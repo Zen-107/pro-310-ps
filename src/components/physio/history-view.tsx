@@ -35,6 +35,7 @@ import {
   FileText,
   ArrowUpDown,
 } from 'lucide-react';
+import { useAppStore } from '@/lib/store';
 
 interface SessionRecord {
   id: string;
@@ -59,14 +60,19 @@ export function HistoryView() {
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'date' | 'accuracy'>('date');
+  const currentPatientId = useAppStore((s) => s.currentPatientId);
 
   useEffect(() => {
     fetchSessions();
-  }, []);
+  }, [currentPatientId]);
 
   async function fetchSessions() {
+    if (!currentPatientId) {
+      setLoading(false);
+      return;
+    }
     try {
-      const res = await fetch('/api/sessions');
+      const res = await fetch(`/api/sessions?patientId=${currentPatientId}`);
       if (res.ok) {
         const data = await res.json();
         setSessions(data);

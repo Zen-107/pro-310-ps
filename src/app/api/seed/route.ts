@@ -40,14 +40,26 @@ export async function POST() {
       });
     }
 
-    // Ensure user profile exists
-    await db.userProfile.upsert({
-      where: { id: 'default_user' },
-      update: {},
-      create: { id: 'default_user', name: 'ผู้ใช้งาน' },
-    });
+    // Seed sample patients
+    const samplePatients = [
+      { name: 'คุณสมชาย ใจดี', age: 55, gender: 'ชาย', condition: 'ปวดเข่าเรื้อรัง OA Grade 2' },
+      { name: 'คุณสมหญิง รักเรียน', age: 42, gender: 'หญิง', condition: 'บาดเจ็บไหล่ซ้าย rotator cuff' },
+      { name: 'คุณวิชัย กล้าหาญ', age: 60, gender: 'ชาย', condition: 'ท่าเดินผิดปกติ หลังผ่าตัดเข่า' },
+    ];
 
-    return NextResponse.json({ success: true, count: EXERCISES.length });
+    for (const sp of samplePatients) {
+      const exists = await db.patient.findFirst({ where: { name: sp.name } });
+      if (!exists) {
+        await db.patient.create({
+          data: {
+            ...sp,
+            assignedExerciseIds: JSON.stringify(EXERCISES.slice(0, 6).map(e => `ex_${e.name.toLowerCase().replace(/\s+/g, '_')}`)),
+          },
+        });
+      }
+    }
+
+    return NextResponse.json({ success: true, exerciseCount: EXERCISES.length });
   } catch (error) {
     console.error('Seed error:', error);
     return NextResponse.json({ success: false, error: 'Failed to seed' }, { status: 500 });

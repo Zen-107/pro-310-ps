@@ -1,9 +1,15 @@
 import { db } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url);
+    const patientId = searchParams.get('patientId');
+
     const sessions = await db.session.findMany({
+      where: {
+        ...(patientId ? { patientId } : {}),
+      },
       orderBy: { startedAt: 'desc' },
       take: 50,
       include: { exercise: true },
@@ -24,27 +30,24 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { exerciseId } = body;
+    const { exerciseId, patientId } = body;
 
-    if (!exerciseId) {
-      return NextResponse.json({ error: 'exerciseId is required' }, { status: 400 });
+    if (!exerciseId || !patientId) {
+      return NextResponse.json({ error: 'exerciseId and patientId are required' }, { status: 400 });
     }
 
     const session = await db.session.create({
       data: {
         exerciseId,
+        patientId,
         status: 'in_progress',
       },
     });
 
-    // Update user profile
-    await db.userProfile.upsert({
-      where: { id: 'default_user' },
-      update: {
-        totalSessions: { increment: 1 },
-        lastActiveAt: new Date(),
-      },
-      create: { id: 'default_user', name: 'ผู้ใช้งาน', totalSessions: 1, lastActiveAt: new Date() },
+    // Update patient last active
+    await db.patient.update({
+      where: { id: patientId },
+      data: { lastActiveAt: new Date() },
     });
 
     return NextResponse.json(session);

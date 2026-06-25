@@ -1,17 +1,23 @@
 import { db } from '@/lib/db';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const profile = await db.userProfile.upsert({
-      where: { id: 'default_user' },
-      update: {},
-      create: { id: 'default_user', name: 'ผู้ใช้งาน' },
-    });
+    const { searchParams } = new URL(req.url);
+    const patientId = searchParams.get('patientId');
+
+    if (!patientId) {
+      return NextResponse.json({ error: 'patientId is required' }, { status: 400 });
+    }
+
+    const patient = await db.patient.findUnique({ where: { id: patientId } });
+    if (!patient) {
+      return NextResponse.json({ error: 'Patient not found' }, { status: 404 });
+    }
 
     // Calculate streak
     const sessions = await db.session.findMany({
-      where: { status: 'completed' },
+      where: { patientId, status: 'completed' },
       orderBy: { startedAt: 'desc' },
       select: { startedAt: true },
       take: 100,
@@ -21,45 +27,39 @@ export async function GET() {
     if (sessions.length > 0) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-
       const uniqueDays = new Set<string>();
       for (const s of sessions) {
         const d = new Date(s.startedAt);
         d.setHours(0, 0, 0, 0);
         uniqueDays.add(d.toISOString().split('T')[0]);
       }
-
-      // Check if today or yesterday has a session
       const todayStr = today.toISOString().split('T')[0];
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-      if (!uniqueDays.has(todayStr) && !uniqueDays.has(yesterdayStr)) {
-        streak = 0;
-      } else {
+      if (uniqueDays.has(todayStr) || uniqueDays.has(yesterdayStr)) {
         let checkDate = uniqueDays.has(todayStr) ? today : yesterday;
         while (true) {
           const dateStr = checkDate.toISOString().split('T')[0];
           if (uniqueDays.has(dateStr)) {
             streak++;
             checkDate.setDate(checkDate.getDate() - 1);
-          } else {
-            break;
-          }
+          } else break;
         }
       }
     }
 
-    // Update streak
-    await db.userProfile.update({
-      where: { id: 'default_user' },
-      data: { streak },
+    await db.patient.update({ where: { id: patientId }, data: { streak } });
+
+    return NextResponse.json({
+      id: patient.id,
+      name: patient.name,
+      streak,
+      totalMinutes: patient.totalMinutes,
+      condition: patient.condition,
+      assignedExerciseIds: JSON.parse(patient.assignedExerciseIds),
+      lastActiveAt: patient.lastActiveAt?.toISOString(),
     });
-
-    profile.streak = streak;
-
-    return NextResponse.json(profile);
   } catch (error) {
     console.error('Profile error:', error);
     return NextResponse.json({ error: 'Failed to fetch profile' }, { status: 500 });

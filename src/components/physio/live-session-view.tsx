@@ -289,7 +289,7 @@ export function LiveSessionView() {
         const sessionRes = await fetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ exerciseId: exercise.id }),
+          body: JSON.stringify({ exerciseId: exercise.id, patientId: store.currentPatientId }),
         });
         const sessionData = await sessionRes.json();
 

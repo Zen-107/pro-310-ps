@@ -21,13 +21,13 @@ export async function PATCH(
       },
     });
 
-    // Update total minutes
+    // Update patient total minutes
     if (body.endedAt && session.startedAt) {
       const durationMs = new Date(body.endedAt).getTime() - session.startedAt.getTime();
       const durationMin = Math.round(durationMs / 60000);
       if (durationMin > 0) {
-        await db.userProfile.update({
-          where: { id: 'default_user' },
+        await db.patient.update({
+          where: { id: session.patientId },
           data: { totalMinutes: { increment: durationMin } },
         });
       }

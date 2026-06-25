@@ -37,6 +37,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BADGES } from '@/lib/exercises-data';
+import { useAppStore } from '@/lib/store';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -247,11 +248,17 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const currentPatientId = useAppStore((s) => s.currentPatientId);
+
   const fetchData = useCallback(async () => {
+    if (!currentPatientId) {
+      setLoading(false);
+      return;
+    }
     try {
       const [profileRes, statsRes] = await Promise.all([
-        fetch('/api/profile'),
-        fetch('/api/stats?days=30'),
+        fetch(`/api/profile?patientId=${currentPatientId}`),
+        fetch(`/api/stats?days=30&patientId=${currentPatientId}`),
       ]);
 
       if (profileRes.ok) {
@@ -268,7 +275,7 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentPatientId]);
 
   useEffect(() => {
     fetchData();

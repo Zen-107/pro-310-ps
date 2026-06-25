@@ -24,9 +24,13 @@ interface AppState {
   doctorTab: DoctorTab;
   setDoctorTab: (tab: DoctorTab) => void;
 
-  // Doctor: selected patient
+  // Doctor: selected patient for detail view
   selectedPatientId: string | null;
   setSelectedPatientId: (id: string | null) => void;
+
+  // Patient side: which patient identity am I?
+  currentPatientId: string | null;
+  setCurrentPatientId: (id: string | null) => void;
 
   // Exercise selection
   selectedExerciseId: string | null;
@@ -78,6 +82,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   selectedPatientId: null,
   setSelectedPatientId: (id) => set({ selectedPatientId: id }),
+
+  currentPatientId: null,
+  setCurrentPatientId: (id) => set({ currentPatientId: id }),
 
   selectedExerciseId: null,
   setSelectedExerciseId: (id) => set({ selectedExerciseId: id }),

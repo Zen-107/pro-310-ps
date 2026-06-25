@@ -1,281 +1,542 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
+  LineChart, Line, ResponsiveContainer,
 } from 'recharts';
 import {
-  Users, Activity, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Info, Clock,
-  Stethoscope, Calendar, Target, Flame, BarChart3, ArrowRight,
+  Users, CalendarCheck, Target, Activity, AlertTriangle,
+  Clock, Flame, ChevronRight, User,
 } from 'lucide-react';
-import { useAppStore } from '@/lib/store';
 
-interface PatientData {
-  id: string; name: string; streak: number; totalSessions: number; totalMinutes: number;
-  totalReps: number; avgAccuracy: number; exercisesCompleted: number;
-  recentSessions7d: number; improvementTrend: number; lastActiveAt: string | null;
-  alerts: { type: 'warning' | 'info' | 'success'; message: string; date: string }[];
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+interface PatientSummary {
+  id: string;
+  name: string;
+  age: number | null;
+  gender: string;
+  condition: string;
+  phone: string;
+  assignedExerciseIds: string[];
+  therapistNotes: string;
+  streak: number;
+  totalMinutes: number;
+  lastActiveAt: string | null;
+  totalSessions: number;
+  recentSessions7d: number;
+  latestAccuracy: number;
 }
 
-interface SessionDetail {
-  id: string; exerciseName: string; exerciseCategory: string; startedAt: string;
-  endedAt: string | null; totalReps: number; avgAccuracy: number; maxRom: number; logCount: number;
+interface SessionBrief {
+  id: string;
+  patientId: string;
+  startedAt: string;
+  avgAccuracy: number;
+  status: string;
 }
 
-export function DoctorOverview({ onViewPatient }: { onViewPatient: () => void }) {
-  const [data, setData] = useState<{
-    patient: PatientData; sessionDetails: SessionDetail[];
-    latestRomPerExercise: { exercise: string; exerciseTh: string; rom: number; accuracy: number; date: string }[];
-    jointTrends: Record<string, { date: string; angle: number; idealAngle: number }[]>;
-  } | null>(null);
+/* ------------------------------------------------------------------ */
+/*  Animation helpers                                                  */
+/* ------------------------------------------------------------------ */
+
+const container = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.06 },
+  },
+};
+
+const item = {
+  hidden: { opacity: 0, y: 16 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 400, damping: 28 } },
+};
+
+/* ------------------------------------------------------------------ */
+/*  Main Component                                                     */
+/* ------------------------------------------------------------------ */
+
+export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: string) => void }) {
+  const [patients, setPatients] = useState<PatientSummary[]>([]);
+  const [sessions, setSessions] = useState<SessionBrief[]>([]);
+  const [sparklineMap, setSparklineMap] = useState<Record<string, number[]>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
+  /* ---- Data fetching ---- */
   useEffect(() => {
-    fetch('/api/patients').then(r => r.json()).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+    let cancelled = false;
+
+    async function loadData() {
+      try {
+        // Parallel: patients list + all sessions (for "today" count)
+        const [patientsRes, sessionsRes] = await Promise.all([
+          fetch('/api/patients'),
+          fetch('/api/sessions'),
+        ]);
+
+        if (!patientsRes.ok || !sessionsRes.ok) throw new Error('fetch failed');
+
+        const patientsData: PatientSummary[] = await patientsRes.json();
+        const sessionsData: SessionBrief[] = await sessionsRes.json();
+
+        if (cancelled) return;
+
+        setPatients(patientsData);
+        setSessions(sessionsData);
+
+        // Fetch sparkline data (last 3 session accuracies) for patients with sessions
+        const patientsWithSessions = patientsData.filter((p) => p.totalSessions > 0);
+        if (patientsWithSessions.length > 0) {
+          const detailPromises = patientsWithSessions.map(async (p) => {
+            try {
+              const res = await fetch(`/api/patients/${p.id}`);
+              if (!res.ok) return null;
+              const detail = await res.json();
+              // sessionDetails is ordered by startedAt desc
+              const last3 = (detail.sessionDetails || [])
+                .slice(0, 3)
+                .map((s: { avgAccuracy: number }) => s.avgAccuracy);
+              return { id: p.id, accuracies: last3.reverse() }; // chronological order
+            } catch {
+              return null;
+            }
+          });
+
+          const results = await Promise.all(detailPromises);
+          if (cancelled) return;
+
+          const map: Record<string, number[]> = {};
+          for (const r of results) {
+            if (r) map[r.id] = r.accuracies;
+          }
+          setSparklineMap(map);
+        }
+
+        setLoading(false);
+      } catch {
+        if (!cancelled) {
+          setError(true);
+          setLoading(false);
+        }
+      }
+    }
+
+    loadData();
+    return () => { cancelled = true; };
   }, []);
 
+  /* ---- Computed summary stats ---- */
+  const stats = useMemo(() => {
+    const totalPatients = patients.length;
+
+    // Sessions today (completed, started today)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const sessionsToday = sessions.filter(
+      (s) => s.status === 'completed' && new Date(s.startedAt) >= todayStart
+    ).length;
+
+    // Overall average accuracy (from patients with at least 1 session)
+    const patientsWithAcc = patients.filter((p) => p.latestAccuracy > 0);
+    const overallAvgAccuracy =
+      patientsWithAcc.length > 0
+        ? Math.round(
+            patientsWithAcc.reduce((sum, p) => sum + p.latestAccuracy, 0) /
+              patientsWithAcc.length
+          )
+        : 0;
+
+    // Active patients (recentSessions7d > 0)
+    const activePatients = patients.filter((p) => p.recentSessions7d > 0).length;
+
+    return { totalPatients, sessionsToday, overallAvgAccuracy, activePatients };
+  }, [patients, sessions]);
+
+  /* ---- Quick alerts (computed) ---- */
+  const alerts = useMemo(() => {
+    const result: { type: 'warning' | 'info'; message: string; patientName: string; patientId: string }[] = [];
+
+    for (const p of patients) {
+      // Inactive for 7+ days (has sessions but no recent)
+      if (p.totalSessions > 0 && p.recentSessions7d === 0) {
+        result.push({
+          type: 'warning',
+          message: 'ไม่ได้ฝึกมา 7 วัน',
+          patientName: p.name,
+          patientId: p.id,
+        });
+      }
+      // Never started
+      if (p.totalSessions === 0) {
+        result.push({
+          type: 'info',
+          message: 'ยังไม่เคยเริ่มฝึก',
+          patientName: p.name,
+          patientId: p.id,
+        });
+      }
+      // Low accuracy
+      if (p.latestAccuracy > 0 && p.latestAccuracy < 50 && p.totalSessions >= 3) {
+        result.push({
+          type: 'warning',
+          message: `ความแม่นยำต่ำ (${p.latestAccuracy}%)`,
+          patientName: p.name,
+          patientId: p.id,
+        });
+      }
+    }
+
+    return result;
+  }, [patients]);
+
+  /* ---- Render ---- */
   if (loading) return <DoctorOverviewSkeleton />;
-  if (!data) return <p className="text-muted-foreground">ไม่สามารถโหลดข้อมูลได้</p>;
-
-  const { patient, sessionDetails, latestRomPerExercise, jointTrends } = data;
-
-  // Prepare joint trend chart data (take last 20 points per joint)
-  const chartData: Record<string, { name: string; value: number; ideal: number }[]> = {};
-  let chartIndex = 0;
-  for (const [joint, points] of Object.entries(jointTrends)) {
-    const trimmed = points.slice(-20);
-    chartData[joint] = trimmed.map((p, i) => ({
-      name: `#${chartIndex + i + 1}`,
-      value: Math.round(p.angle),
-      ideal: Math.round(p.idealAngle),
-    }));
-    chartIndex += trimmed.length;
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+        <AlertTriangle className="h-10 w-10 mb-3 text-amber-500" />
+        <p className="text-sm">ไม่สามารถโหลดข้อมูลได้</p>
+      </div>
+    );
   }
 
-  const alertIcon = (type: string) => {
-    if (type === 'warning') return <AlertTriangle className="h-4 w-4 text-amber-500" />;
-    if (type === 'success') return <CheckCircle className="h-4 w-4 text-emerald-500" />;
-    return <Info className="h-4 w-4" />;
-  };
-
-  const alertBg = (type: string) => {
-    if (type === 'warning') return 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30';
-    if (type === 'success') return 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30';
-    return 'border-muted bg-muted/50';
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
+      {/* ---- Header ---- */}
+      <motion.div variants={item}>
         <h2 className="text-2xl font-bold tracking-tight">ภาพรวมผู้ป่วย</h2>
-        <p className="text-muted-foreground mt-1">ติดตามความคืบหน้าและสถานะของผู้ป่วย</p>
-      </div>
+        <p className="text-muted-foreground mt-1">ติดตามความคืบหน้าของผู้ป่วยทั้งหมด</p>
+      </motion.div>
 
-      {/* Patient Card */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-        <Card className="border-emerald-500/20 overflow-hidden">
-          <div className="bg-gradient-to-r from-slate-800 to-slate-700 p-6 text-white">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 flex items-center justify-center">
-                  <Stethoscope className="h-7 w-7 text-emerald-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold">{patient.name}</h3>
-                  <p className="text-sm text-slate-300">รหัส: {patient.id.slice(0, 8)}</p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {patient.lastActiveAt
-                      ? `กิจกรรมล่าสุด: ${new Date(patient.lastActiveAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`
-                      : 'ยังไม่มีกิจกรรม'}
-                  </p>
-                </div>
-              </div>
-              <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-300 border-0">
-                {patient.recentSessions7d > 0 ? 'กำลังฝึกอยู่' : 'ไม่มีกิจกรรม'}
-              </Badge>
-            </div>
+      {/* ---- Summary Stats Row ---- */}
+      <motion.div variants={item} className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <SummaryCard
+          icon={<Users className="h-4.5 w-4.5 text-emerald-600" />}
+          label="จำนวนผู้ป่วยทั้งหมด"
+          value={stats.totalPatients}
+          color="emerald"
+        />
+        <SummaryCard
+          icon={<CalendarCheck className="h-4.5 w-4.5 text-amber-500" />}
+          label="เซสชันวันนี้"
+          value={stats.sessionsToday}
+          color="amber"
+        />
+        <SummaryCard
+          icon={<Target className="h-4.5 w-4.5 text-emerald-600" />}
+          label="ความแม่นยำเฉลี่ยรวม"
+          value={`${stats.overallAvgAccuracy}%`}
+          color="emerald"
+        />
+        <SummaryCard
+          icon={<Activity className="h-4.5 w-4.5 text-amber-500" />}
+          label="ผู้ป่วยที่กำลังฝึก"
+          value={stats.activePatients}
+          color="amber"
+        />
+      </motion.div>
+
+      {/* ---- Patient Cards Grid ---- */}
+      <motion.div variants={item}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-foreground">รายชื่อผู้ป่วย</h3>
+          <span className="text-xs text-muted-foreground">{patients.length} คน</span>
+        </div>
+
+        {patients.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <User className="h-10 w-10 mb-3 opacity-40" />
+              <p className="text-sm">ยังไม่มีผู้ป่วยในระบบ</p>
+              <p className="text-xs mt-1">เพิ่มผู้ป่วยจากแท็บ &quot;ผู้ป่วย&quot;</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {patients.map((p) => (
+              <PatientCard
+                key={p.id}
+                patient={p}
+                sparkline={sparklineMap[p.id] || []}
+                onClick={() => onSelectPatient(p.id)}
+              />
+            ))}
           </div>
-          <CardContent className="p-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center p-3 rounded-xl bg-muted/50">
-                <p className="text-2xl font-bold text-emerald-600">{patient.totalSessions}</p>
-                <p className="text-xs text-muted-foreground">เซสชันทั้งหมด</p>
-              </div>
-              <div className="text-center p-3 rounded-xl bg-muted/50">
-                <p className="text-2xl font-bold">{patient.avgAccuracy}%</p>
-                <p className="text-xs text-muted-foreground">ความแม่นยำเฉลี่ย</p>
-              </div>
-              <div className="text-center p-3 rounded-xl bg-muted/50">
-                <p className="text-2xl font-bold">{patient.streak}</p>
-                <p className="text-xs text-muted-foreground">Streak (วัน)</p>
-              </div>
-              <div className="text-center p-3 rounded-xl bg-muted/50">
-                <p className={`text-2xl font-bold ${patient.improvementTrend >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {patient.improvementTrend >= 0 ? '+' : ''}{patient.improvementTrend}%
-                </p>
-                <p className="text-xs text-muted-foreground">แนวโน้ม</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        )}
       </motion.div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard icon={<Activity className="h-4 w-4 text-emerald-600" />} label="ท่าที่ฝึกแล้ว" value={`${patient.exercisesCompleted} ท่า`} delay={0} />
-        <StatCard icon={<Target className="h-4 w-4 text-amber-500" />} label="ทั้งหมด (ครั้ง)" value={`${patient.totalReps}`} delay={0.1} />
-        <StatCard icon={<Clock className="h-4 w-4" />} label="เวลารวม" value={`${patient.totalMinutes} นาที`} delay={0.2} />
-        <StatCard icon={<Flame className="h-4 w-4 text-amber-500" />} label="เซสชัน 7 วัน" value={`${patient.recentSessions7d}`} delay={0.3} />
-      </div>
-
-      {/* Alerts */}
-      {patient.alerts.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
+      {/* ---- Quick Alerts ---- */}
+      {alerts.length > 0 && (
+        <motion.div variants={item}>
+          <Card className="border-amber-200/60 dark:border-amber-800/40">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-500" />
-                การแจ้งเตือน
+                การแจ้งเตือนด่วน
+                <Badge variant="secondary" className="ml-1 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border-0 text-[10px] px-1.5">
+                  {alerts.length}
+                </Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {patient.alerts.map((alert, i) => (
-                <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${alertBg(alert.type)}`}>
-                  {alertIcon(alert.type)}
-                  <p className="text-sm">{alert.message}</p>
+            <CardContent>
+              <ScrollArea className="max-h-64">
+                <div className="space-y-2">
+                  {alerts.map((alert, i) => (
+                    <button
+                      key={`${alert.patientId}-${i}`}
+                      onClick={() => onSelectPatient(alert.patientId)}
+                      className="w-full flex items-center gap-3 p-3 rounded-xl border border-amber-200/60 bg-amber-50/60 dark:border-amber-800/30 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-950/40 transition-colors text-left group"
+                    >
+                      <AlertTriangle className={`h-4 w-4 shrink-0 ${alert.type === 'warning' ? 'text-amber-500' : 'text-muted-foreground'}`} />
+                      <span className="text-sm flex-1">
+                        <span className="font-medium">{alert.patientName}</span>{' '}
+                        <span className="text-muted-foreground">— {alert.message}</span>
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </button>
+                  ))}
                 </div>
-              ))}
+              </ScrollArea>
             </CardContent>
           </Card>
         </motion.div>
       )}
-
-      {/* Joint Trend Charts */}
-      {Object.keys(chartData).length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-emerald-600" />
-                แนวโน้มมุมข้อต่อ (ROM)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6 max-h-[400px] overflow-y-auto pr-2">
-                {Object.entries(chartData).map(([joint, points]) => (
-                  <div key={joint}>
-                    <p className="text-xs font-medium text-muted-foreground mb-1">{joint}</p>
-                    <ResponsiveContainer width="100%" height={100}>
-                      <LineChart data={points}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', fontSize: '12px' }} />
-                        <ReferenceLine y={points[0]?.ideal} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: `เป้า ${points[0]?.ideal}°`, fontSize: 10, fill: '#f59e0b' }} />
-                        <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 2 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {/* Latest Session Performance */}
-      {latestRomPerExercise.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <BarChart3 className="h-4 w-4 text-amber-500" />
-                ผลลัพธ์ล่าสุดตามท่า
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={latestRomPerExercise} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
-                  <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="exerciseTh" tick={{ fontSize: 11 }} width={100} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid hsl(var(--border))', fontSize: '12px' }} />
-                  <Bar dataKey="accuracy" fill="#10b981" radius={[0, 4, 4, 0]} name="ความแม่นยำ (%)" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {/* Recent Sessions */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Calendar className="h-4 w-4" />
-                เซสชันล่าสุด
-              </span>
-              <button onClick={onViewPatient} className="text-xs text-emerald-600 hover:text-emerald-700 flex items-center gap-1">
-                ดูทั้งหมด <ArrowRight className="h-3 w-3" />
-              </button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {sessionDetails.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">ยังไม่มีข้อมูลเซสชัน</p>
-            ) : (
-              <div className="space-y-2">
-                {sessionDetails.slice(0, 5).map((s) => (
-                  <div key={s.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">{s.exerciseName}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(s.startedAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
-                    </div>
-                    <div className="flex items-center gap-4 ml-3">
-                      <div className="text-right">
-                        <p className={`text-sm font-bold ${s.avgAccuracy >= 80 ? 'text-emerald-600' : s.avgAccuracy >= 60 ? 'text-amber-600' : 'text-red-600'}`}>{s.avgAccuracy}%</p>
-                        <p className="text-[10px] text-muted-foreground">{s.totalReps} ครั้ง</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
-    </div>
+    </motion.div>
   );
 }
 
-function StatCard({ icon, label, value, delay }: { icon: React.ReactNode; label: string; value: string; delay: number }) {
+/* ------------------------------------------------------------------ */
+/*  Summary Stat Card                                                  */
+/* ------------------------------------------------------------------ */
+
+function SummaryCard({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+  color: 'emerald' | 'amber';
+}) {
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay }}>
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">{icon} {label}</div>
-          <p className="text-xl font-bold">{value}</p>
+    <Card className="relative overflow-hidden">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
+          {icon}
+          <span>{label}</span>
+        </div>
+        <p className="text-2xl font-bold tracking-tight">{value}</p>
+      </CardContent>
+      {/* Subtle accent line */}
+      <div
+        className={`absolute bottom-0 left-0 right-0 h-0.5 ${
+          color === 'emerald' ? 'bg-emerald-500/40' : 'bg-amber-500/40'
+        }`}
+      />
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Patient Card                                                       */
+/* ------------------------------------------------------------------ */
+
+function PatientCard({
+  patient,
+  sparkline,
+  onClick,
+}: {
+  patient: PatientSummary;
+  sparkline: number[];
+  onClick: () => void;
+}) {
+  const isActive = patient.recentSessions7d > 0;
+
+  const lastActive = patient.lastActiveAt
+    ? new Date(patient.lastActiveAt).toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+      })
+    : null;
+
+  return (
+    <motion.div variants={item}>
+      <Card
+        className="cursor-pointer hover:shadow-md hover:border-emerald-300/50 dark:hover:border-emerald-700/50 transition-all group"
+        onClick={onClick}
+      >
+        <CardContent className="p-4 space-y-3">
+          {/* Top row: name + badge */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-semibold text-sm truncate">{patient.name}</p>
+              {patient.condition && (
+                <p className="text-xs text-muted-foreground truncate mt-0.5">{patient.condition}</p>
+              )}
+            </div>
+            <Badge
+              variant="secondary"
+              className={`shrink-0 text-[10px] border-0 px-2 py-0.5 ${
+                isActive
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                  : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {isActive ? 'กำลังฝึก' : 'ไม่มีกิจกรรม'}
+            </Badge>
+          </div>
+
+          {/* Age / Gender */}
+          <p className="text-xs text-muted-foreground">
+            {[
+              patient.age ? `${patient.age} ปี` : null,
+              patient.gender !== 'ไม่ระบุ' ? patient.gender : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || '—'}
+          </p>
+
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="text-center p-2 rounded-lg bg-muted/50">
+              <p className="text-sm font-bold">{patient.totalSessions}</p>
+              <p className="text-[10px] text-muted-foreground">เซสชัน</p>
+            </div>
+            <div className="text-center p-2 rounded-lg bg-muted/50">
+              <p className={`text-sm font-bold ${patient.latestAccuracy >= 70 ? 'text-emerald-600' : patient.latestAccuracy >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
+                {patient.latestAccuracy > 0 ? `${patient.latestAccuracy}%` : '—'}
+              </p>
+              <p className="text-[10px] text-muted-foreground">แม่นยำ</p>
+            </div>
+            <div className="text-center p-2 rounded-lg bg-muted/50">
+              <p className="text-sm font-bold flex items-center justify-center gap-1">
+                {patient.streak > 0 && <Flame className="h-3 w-3 text-amber-500" />}
+                {patient.streak}
+              </p>
+              <p className="text-[10px] text-muted-foreground">Streak</p>
+            </div>
+          </div>
+
+          {/* Sparkline + last active */}
+          <div className="flex items-end justify-between gap-3 pt-1">
+            {sparkline.length > 1 ? (
+              <div className="w-24 h-[50px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={sparkline.map((v, i) => ({ i, v }))}>
+                    <Line
+                      type="monotone"
+                      dataKey="v"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="w-24 h-[50px] flex items-center justify-center">
+                <span className="text-[10px] text-muted-foreground">ยังไม่มีข้อมูล</span>
+              </div>
+            )}
+            <div className="text-right shrink-0">
+              <p className="text-[10px] text-muted-foreground">กิจกรรมล่าสุด</p>
+              <p className="text-xs font-medium">{lastActive || '—'}</p>
+            </div>
+          </div>
+
+          {/* Click indicator */}
+          <div className="flex items-center justify-end">
+            <span className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+              ดูรายละเอียด <ChevronRight className="h-3 w-3" />
+            </span>
+          </div>
         </CardContent>
       </Card>
     </motion.div>
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Loading Skeleton                                                   */
+/* ------------------------------------------------------------------ */
+
 function DoctorOverviewSkeleton() {
   return (
     <div className="space-y-6">
-      <Skeleton className="h-8 w-48" />
-      <Card><CardContent className="p-6"><div className="grid grid-cols-4 gap-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}</div></CardContent></Card>
-      <div className="grid grid-cols-4 gap-4">{Array.from({ length: 4 }).map((_, i) => <Card key={i}><CardContent className="p-4"><Skeleton className="h-4 w-20 mb-2" /><Skeleton className="h-6 w-12" /></CardContent></Card>)}</div>
-      <Card><CardHeader><Skeleton className="h-5 w-40" /></CardHeader><CardContent><Skeleton className="h-48" /></CardContent></Card>
+      {/* Header */}
+      <div>
+        <Skeleton className="h-8 w-52" />
+        <Skeleton className="h-4 w-72 mt-2" />
+      </div>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i}>
+            <CardContent className="p-4">
+              <Skeleton className="h-3.5 w-28 mb-2" />
+              <Skeleton className="h-7 w-16" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Patient cards */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-3.5 w-12" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1.5 flex-1">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-24" />
+                  </div>
+                  <Skeleton className="h-5 w-16 rounded-full" />
+                </div>
+                <Skeleton className="h-3 w-16" />
+                <div className="grid grid-cols-3 gap-2">
+                  <Skeleton className="h-10 rounded-lg" />
+                  <Skeleton className="h-10 rounded-lg" />
+                  <Skeleton className="h-10 rounded-lg" />
+                </div>
+                <div className="flex items-end justify-between">
+                  <Skeleton className="h-[50px] w-24" />
+                  <Skeleton className="h-3.5 w-16" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* Alerts skeleton */}
+      <Card>
+        <CardHeader className="pb-2">
+          <Skeleton className="h-4 w-36" />
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-11 w-full rounded-xl" />
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

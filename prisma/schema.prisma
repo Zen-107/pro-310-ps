@@ -26,10 +26,29 @@ model Exercise {
   sessions       Session[]
 }
 
+model Patient {
+  id                  String   @id @default(cuid())
+  name                String
+  age                 Int?
+  gender              String   @default("ไม่ระบุ") // "ชาย", "หญิง", "ไม่ระบุ"
+  condition           String   @default("") // อาการ/โรค เช่น "ปวดเข่าเรื้อรัง"
+  phone               String   @default("")
+  assignedExerciseIds String   @default("[]") // JSON array of exercise IDs
+  therapistNotes      String   @default("") // หมอบันทึก
+  streak              Int      @default(0)
+  totalMinutes        Int      @default(0)
+  lastActiveAt        DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  sessions            Session[]
+}
+
 model Session {
   id           String   @id @default(cuid())
   exerciseId   String
   exercise     Exercise @relation(fields: [exerciseId], references: [id])
+  patientId    String
+  patient      Patient  @relation(fields: [patientId], references: [id])
   startedAt    DateTime @default(now())
   endedAt      DateTime?
   totalReps    Int      @default(0)
@@ -53,15 +72,4 @@ model JointAngleLog {
   idealAngle Float
   deviation Float
   isCorrect Boolean  @default(false)
-}
-
-model UserProfile {
-  id        String   @id @default(cuid())
-  name      String   @default("ผู้ใช้งาน")
-  streak    Int      @default(0)
-  totalSessions Int  @default(0)
-  totalMinutes  Int  @default(0)
-  lastActiveAt  DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
