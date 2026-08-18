@@ -20,9 +20,6 @@
 ---
 
 ## 🧠 Technical Strategy & CPE310 Alignment
-> [!info] การแมปกับ Requirement วิชา CPE310
-> โปรเจกต์นี้ครอบคลุมทั้ง Phase 1 (Core ML/DL) และ Phase 2 (Agentic AI) ตามที่หลักสูตรกำหนด
-
 ### 💡 Dataset Strategy: "ไม่ต้องหา Dataset ภาพเยอะ"
 - ใช้ MediaPipe (Pre-trained) ดึง Joint จากวิดีโอ YouTube แนวกายภาพบำบัดฟรีๆ
 - **Ground Truth:** ดึงเฟรมวิดีโอ -> รัน MediaPipe -> คำนวณมุมข้อต่อมาตรฐาน (Ideal Angles) -> บันทึกเป็น JSON Baseline
@@ -128,36 +125,53 @@ flowchart BT
 
 ## 🚀 Project Roadmap
 ### Step 1: Backend, Database & Mobile Setup
-
-- ~~ออกแบบ [[Database Schema]] (Users → Exercise Plans → Session Logs → Joint_Angle_Records)~~
-- ~~สร้าง FastAPI Endpoint สำหรับ Auth, Sync Data, และดึง Exercise Plans~~
-- ~~Setup โครงสร้าง Mobile App ด้วย Capacitor (Wrap Tailwind Frontend)~~
-
+- ✅ ออกแบบ Database Schema (Users → Exercise Plans → Session Logs → Joint_Angle_Records)
+- ✅ สร้าง FastAPI Endpoint สำหรับ Auth, Sync Data, และดึง Exercise Plans
+- ✅ Setup โครงสร้าง Mobile App ด้วย Capacitor (Wrap Tailwind Frontend)
 
 ### Step 2: Computer Vision & Logic Module (Phase 1 Core)
-- ~~เขียน Python Script ดึงวิดีโอ YouTube -> Extract Ideal Angles (Ground Truth)~~
-- ~~เขียน Logic คำนวณมุมข้อต่อ (Angle Calculation using Vector Math) บน Frontend (JS)~~
-- เช็คว่าทำท่าถูกไหม (Form Check) และสุดระยะไหม (ROM Check)
-- Implement Time-Series Dashboard (กราฟพัฒนาการ)
+- ✅ เขียน Python Script ดึงวิดีโอ YouTube -> Extract Ideal Angles (Ground Truth)
+- ✅ เขียน Logic คำนวณมุมข้อต่อ (Angle Calculation using Vector Math) บน Frontend (JS)
+- ⚠️ เช็คว่าทำท่าถูกไหม (Form Check) และสุดระยะไหม (ROM Check) — ยังต้อง test live camera flow
+- ⚠️ Implement Time-Series Dashboard (กราฟพัฒนาการ) — dashboard มี แต่ยังต้อง test data flow
 
 ### Step 3: Agentic AI & Predictive Integration (Phase 2 Core)
-- เชื่อมต่อ Tracker Agent กับ Coach Agent (ใช้ LangChain / FastAPI LLM Endpoint)
-- สร้าง Reporter Agent ให้สรุปผลเป็น Clinical Note
-- สร้างโมเดล Predictive Analytics ง่ายๆ (เช่น Linear Regression) เพื่อพยากรณ์วันฟื้นตัว
+- ⚠️ เชื่อมต่อ Tracker Agent กับ Coach Agent (ใช้ Z-AI SDK Endpoint) — foundation มี แต่ยังต้อง test real-time feedback
+- ⚠️ สร้าง Reporter Agent ให้สรุปผลเป็น Clinical Note — endpoint มี แต่ยังต้อง test generation quality
+- ⏳ สร้างโมเดล Predictive Analytics ง่ายๆ (เช่น Linear Regression) เพื่อพยากรณ์วันฟื้นตัว
 
 ### Step 4: Play Store Preparation & Launch
-- ทำระบบ Sign-up / Login และหน้า **Privacy Policy / Terms of Service** (บังคับโดย Google Play)
-- ขอ Permission กล้อง และ Microphone (สำหรับ TTS) อย่างถูกต้องตาม Android Guideline
-- Build APK/AAB และทดสอบบนเครื่องจริง (Real-device Testing)
-- อัปโหลดขึ้น Google Play Console (เตรียมรูป Screenshot, คำอธิบายแอป)
+- ⏳ ทำระบบ Sign-up / Login และหน้า **Privacy Policy / Terms of Service** (บังคับโดย Google Play)
+- ⏳ ขอ Permission กล้อง และ Microphone (สำหรับ TTS) อย่างถูกต้องตาม Android Guideline
+- ⏳ Build APK/AAB และทดสอบบนเครื่องจริง (Real-device Testing)
+- ⏳ อัปโหลดขึ้น Google Play Console (เตรียมรูป Screenshot, คำอธิบายแอป)
 
 ---
-## 🔗 Related Notes
-- [[Range of Motion (ROM)]] — เกณฑ์การขยับข้อต่อ
-- [[MediaPipe]] — Library สำหรับ Pose Estimation
-- [[Kinematics Math]] — การคำนวณมุมจาก Vector 3 จุด
-- [[LangChain Agents]] — การสร้าง Multi-Agent System
-- [[Capacitor JS]] — การ Wrap Web App เป็น Mobile App
-- [[Google Play Console]] — ขั้นตอนการอัปโหลดแอป
-- [[แล้วท่าที่จะใช้ละ]] 
-- [[Dataset]]
+
+## 📚 Developer Documentation
+
+> 👉 **สำหรับ developers ที่จะทำต่อ** — อ่าน [CODEBASE.md](./CODEBASE.md) สำหรับคำอธิบายโครงสร้างโค้ด, API endpoints, database schema, วิธีการรันเว็บ, และ data flow ทั้งหมด
+
+### Quick Start
+```bash
+# Install dependencies
+bun install
+
+# Setup database
+bun run db:push && bun run db:generate
+
+# Run development server
+bun run dev
+
+# Open browser to http://localhost:3000
+```
+
+### Key Files Reference
+- **Core Logic:** `src/lib/angle-utils.ts` (angle calculation, ROM check)
+- **State Management:** `src/lib/store.ts` (Zustand global state)
+- **Live Camera:** `src/components/physio/live-session-view.tsx` (main session component)
+- **AI Coach:** `src/app/api/coach/route.ts` (Z-AI LLM endpoint)
+- **Reports:** `src/app/api/reports/[sessionId]/route.ts` (clinical summary generator)
+- **Exercise Library:** `src/lib/exercises-data.ts` (all exercises with target angles)
+- **Database:** `prisma/schema.prisma` (Exercise, Patient, Session, JointAngleLog models)
+
