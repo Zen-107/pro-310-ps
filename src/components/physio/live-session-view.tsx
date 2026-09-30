@@ -80,12 +80,26 @@ const bodyPartLabels: Record<string, string> = {
   full: 'ทั้งตัว',
 };
 
-// ─── MediaPipe CDN URLs (pin explicit versions for reliability) ────────
+// ─── MediaPipe sources ─────────────────────────────────────────────────
+// ROOT-CAUSE FIX: previously we loaded `@mediapipe/pose@0.1` from a CDN.
+// That legacy build creates its inference worker from a same-origin Blob
+// whose internals `importScripts()` the *page-relative* asset paths — on
+// http://localhost:3000 those requests 404, so `pose.initialize()` never
+// resolves and `onResults` is NEVER called. The camera showed a live image
+// but no skeleton ever appeared. We now ship ALL MediaPipe WASM/model files
+// locally in /public/mediapipe/pose (same-origin → blob worker works, no
+// CDN dependency at runtime, faster init, fully offline-capable).
+const LOCAL_POSE_BASE = '/mediapipe/pose/';
+const LOCAL_POSE_CDN = `${LOCAL_POSE_BASE}pose.js`;
+const LOCAL_CAMERA_UTILS = '/mediapipe/camera_utils.js';
+
+// Fallback CDN (pinned to the SAME version as the local copy so model +
+// loader binaries always match). Used only if the local script fails.
 const MP_BASE = 'https://cdn.jsdelivr.net/npm';
-const CAMERA_UTILS_CDN = `${MP_BASE}/@mediapipe/camera_utils@0.3/camera_utils.js`;
-const POSE_VERSION = '0.1';
-const POSE_BASE_URL = `${MP_BASE}/@mediapipe/pose@${POSE_VERSION}/`;
-const POSE_CDN = `${POSE_BASE_URL}pose.js`;
+const POSE_VERSION = '0.5.1675469404';
+const CDN_POSE_BASE_URL = `${MP_BASE}/@mediapipe/pose@${POSE_VERSION}/`;
+const CDN_POSE_CDN = `${CDN_POSE_BASE_URL}pose.js`;
+const CDN_CAMERA_UTILS = `${MP_BASE}/@mediapipe/camera_utils@0.3/camera_utils.js`;
 
 // ─── Helper: load script (with timeout + retry) ────────────────────────
 function loadScript(src: string, timeoutMs = 20000): Promise<void> {
@@ -451,10 +465,24 @@ export function LiveSessionView() {
     let rafId = 0;
 
     async function initMediaPipe() {
+      // Track which base URL the loader scripts came from so locateFile()
+      // fetches matching WASM/model binaries (local vs CDN must never mix).
+      let poseBaseUrl = LOCAL_POSE_BASE;
+
       try {
-        // 1) Load MediaPipe scripts from CDN (with timeout + retry)
-        await loadScriptWithRetry(CAMERA_UTILS_CDN);
-        await loadScriptWithRetry(POSE_CDN);
+        // 1) Load MediaPipe scripts: LOCAL first (instant, offline-safe),
+        //    fall back to the pinned CDN version only if local fails.
+        try {
+          await loadScriptWithRetry(LOCAL_CAMERA_UTILS, 1);
+          await loadScriptWithRetry(LOCAL_POSE_CDN, 1);
+          poseBaseUrl = LOCAL_POSE_BASE;
+        } catch {
+          if (cancelled) return;
+          console.warn('[MediaPipe] local assets failed, falling back to CDN');
+          await loadScriptWithRetry(CDN_CAMERA_UTILS);
+          await loadScriptWithRetry(CDN_POSE_CDN);
+          poseBaseUrl = CDN_POSE_BASE_URL;
+        }
 
         if (cancelled) return;
 
@@ -524,9 +552,12 @@ export function LiveSessionView() {
         await waitForVideoReady(video);
         if (cancelled) return;
 
-        // 3) Create Pose instance (WASM assets fetched via locateFile)
+        // 3) Create Pose instance (WASM assets fetched via locateFile).
+        //    NOTE: `poseBaseUrl` MUST point at the same origin/version the
+        //    pose.js loader came from — mixing a local loader with CDN WASM
+        //    (or vice versa) breaks the blob worker's importScripts().
         const pose = new w.Pose({
-          locateFile: (file: string) => `${POSE_BASE_URL}${file}`,
+          locateFile: (file: string) => `${poseBaseUrl}${file}`,
         });
 
         await pose.setOptions({
@@ -552,7 +583,24 @@ export function LiveSessionView() {
           handlePoseResultsRef.current(results);
         });
 
-        await pose.initialize();
+        // DIAGNOSTIC FIX: `initialize()` used to hang forever when the WASM
+        // graph failed to boot (CDN blocked / mixed origins). An unresolvable
+        // await meant NO error UI, NO skeleton, just an eternal spinner.
+        // We now race it against a 60s timeout so failures surface clearly.
+        const initTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('MediaPipe initialize timeout')), 60000)
+        );
+        try {
+          await Promise.race([pose.initialize(), initTimeout]);
+        } catch (err) {
+          if (cancelled) return;
+          console.error('[MediaPipe] initialize() failed/timed out:', err);
+          try { pose.close(); } catch { /* already closed */ }
+          setMediaPipeError(
+            'โมเดล AI ไม่สามารถเริ่มต้นได้ (WASM โหลดไม่สำเร็จ) — กดเริ่มใหม่หรือตรวจสอบอินเทอร์เน็ต'
+          );
+          return;
+        }
         if (cancelled) return;
         poseRef.current = pose;
         setMediaPipeLoaded(true);

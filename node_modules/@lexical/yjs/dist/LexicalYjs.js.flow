@@ -1,0 +1,425 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ * @flow strict
+ */
+
+import type {Doc, RelativePosition, UndoManager, XmlText} from 'yjs';
+import type {
+  DecoratorNode,
+  EditorState,
+  ElementNode,
+  LexicalCommand,
+  LexicalEditor,
+  LexicalNode,
+  LineBreakNode,
+  NodeMap,
+  NodeKey,
+  TextNode,
+} from 'lexical';
+
+// $FlowFixMe[unclear-type]: todo
+export type YjsEvent = Object;
+
+export type UserState = {
+  anchorPos: null | RelativePosition,
+  color: string,
+  focusing: boolean,
+  focusPos: null | RelativePosition,
+  name: string,
+};
+
+export type ProviderAwareness = {
+  getLocalState: () => UserState | null,
+  getStates: () => Map<number, UserState>,
+  off: (type: 'update', cb: () => void) => void,
+  on: (type: 'update', cb: () => void) => void,
+  setLocalState: (UserState | null) => void,
+};
+
+declare interface Provider {
+  awareness: ProviderAwareness;
+  connect(): void | Promise<void>;
+  disconnect(): void;
+  off(type: 'sync', cb: (isSynced: boolean) => void): void;
+  // $FlowFixMe[unclear-type]: temp
+  off(type: 'update', cb: (any) => void): void;
+  off(type: 'status', cb: ({status: string}) => void): void;
+  off(type: 'reload', cb: (doc: Doc) => void): void;
+  on(type: 'sync', cb: (isSynced: boolean) => void): void;
+  on(type: 'status', cb: ({status: string}) => void): void;
+  // $FlowFixMe[unclear-type]: temp
+  on(type: 'update', cb: (any) => void): void;
+  on(type: 'reload', cb: (doc: Doc) => void): void;
+}
+
+export type ClientID = number;
+// $FlowFixMe[unclear-type]: work around for internal
+export type XmlElement = Object;
+// $FlowFixMe[unclear-type]: work around for internal
+export type YMap = Object;
+export type TextOperation = {
+  insert?: string | unknown,
+  delete?: number,
+  retain?: number,
+  attributes?: {
+    [x: string]: unknown,
+  },
+};
+
+// CSS Custom Highlight API; lib.dom in TS but not in Flow's bundled defs.
+declare class Highlight {
+  constructor(...initialRanges: Range[]): void;
+  add(range: Range): Highlight;
+  clear(): void;
+}
+
+export type CursorSelection = {
+  anchor: {
+    key: NodeKey,
+    offset: number,
+  },
+  caret: HTMLElement,
+  color: string,
+  focus: {
+    key: NodeKey,
+    offset: number,
+  },
+  highlight: Highlight | null,
+  highlightName: string,
+  name: HTMLSpanElement,
+  selections: HTMLElement[],
+};
+
+export type Cursor = {
+  color: string,
+  name: string,
+  selection: null | CursorSelection,
+};
+
+export type BaseBinding = {
+  clientID: number,
+  cursorHighlightSheet: CSSStyleSheet | null,
+  cursors: Map<ClientID, Cursor>,
+  cursorsContainer: null | HTMLElement,
+  doc: Doc,
+  docMap: Map<string, Doc>,
+  editor: LexicalEditor,
+  excludedProperties: ExcludedProperties,
+  id: string,
+  nodeProperties: Map<string, {[property: string]: unknown}>,
+};
+
+export type Binding = {
+  ...BaseBinding,
+  collabNodeMap: Map<
+    NodeKey,
+    | CollabElementNode
+    | CollabTextNode
+    | CollabDecoratorNode
+    | CollabLineBreakNode,
+  >,
+  root: CollabElementNode,
+};
+
+// CollabV2Mapping is an internal class with no public TypeScript export; model
+// it as an opaque nominal type (like Highlight above) so the v2 binding's
+// `mapping` field is distinct rather than `any`/`Object`.
+declare class CollabV2Mapping {}
+
+export type BindingV2 = {
+  ...BaseBinding,
+  mapping: CollabV2Mapping,
+  root: XmlElement,
+};
+
+// AnyBinding is not part of the public TypeScript export surface; it is kept
+// local so it can type the binding parameter below.
+type AnyBinding = Binding | BindingV2;
+
+export type ExcludedProperties = Map<Class<LexicalNode>, Set<string>>;
+
+declare export class CollabDecoratorNode {
+  _xmlElem: XmlElement;
+  _key: NodeKey;
+  _parent: CollabElementNode;
+  _type: string;
+  _unobservers: Set<() => void>;
+
+  constructor(
+    xmlElem: XmlElement,
+    parent: CollabElementNode,
+    type: string,
+  ): void;
+
+  getPrevNode(nodeMap: null | NodeMap): null | DecoratorNode<{...}>;
+
+  getNode(): null | DecoratorNode<{...}>;
+
+  getSharedType(): XmlElement;
+
+  getType(): string;
+
+  getKey(): NodeKey;
+
+  getSize(): number;
+
+  getOffset(): number;
+
+  syncPropertiesFromLexical(
+    binding: Binding,
+    nextLexicalNode: DecoratorNode<{...}>,
+    prevNodeMap: null | NodeMap,
+  ): void;
+
+  syncPropertiesFromYjs(
+    binding: Binding,
+    keysChanged: null | Set<string>,
+  ): void;
+
+  destroy(binding: Binding): void;
+}
+
+declare export class CollabLineBreakNode {
+  _map: YMap;
+  _key: NodeKey;
+  _parent: CollabElementNode;
+  _type: 'linebreak';
+
+  constructor(map: YMap, parent: CollabElementNode): void;
+
+  getNode(): null | LineBreakNode;
+
+  getKey(): NodeKey;
+
+  getSharedType(): YMap;
+
+  getType(): string;
+
+  getSize(): number;
+
+  getOffset(): number;
+
+  destroy(binding: Binding): void;
+}
+
+declare export class CollabTextNode {
+  _map: YMap;
+  _key: NodeKey;
+  _parent: CollabElementNode;
+  _text: string;
+  _type: string;
+  _normalized: boolean;
+
+  constructor(
+    map: YMap,
+    text: string,
+    parent: CollabElementNode,
+    type: string,
+  ): void;
+
+  getPrevNode(nodeMap: null | NodeMap): null | TextNode;
+
+  getNode(): null | TextNode;
+
+  getSharedType(): YMap;
+
+  getType(): string;
+
+  getKey(): NodeKey;
+
+  getSize(): number;
+
+  getOffset(): number;
+
+  spliceText(index: number, delCount: number, newText: string): void;
+
+  syncPropertiesAndTextFromLexical(
+    binding: Binding,
+    nextLexicalNode: TextNode,
+    prevNodeMap: null | NodeMap,
+  ): void;
+
+  syncPropertiesAndTextFromYjs(
+    binding: Binding,
+    keysChanged: null | Set<string>,
+  ): void;
+
+  destroy(binding: Binding): void;
+}
+
+type IntentionallyMarkedAsDirtyElement = boolean;
+
+declare export class CollabElementNode {
+  _key: NodeKey;
+  _children: (
+    | CollabElementNode
+    | CollabTextNode
+    | CollabDecoratorNode
+    | CollabLineBreakNode
+  )[];
+  _xmlText: XmlText;
+  _type: string;
+  _parent: null | CollabElementNode;
+
+  constructor(
+    xmlText: XmlText,
+    parent: null | CollabElementNode,
+    type: string,
+  ): void;
+
+  getPrevNode(nodeMap: null | NodeMap): null | ElementNode;
+
+  getNode(): null | ElementNode;
+
+  getSharedType(): XmlText;
+
+  getType(): string;
+
+  getKey(): NodeKey;
+
+  isEmpty(): boolean;
+
+  getSize(): number;
+
+  getOffset(): number;
+
+  syncPropertiesFromYjs(
+    binding: Binding,
+    keysChanged: null | Set<string>,
+  ): void;
+
+  applyChildrenYjsDelta(binding: Binding, deltas: TextOperation[]): void;
+
+  syncChildrenFromYjs(binding: Binding): void;
+
+  syncPropertiesFromLexical(
+    binding: Binding,
+    nextLexicalNode: ElementNode,
+    prevNodeMap: null | NodeMap,
+  ): void;
+
+  _syncChildFromLexical(
+    binding: Binding,
+    index: number,
+    key: NodeKey,
+    prevNodeMap: null | NodeMap,
+    dirtyElements: null | Map<NodeKey, IntentionallyMarkedAsDirtyElement>,
+    dirtyLeaves: null | Set<NodeKey>,
+  ): void;
+
+  syncChildrenFromLexical(
+    binding: Binding,
+    nextLexicalNode: ElementNode,
+    prevNodeMap: null | NodeMap,
+    dirtyElements: null | Map<NodeKey, IntentionallyMarkedAsDirtyElement>,
+    dirtyLeaves: null | Set<NodeKey>,
+  ): void;
+
+  append(
+    collabNode:
+      | CollabElementNode
+      | CollabDecoratorNode
+      | CollabTextNode
+      | CollabLineBreakNode,
+  ): void;
+
+  splice(
+    binding: Binding,
+    index: number,
+    delCount: number,
+    collabNode?:
+      | CollabElementNode
+      | CollabDecoratorNode
+      | CollabTextNode
+      | CollabLineBreakNode,
+  ): void;
+
+  getChildOffset(
+    collabNode:
+      | CollabElementNode
+      | CollabTextNode
+      | CollabDecoratorNode
+      | CollabLineBreakNode,
+  ): number;
+
+  destroy(binding: Binding): void;
+}
+
+declare export function createUndoManager(
+  binding: Binding,
+  root: XmlText,
+): UndoManager;
+
+declare export function initLocalState(
+  provider: Provider,
+  name: string,
+  color: string,
+  focusing: boolean,
+): void;
+
+declare export function setLocalStateFocus(
+  provider: Provider,
+  name: string,
+  color: string,
+  focusing: boolean,
+): void;
+
+declare export function createBinding(
+  editor: LexicalEditor,
+  provider: Provider,
+  id: string,
+  doc: ?Doc,
+  docMap: Map<string, Doc>,
+): Binding;
+
+export type SyncCursorPositionsOptions = {
+  getAwarenessStates?: (
+    binding: Binding,
+    provider: Provider,
+  ) => Map<number, UserState>,
+  selectionHighlight?: boolean,
+};
+
+declare export function syncCursorPositions(
+  binding: Binding,
+  provider: Provider,
+  options?: SyncCursorPositionsOptions,
+): void;
+
+declare export function removeCursorHighlightRule(highlightName: string): void;
+
+declare export function $getAnchorAndFocusForUserState(
+  binding: AnyBinding,
+  userState: UserState,
+): {
+  anchorKey: NodeKey | null,
+  anchorOffset: number,
+  focusKey: NodeKey | null,
+  focusOffset: number,
+};
+
+declare export function syncLexicalUpdateToYjs(
+  binding: Binding,
+  provider: Provider,
+  prevEditorState: EditorState,
+  currEditorState: EditorState,
+  dirtyElements: Map<NodeKey, IntentionallyMarkedAsDirtyElement>,
+  dirtyLeaves: Set<NodeKey>,
+  normalizedNodes: Set<NodeKey>,
+  tags: Set<string>,
+): void;
+
+declare export function syncYjsChangesToLexical(
+  binding: Binding,
+  provider: Provider,
+  events: YjsEvent[],
+): void;
+
+declare export var CONNECTED_COMMAND: LexicalCommand<boolean>;
+declare export var TOGGLE_CONNECT_COMMAND: LexicalCommand<boolean>;
+
+export type {Provider};
