@@ -80,27 +80,66 @@ const bodyPartLabels: Record<string, string> = {
   full: 'ทั้งตัว',
 };
 
-// ─── MediaPipe CDN URLs ────────────────────────────────────────────────
-const CAMERA_UTILS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
-const DRAWING_UTILS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
-const POSE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js';
+// ─── MediaPipe CDN URLs (pin explicit versions for reliability) ────────
+const MP_BASE = 'https://cdn.jsdelivr.net/npm';
+const CAMERA_UTILS_CDN = `${MP_BASE}/@mediapipe/camera_utils@0.3/camera_utils.js`;
+const POSE_VERSION = '0.1';
+const POSE_BASE_URL = `${MP_BASE}/@mediapipe/pose@${POSE_VERSION}/`;
+const POSE_CDN = `${POSE_BASE_URL}pose.js`;
 
-// ─── Helper: load script ───────────────────────────────────────────────
-function loadScript(src: string): Promise<void> {
+// ─── Helper: load script (with timeout + retry) ────────────────────────
+function loadScript(src: string, timeoutMs = 20000): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Check if already loaded
-    const existing = document.querySelector(`script[src="${src}"]`);
-    if (existing) {
+    // If the global provided by this script already exists, skip re-loading
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+    if (existing && existing.dataset.loaded === 'true') {
       resolve();
       return;
     }
-    const s = document.createElement('script');
+    const s = existing ?? document.createElement('script');
     s.src = src;
-    s.crossOrigin = 'anonymous';
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load: ${src}`));
-    document.head.appendChild(s);
+    // IMPORTANT: do NOT set crossOrigin here. The MediaPipe loader creates a
+    // same-origin Blob worker that importScripts() these CDN files; adding
+    // crossorigin can trigger opaque-response failures in some browsers.
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Timeout loading: ${src}`));
+      }
+    }, timeoutMs);
+    s.onload = () => {
+      clearTimeout(timer);
+      if (!settled) {
+        settled = true;
+        s.dataset.loaded = 'true';
+        resolve();
+      }
+    };
+    s.onerror = () => {
+      clearTimeout(timer);
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Failed to load: ${src}`));
+      }
+    };
+    if (!existing) document.head.appendChild(s);
   });
+}
+
+async function loadScriptWithRetry(src: string, attempts = 2): Promise<void> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await loadScript(src);
+      return;
+    } catch (err) {
+      lastErr = err;
+      // wait a bit before retrying
+      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`Failed to load: ${src}`);
 }
 
 // ─── Helper: format time MM:SS ────────────────────────────────────────
@@ -145,6 +184,7 @@ export function LiveSessionView() {
   const [isPaused, setIsPaused] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
+  const [detectionActive, setDetectionActive] = useState(false); // true once landmarks arrive
   const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [coachLoading, setCoachLoading] = useState(false);
@@ -160,7 +200,6 @@ export function LiveSessionView() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const poseRef = useRef<unknown>(null);
-  const cameraRef = useRef<unknown>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const coachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCoachCallRef = useRef<number>(0);
@@ -171,6 +210,14 @@ export function LiveSessionView() {
   const streamRef = useRef<MediaStream | null>(null);
   const sessionStartTimeRef = useRef<number>(0);
   const maxRomRef = useRef<number>(0);
+  const processingRef = useRef<boolean>(false); // true while pose.send() is in flight
+  const isPausedRef = useRef<boolean>(false); // mirror of isPaused for use inside callbacks
+  const lastFrameTimeRef = useRef<number>(0); // watchdog: timestamp of last processed frame
+
+  // keep the ref in sync so onResults callback (registered once) sees latest value
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
 
   // ─── Fetch exercises ────────────────────────────────────────────────
   useEffect(() => {
@@ -325,13 +372,16 @@ export function LiveSessionView() {
       streamRef.current = null;
     }
 
-    // Stop MediaPipe
+    // Stop MediaPipe (close WASM graph + release worker)
     try {
-      const cam = cameraRef.current as { stop?: () => void } | null;
-      if (cam?.stop) cam.stop();
+      const pose = poseRef.current as { close?: () => void } | null;
+      if (pose?.close) pose.close();
     } catch {
       // ignore
     }
+    poseRef.current = null;
+    setMediaPipeLoaded(false);
+    setDetectionActive(false);
 
     // Finalize session
     const totalReps = store.currentRep;
@@ -381,16 +431,16 @@ export function LiveSessionView() {
 
   // ─── Initialize MediaPipe + Camera ──────────────────────────────────
   useEffect(() => {
-    if (phase !== 'active' || !videoRef.current) return;
+    if (phase !== 'active') return;
 
     let cancelled = false;
+    let rafId = 0;
 
     async function initMediaPipe() {
       try {
-        // Load scripts
-        await loadScript(CAMERA_UTILS_CDN);
-        await loadScript(DRAWING_UTILS_CDN);
-        await loadScript(POSE_CDN);
+        // 1) Load MediaPipe scripts from CDN (with timeout + retry)
+        await loadScriptWithRetry(CAMERA_UTILS_CDN);
+        await loadScriptWithRetry(POSE_CDN);
 
         if (cancelled) return;
 
@@ -403,26 +453,70 @@ export function LiveSessionView() {
             close: () => void;
             send: (input: HTMLVideoElement) => Promise<void>;
           };
-          Camera: new (config: {
-            video: HTMLVideoElement;
-            onFrame: () => Promise<void>;
-            width: number;
-            height: number;
-          }) => { start: () => Promise<void>; stop: () => void };
         };
 
-        if (!w.Pose || !w.Camera) {
-          setMediaPipeError('ไม่สามารถโหลด MediaPipe ได้');
+        if (!w.Pose) {
+          setMediaPipeError('ไม่สามารถโหลด MediaPipe ได้ ตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่');
           return;
         }
 
-        // Create Pose instance
+        // 2) Open the camera FIRST — getUserMedia gives a clear error
+        //    message (permission denied / no device) before we spend time
+        //    downloading WASM model files.
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setCameraError(
+            'เบราว์เซอร์นี้ไม่รองรับกล้อง (ต้องใช้ HTTPS หรือ localhost) กรุณาเปิดผ่าน https:// หรือ http://localhost'
+          );
+          return;
+        }
+
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 640, height: 480, facingMode: 'user' },
+          });
+        } catch (err) {
+          if (cancelled) return;
+          const name = err instanceof DOMException ? err.name : '';
+          if (name === 'NotAllowedError' || name === 'SecurityError') {
+            setCameraError('ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณากด "อนุญาต" แล้วเริ่มใหม่');
+          } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+            setCameraError('ไม่พบกล้องบนอุปกรณ์นี้');
+          } else {
+            setCameraError('ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบว่าไม่มีแอปอื่นใช้งานกล้องอยู่');
+          }
+          return;
+        }
+
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+
+        // Wait until React has attached the <video> element to the DOM
+        const video = await waitForVideoElement();
+        if (!video || cancelled) return;
+
+        video.srcObject = stream;
+        video.muted = true;
+        try {
+          await video.play();
+        } catch {
+          // autoplay quirks on some browsers; muted+playsInline usually avoids this
+        }
+
+        // Wait for actual frames so videoWidth/videoHeight are non-zero
+        await waitForVideoReady(video);
+        if (cancelled) return;
+
+        // 3) Create Pose instance (WASM assets fetched via locateFile)
         const pose = new w.Pose({
-          locateFile: (file: string) =>
-            `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+          locateFile: (file: string) => `${POSE_BASE_URL}${file}`,
         });
 
         await pose.setOptions({
+          selfieMode: true, // landmarks come back already mirrored → matches -scale-x-100 canvas
           modelComplexity: 1,
           smoothLandmarks: true,
           enableSegmentation: false,
@@ -431,69 +525,93 @@ export function LiveSessionView() {
         });
 
         pose.onResults((results: unknown) => {
-          if (isPaused || cancelled) return;
+          if (cancelled) return;
+          if (isPausedRef.current) return;
           handlePoseResults(results);
         });
 
         await pose.initialize();
+        if (cancelled) return;
         poseRef.current = pose;
         setMediaPipeLoaded(true);
 
-        // Start camera
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480, facingMode: 'user' },
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        // Create camera loop
-        const camera = new w.Camera({
-          video: videoRef.current!,
-          onFrame: async () => {
-            if (pose && !cancelled) {
-              await pose.send(videoRef.current!);
+        // 4) Drive detection with our own rAF loop instead of camera_utils'
+        //    internal setInterval. This is more robust: it naturally throttles
+        //    to the display refresh rate and never queues frames while the
+        //    WASM model is still busy (pose.send is awaited per frame).
+        const sendLoop = async () => {
+          if (cancelled) return;
+          const v = videoRef.current;
+          if (v && v.readyState >= 2 && !processingRef.current) {
+            processingRef.current = true;
+            try {
+              await pose.send({ image: v });
+            } catch {
+              // ignore single-frame inference errors, keep looping
+            } finally {
+              processingRef.current = false;
             }
-          },
-          width: 640,
-          height: 480,
-        });
-
-        await camera.start();
-        cameraRef.current = camera;
+          }
+          rafId = requestAnimationFrame(sendLoop);
+        };
+        rafId = requestAnimationFrame(sendLoop);
       } catch (err) {
         if (cancelled) return;
-        if (err instanceof DOMException && err.name === 'NotAllowedError') {
-          setCameraError('ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณาอนุญาตการเข้าถึงกล้องในการตั้งค่าเบราว์เซอร์');
-        } else {
-          setMediaPipeError('ไม่สามารถเริ่มต้นระบบ AI ได้ กรุณาลองใหม่อีกครั้ง');
-        }
+        console.error('[MediaPipe init failed]', err);
+        setMediaPipeError('ไม่สามารถเริ่มต้นระบบ AI ได้ กรุณาลองใหม่อีกครั้ง');
       }
+    }
+
+    // Poll for the mounted <video> element (max ~2s)
+    function waitForVideoElement(): Promise<HTMLVideoElement | null> {
+      return new Promise((resolve) => {
+        const start = Date.now();
+        const check = () => {
+          if (videoRef.current) {
+            resolve(videoRef.current);
+          } else if (Date.now() - start > 2000 || cancelled) {
+            resolve(null);
+          } else {
+            setTimeout(check, 50);
+          }
+        };
+        check();
+      });
+    }
+
+    // Wait until the video stream is actually producing frames
+    function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
+      return new Promise((resolve) => {
+        if (video.videoWidth > 0) {
+          resolve();
+          return;
+        }
+        const timeout = setTimeout(() => resolve(), 5000);
+        video.onloadeddata = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+      });
     }
 
     initMediaPipe();
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(rafId);
     };
-    }, [phase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // ─── Handle pose results ────────────────────────────────────────────
   const handlePoseResults = useCallback(
     (results: unknown) => {
       const r = results as {
         poseLandmarks?: Landmark[];
-        image?: HTMLVideoElement;
+        image?: HTMLVideoElement | HTMLCanvasElement;
       };
 
-      if (!r.poseLandmarks || !canvasRef.current) return;
+      if (!canvasRef.current) return;
 
       const landmarks = r.poseLandmarks;
       const canvas = canvasRef.current;
@@ -504,9 +622,23 @@ export function LiveSessionView() {
       if (!video) return;
 
       // Match canvas to displayed video size
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Watchdog: remember when we last received a processed frame
+      lastFrameTimeRef.current = Date.now();
+
+      // No person detected this frame → clear skeleton + show hint
+      if (!landmarks || landmarks.length < 33) {
+        store.setSkeletonLandmarks([]);
+        return;
+      }
+
+      // First successful detection → flip watchdog to "active"
+      setDetectionActive(true);
 
       // Calculate angles
       const angles = calculateAllAngles(landmarks);
@@ -565,15 +697,19 @@ export function LiveSessionView() {
       });
 
       // Draw skeleton connections
+      // NOTE: selfieMode:true already mirrors landmarks, and both <video> and
+      // <canvas> are flipped by the same CSS (-scale-x-100). So we draw with
+      // RAW landmark coordinates — flipping here too would double-mirror and
+      // misalign the skeleton from the body.
       SKELETON_CONNECTIONS.forEach(([i, j]) => {
         const lm1 = landmarks[i];
         const lm2 = landmarks[j];
         if (!lm1 || !lm2) return;
         if ((lm1.visibility ?? 0) < 0.5 || (lm2.visibility ?? 0) < 0.5) return;
 
-        const x1 = (1 - lm1.x) * canvas.width; // mirror
+        const x1 = lm1.x * canvas.width;
         const y1 = lm1.y * canvas.height;
-        const x2 = (1 - lm2.x) * canvas.width;
+        const x2 = lm2.x * canvas.width;
         const y2 = lm2.y * canvas.height;
 
         // Determine line color
@@ -615,7 +751,7 @@ export function LiveSessionView() {
         const lm = landmarks[idx];
         if (!lm || (lm.visibility ?? 0) < 0.5) return;
 
-        const x = (1 - lm.x) * canvas.width; // mirror
+        const x = lm.x * canvas.width; // raw coords; CSS -scale-x-100 handles mirroring
         const y = lm.y * canvas.height;
 
         ctx.beginPath();
@@ -859,8 +995,24 @@ export function LiveSessionView() {
               <Loader2 className="mb-3 h-10 w-10 animate-spin text-emerald-400" />
               <p className="text-sm font-medium text-white">กำลังเริ่มต้น AI...</p>
               <p className="mt-1 text-xs text-white/60">
-                กำลังโหลดโมเดลตรวจจับท่าทาง
+                กำลังโหลดโมเดลตรวจจับท่าทาง (MediaPipe Pose) — ครั้งแรกอาจใช้เวลา 5-15 วินาที
               </p>
+            </div>
+          )}
+
+          {/* Watchdog: loaded but frames stopped flowing */}
+          {mediaPipeLoaded && !detectionActive && !cameraError && !mediaPipeError && (
+            <div className="absolute inset-x-0 bottom-24 z-20 mx-auto flex max-w-md items-center gap-2 rounded-full bg-amber-500/90 px-4 py-2 text-sm font-medium text-black shadow-lg lg:bottom-8">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              ยังไม่ได้รับผลตรวจจับจาก AI — ตรวจสอบว่าอยู่ในที่แสงเพียงพอและเห็นร่างกายชัดเจน
+            </div>
+          )}
+
+          {/* No-person hint once detection is running */}
+          {detectionActive && store.skeletonLandmarks.length === 0 && (
+            <div className="absolute inset-x-0 top-20 z-20 mx-auto flex max-w-md items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm text-white backdrop-blur-sm">
+              <PersonStanding className="h-4 w-4 text-emerald-400" />
+              ถอยหลังให้เห็นลำตัว/ขาทั้งข้างในกรอบกล้อง
             </div>
           )}
 
