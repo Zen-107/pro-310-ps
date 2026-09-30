@@ -48,8 +48,13 @@ import {
   SKELETON_CONNECTIONS,
   type Landmark,
 } from '@/lib/angle-utils';
-import type { ExerciseData, TargetJoint } from '@/lib/exercises-data';
+import type { TargetJoint } from '@/lib/exercises-data';
 import { CATEGORIES } from '@/lib/exercises-data';
+import {
+  createPoseLandmarker,
+  landmarksFromResult,
+  type PoseLandmarkerInstance,
+} from '@/lib/pose-landmarker';
 
 // ─── Icon map for exercises ────────────────────────────────────────────
 const exerciseIconMap: Record<string, React.ReactNode> = {
@@ -79,29 +84,6 @@ const bodyPartLabels: Record<string, string> = {
   upper: 'ร่างกายบน',
   full: 'ทั้งตัว',
 };
-
-// ─── MediaPipe CDN URLs ────────────────────────────────────────────────
-const CAMERA_UTILS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
-const DRAWING_UTILS_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
-const POSE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js';
-
-// ─── Helper: load script ───────────────────────────────────────────────
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // Check if already loaded
-    const existing = document.querySelector(`script[src="${src}"]`);
-    if (existing) {
-      resolve();
-      return;
-    }
-    const s = document.createElement('script');
-    s.src = src;
-    s.crossOrigin = 'anonymous';
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load: ${src}`));
-    document.head.appendChild(s);
-  });
-}
 
 // ─── Helper: format time MM:SS ────────────────────────────────────────
 function formatTime(seconds: number): string {
@@ -159,8 +141,7 @@ export function LiveSessionView() {
   // ─── Refs ───────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const poseRef = useRef<unknown>(null);
-  const cameraRef = useRef<unknown>(null);
+  const landmarkerRef = useRef<PoseLandmarkerInstance | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const coachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCoachCallRef = useRef<number>(0);
@@ -331,10 +312,9 @@ export function LiveSessionView() {
       streamRef.current = null;
     }
 
-    // Stop MediaPipe
     try {
-      const cam = cameraRef.current as { stop?: () => void } | null;
-      if (cam?.stop) cam.stop();
+      landmarkerRef.current?.close();
+      landmarkerRef.current = null;
     } catch {
       // ignore
     }
@@ -385,12 +365,13 @@ export function LiveSessionView() {
     setIsPaused((prev) => !prev);
   }, []);
 
-  // ─── Initialize MediaPipe + Camera ──────────────────────────────────
+  // ─── Initialize Pose Landmarker + Camera ────────────────────────────
   useEffect(() => {
     if (phase !== 'active') return;
 
     let cancelled = false;
     let rafId = 0;
+    let lastVideoTime = -1;
 
     async function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
       if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
@@ -414,60 +395,24 @@ export function LiveSessionView() {
       });
     }
 
-    async function initMediaPipe() {
-      const videoEl = videoRef.current;
-      if (!videoEl) return;
+    async function waitForVideoElement(): Promise<HTMLVideoElement | null> {
+      for (let i = 0; i < 60; i++) {
+        if (cancelled) return null;
+        const el = videoRef.current;
+        if (el) return el;
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      return videoRef.current;
+    }
 
+    async function initPoseTracking() {
       try {
         setMediaPipeLoaded(false);
         setMediaPipeError(null);
         setCameraError(null);
 
-        await loadScript(CAMERA_UTILS_CDN);
-        await loadScript(DRAWING_UTILS_CDN);
-        await loadScript(POSE_CDN);
-
-        if (cancelled) return;
-
-        const w = window as unknown as {
-          Pose: new (config: { locateFile: (file: string) => string }) => {
-            setOptions: (opts: Record<string, unknown>) => Promise<void>;
-            onResults: (cb: (results: unknown) => void) => void;
-            initialize: () => Promise<void>;
-            close: () => void;
-            send: (input: { image: HTMLVideoElement }) => Promise<void>;
-          };
-        };
-
-        if (!w.Pose) {
-          setMediaPipeError('ไม่สามารถโหลด MediaPipe ได้');
-          return;
-        }
-
-        const pose = new w.Pose({
-          locateFile: (file: string) =>
-            `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-        });
-
-        await pose.setOptions({
-          modelComplexity: 1,
-          smoothLandmarks: true,
-          enableSegmentation: false,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-
-        pose.onResults((results: unknown) => {
-          if (cancelled || isPausedRef.current) return;
-          handlePoseResultsRef.current(results);
-        });
-
-        await pose.initialize();
-        if (cancelled) {
-          pose.close();
-          return;
-        }
-        poseRef.current = pose;
+        const videoEl = await waitForVideoElement();
+        if (!videoEl || cancelled) return;
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480, facingMode: 'user' },
@@ -479,45 +424,78 @@ export function LiveSessionView() {
         streamRef.current = stream;
 
         videoEl.srcObject = stream;
+        videoEl.playsInline = true;
+        videoEl.muted = true;
         await videoEl.play();
         await waitForVideoReady(videoEl);
 
         if (cancelled) return;
 
+        const landmarker = await createPoseLandmarker();
+        if (cancelled) {
+          landmarker.close();
+          return;
+        }
+        landmarkerRef.current = landmarker;
         setMediaPipeLoaded(true);
 
-        const tick = async () => {
-          if (cancelled || !videoRef.current || videoRef.current.readyState < 2) {
+        const tick = () => {
+          if (cancelled) return;
+
+          const video = videoRef.current;
+          const marker = landmarkerRef.current;
+          if (!video || !marker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
             rafId = requestAnimationFrame(tick);
             return;
           }
-          try {
-            await pose.send({ image: videoRef.current });
-          } catch {
-            // skip frame on transient send errors
+
+          if (isPausedRef.current) {
+            rafId = requestAnimationFrame(tick);
+            return;
           }
+
+          const timestampMs = performance.now();
+          if (timestampMs <= lastVideoTime) {
+            rafId = requestAnimationFrame(tick);
+            return;
+          }
+          lastVideoTime = timestampMs;
+
+          try {
+            const result = marker.detectForVideo(video, timestampMs);
+            const landmarks = landmarksFromResult(result);
+            if (landmarks) {
+              handlePoseResultsRef.current({ poseLandmarks: landmarks });
+            }
+          } catch (err) {
+            console.error('[pose] detectForVideo failed:', err);
+          }
+
           rafId = requestAnimationFrame(tick);
         };
+
         rafId = requestAnimationFrame(tick);
       } catch (err) {
         if (cancelled) return;
+        console.error('[pose] init failed:', err);
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
           setCameraError('ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณาอนุญาตการเข้าถึงกล้องในการตั้งค่าเบราว์เซอร์');
         } else {
-          setMediaPipeError('ไม่สามารถเริ่มต้นระบบ AI ได้ กรุณาลองใหม่อีกครั้ง');
+          setMediaPipeError(
+            'ไม่สามารถเริ่มต้นระบบตรวจจับท่าทางได้ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่'
+          );
         }
       }
     }
 
-    initMediaPipe();
+    initPoseTracking();
 
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
       try {
-        const pose = poseRef.current as { close?: () => void } | null;
-        pose?.close?.();
-        poseRef.current = null;
+        landmarkerRef.current?.close();
+        landmarkerRef.current = null;
       } catch {
         // ignore
       }
@@ -525,6 +503,8 @@ export function LiveSessionView() {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
+      const video = videoRef.current;
+      if (video) video.srcObject = null;
     };
   }, [phase]);
 
