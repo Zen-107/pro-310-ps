@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  allowedDevOrigins: ["shaina-harbourless-demoniacally.ngrok-free.app"],
 };
 
 export default nextConfig;
