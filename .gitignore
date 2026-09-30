@@ -1,4 +1,11 @@
 # Environment
 .env
+
+# Build outputs
 .next/
 node_modules/
+tsconfig.tsbuildinfo
+db/*.db*
+# Local database
+/db/*.db
+/db/*.db-journal
