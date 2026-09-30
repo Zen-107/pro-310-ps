@@ -171,6 +171,12 @@ export function LiveSessionView() {
   const streamRef = useRef<MediaStream | null>(null);
   const sessionStartTimeRef = useRef<number>(0);
   const maxRomRef = useRef<number>(0);
+  const handlePoseResultsRef = useRef<(results: unknown) => void>(() => {});
+  const isPausedRef = useRef(isPaused);
+
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
 
   // ─── Fetch exercises ────────────────────────────────────────────────
   useEffect(() => {
@@ -381,42 +387,63 @@ export function LiveSessionView() {
 
   // ─── Initialize MediaPipe + Camera ──────────────────────────────────
   useEffect(() => {
-    if (phase !== 'active' || !videoRef.current) return;
+    if (phase !== 'active') return;
 
     let cancelled = false;
+    let rafId = 0;
+
+    async function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+        return;
+      }
+      await new Promise<void>((resolve, reject) => {
+        const onReady = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error('Video failed to load'));
+        };
+        const cleanup = () => {
+          video.removeEventListener('loadeddata', onReady);
+          video.removeEventListener('error', onError);
+        };
+        video.addEventListener('loadeddata', onReady);
+        video.addEventListener('error', onError);
+      });
+    }
 
     async function initMediaPipe() {
+      const videoEl = videoRef.current;
+      if (!videoEl) return;
+
       try {
-        // Load scripts
+        setMediaPipeLoaded(false);
+        setMediaPipeError(null);
+        setCameraError(null);
+
         await loadScript(CAMERA_UTILS_CDN);
         await loadScript(DRAWING_UTILS_CDN);
         await loadScript(POSE_CDN);
 
         if (cancelled) return;
 
-        // Access window globals
         const w = window as unknown as {
           Pose: new (config: { locateFile: (file: string) => string }) => {
             setOptions: (opts: Record<string, unknown>) => Promise<void>;
             onResults: (cb: (results: unknown) => void) => void;
             initialize: () => Promise<void>;
             close: () => void;
-            send: (input: HTMLVideoElement) => Promise<void>;
+            send: (input: { image: HTMLVideoElement }) => Promise<void>;
           };
-          Camera: new (config: {
-            video: HTMLVideoElement;
-            onFrame: () => Promise<void>;
-            width: number;
-            height: number;
-          }) => { start: () => Promise<void>; stop: () => void };
         };
 
-        if (!w.Pose || !w.Camera) {
+        if (!w.Pose) {
           setMediaPipeError('ไม่สามารถโหลด MediaPipe ได้');
           return;
         }
 
-        // Create Pose instance
         const pose = new w.Pose({
           locateFile: (file: string) =>
             `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
@@ -431,15 +458,17 @@ export function LiveSessionView() {
         });
 
         pose.onResults((results: unknown) => {
-          if (isPaused || cancelled) return;
-          handlePoseResults(results);
+          if (cancelled || isPausedRef.current) return;
+          handlePoseResultsRef.current(results);
         });
 
         await pose.initialize();
+        if (cancelled) {
+          pose.close();
+          return;
+        }
         poseRef.current = pose;
-        setMediaPipeLoaded(true);
 
-        // Start camera
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480, facingMode: 'user' },
         });
@@ -449,25 +478,27 @@ export function LiveSessionView() {
         }
         streamRef.current = stream;
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
+        videoEl.srcObject = stream;
+        await videoEl.play();
+        await waitForVideoReady(videoEl);
 
-        // Create camera loop
-        const camera = new w.Camera({
-          video: videoRef.current!,
-          onFrame: async () => {
-            if (pose && !cancelled) {
-              await pose.send(videoRef.current!);
-            }
-          },
-          width: 640,
-          height: 480,
-        });
+        if (cancelled) return;
 
-        await camera.start();
-        cameraRef.current = camera;
+        setMediaPipeLoaded(true);
+
+        const tick = async () => {
+          if (cancelled || !videoRef.current || videoRef.current.readyState < 2) {
+            rafId = requestAnimationFrame(tick);
+            return;
+          }
+          try {
+            await pose.send({ image: videoRef.current });
+          } catch {
+            // skip frame on transient send errors
+          }
+          rafId = requestAnimationFrame(tick);
+        };
+        rafId = requestAnimationFrame(tick);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
@@ -482,8 +513,20 @@ export function LiveSessionView() {
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(rafId);
+      try {
+        const pose = poseRef.current as { close?: () => void } | null;
+        pose?.close?.();
+        poseRef.current = null;
+      } catch {
+        // ignore
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
     };
-    }, [phase]);
+  }, [phase]);
 
   // ─── Handle pose results ────────────────────────────────────────────
   const handlePoseResults = useCallback(
@@ -501,9 +544,9 @@ export function LiveSessionView() {
       if (!ctx) return;
 
       const video = videoRef.current;
-      if (!video) return;
+      if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
 
-      // Match canvas to displayed video size
+      // Match canvas to video frame (CSS -scale-x-100 mirrors display; landmarks use raw x)
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -569,11 +612,11 @@ export function LiveSessionView() {
         const lm1 = landmarks[i];
         const lm2 = landmarks[j];
         if (!lm1 || !lm2) return;
-        if ((lm1.visibility ?? 0) < 0.5 || (lm2.visibility ?? 0) < 0.5) return;
+        if ((lm1.visibility ?? 1) < 0.5 || (lm2.visibility ?? 1) < 0.5) return;
 
-        const x1 = (1 - lm1.x) * canvas.width; // mirror
+        const x1 = lm1.x * canvas.width;
         const y1 = lm1.y * canvas.height;
-        const x2 = (1 - lm2.x) * canvas.width;
+        const x2 = lm2.x * canvas.width;
         const y2 = lm2.y * canvas.height;
 
         // Determine line color
@@ -613,9 +656,9 @@ export function LiveSessionView() {
 
       keyIndices.forEach((idx) => {
         const lm = landmarks[idx];
-        if (!lm || (lm.visibility ?? 0) < 0.5) return;
+        if (!lm || (lm.visibility ?? 1) < 0.5) return;
 
-        const x = (1 - lm.x) * canvas.width; // mirror
+        const x = lm.x * canvas.width;
         const y = lm.y * canvas.height;
 
         ctx.beginPath();
@@ -688,6 +731,10 @@ export function LiveSessionView() {
     },
     [selectedExercise, store, callCoach, coachLoading, handleStopSession]
   );
+
+  useEffect(() => {
+    handlePoseResultsRef.current = handlePoseResults;
+  }, [handlePoseResults]);
 
   // ─── Back to home ───────────────────────────────────────────────────
   const handleBackToHome = useCallback(() => {
@@ -850,7 +897,7 @@ export function LiveSessionView() {
           {/* Canvas Overlay */}
           <canvas
             ref={canvasRef}
-            className="absolute inset-0 h-full w-full -scale-x-100"
+            className="absolute inset-0 h-full w-full -scale-x-100 object-cover pointer-events-none"
           />
 
           {/* Loading overlay while MediaPipe initializes */}
