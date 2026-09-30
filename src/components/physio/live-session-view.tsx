@@ -213,11 +213,24 @@ export function LiveSessionView() {
   const processingRef = useRef<boolean>(false); // true while pose.send() is in flight
   const isPausedRef = useRef<boolean>(false); // mirror of isPaused for use inside callbacks
   const lastFrameTimeRef = useRef<number>(0); // watchdog: timestamp of last processed frame
+  // ── Latest-value refs for the pose pipeline ──────────────────────────
+  // pose.onResults and the init effect are registered ONCE (empty deps) so
+  // they never re-run, but handlePoseResults reads exercise/store data that
+  // changes over time. We mirror those values into refs so the callback
+  // always sees fresh data without needing to re-register onResults.
+  const handlePoseResultsRef = useRef<(results: unknown) => void>(() => {});
+  const selectedExerciseRef = useRef<ExerciseFromAPI | null>(null);
+  const detectionActiveRef = useRef<boolean>(false); // one-shot guard for setDetectionActive
 
   // keep the ref in sync so onResults callback (registered once) sees latest value
   useEffect(() => {
     isPausedRef.current = isPaused;
   }, [isPaused]);
+
+  // Mirror changing values into refs — see note above the ref declarations.
+  useEffect(() => {
+    selectedExerciseRef.current = selectedExercise;
+  }, [selectedExercise]);
 
   // ─── Fetch exercises ────────────────────────────────────────────────
   useEffect(() => {
@@ -382,6 +395,7 @@ export function LiveSessionView() {
     poseRef.current = null;
     setMediaPipeLoaded(false);
     setDetectionActive(false);
+    detectionActiveRef.current = false;
 
     // Finalize session
     const totalReps = store.currentRep;
@@ -451,7 +465,7 @@ export function LiveSessionView() {
             onResults: (cb: (results: unknown) => void) => void;
             initialize: () => Promise<void>;
             close: () => void;
-            send: (input: HTMLVideoElement) => Promise<void>;
+            send: (input: { image: HTMLVideoElement } | HTMLVideoElement) => Promise<void>;
           };
         };
 
@@ -527,7 +541,10 @@ export function LiveSessionView() {
         pose.onResults((results: unknown) => {
           if (cancelled) return;
           if (isPausedRef.current) return;
-          handlePoseResults(results);
+          // Indirection through a ref: this callback is registered once, but
+          // handlePoseResults is re-created when exercise/store change. The
+          // ref always points at the LATEST version of the handler.
+          handlePoseResultsRef.current(results);
         });
 
         await pose.initialize();
@@ -637,8 +654,12 @@ export function LiveSessionView() {
         return;
       }
 
-      // First successful detection → flip watchdog to "active"
-      setDetectionActive(true);
+      // First successful detection → flip watchdog to "active" (only once —
+      // calling setState every frame would re-render the component 30x/sec)
+      if (!detectionActiveRef.current) {
+        detectionActiveRef.current = true;
+        setDetectionActive(true);
+      }
 
       // Calculate angles
       const angles = calculateAllAngles(landmarks);
@@ -652,7 +673,7 @@ export function LiveSessionView() {
       store.setSkeletonLandmarks(landmarks.map((l) => ({ x: l.x, y: l.y, z: l.z })));
 
       // Determine colors for connections
-      const targetJoints = selectedExercise?.targetJoints || [];
+      const targetJoints = selectedExerciseRef.current?.targetJoints || [];
 
       // Build a map of joint index -> color based on target joints
       const jointColorMap: Record<number, string> = {};
@@ -824,6 +845,14 @@ export function LiveSessionView() {
     },
     [selectedExercise, store, callCoach, coachLoading, handleStopSession]
   );
+
+  // Keep the ref pointed at the newest handler version so the once-registered
+  // pose.onResults callback never runs a stale closure (this was the root
+  // cause of "camera works but no skeleton": an old closure could early-return
+  // or read outdated exercise data while drawing nothing).
+  useEffect(() => {
+    handlePoseResultsRef.current = handlePoseResults;
+  }, [handlePoseResults]);
 
   // ─── Back to home ───────────────────────────────────────────────────
   const handleBackToHome = useCallback(() => {
