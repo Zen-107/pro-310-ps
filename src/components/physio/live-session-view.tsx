@@ -530,7 +530,12 @@ export function LiveSessionView() {
         });
 
         await pose.setOptions({
-          selfieMode: true, // landmarks come back already mirrored → matches -scale-x-100 canvas
+          // IMPORTANT: MediaPipe's `selfieMode` on the legacy Pose JS API does
+          // NOT mirror landmark.x — it only flips left/right landmark indices.
+          // We keep it OFF and draw RAW coordinates instead; both <video> and
+          // <canvas> are flipped by the same CSS (-scale-x-100), so raw
+          // landmarks line up perfectly with the mirrored preview.
+          selfieMode: false,
           modelComplexity: 1,
           smoothLandmarks: true,
           enableSegmentation: false,
@@ -718,10 +723,10 @@ export function LiveSessionView() {
       });
 
       // Draw skeleton connections
-      // NOTE: selfieMode:true already mirrors landmarks, and both <video> and
-      // <canvas> are flipped by the same CSS (-scale-x-100). So we draw with
-      // RAW landmark coordinates — flipping here too would double-mirror and
-      // misalign the skeleton from the body.
+      // NOTE: selfieMode is OFF, so landmark.x are RAW (unmirrored) coords.
+      // Both <video> and <canvas> are flipped by the same CSS (-scale-x-100),
+      // therefore drawing raw coordinates aligns the skeleton exactly with the
+      // mirrored body in the preview — no extra flip needed here.
       SKELETON_CONNECTIONS.forEach(([i, j]) => {
         const lm1 = landmarks[i];
         const lm2 = landmarks[j];
