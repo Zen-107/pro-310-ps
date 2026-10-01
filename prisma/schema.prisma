@@ -215,6 +215,7 @@ model Patient {
   gender         Gender    @default(UNSPECIFIED)
   condition      String?
   phone          String?
+  clinicalNotes  String? // care-team notes, never shown to the patient
   consentVersion String? // PDPA consent record
   consentAt      DateTime?
   archivedAt     DateTime? // medical records are archived, never hard-deleted

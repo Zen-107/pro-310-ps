@@ -1,70 +1,68 @@
+import { randomBytes } from 'crypto';
+import { NextResponse } from 'next/server';
+import type { Gender } from '@prisma/client';
 import { db } from '@/lib/db';
-import { NextRequest, NextResponse } from 'next/server';
+import { requireApiUser } from '@/lib/auth-guard';
+import { patientScope } from '@/lib/access';
+import { badRequest, jsonError, optionalString, readJson, serverError } from '@/lib/api-utils';
+import { dateOnly, isValidDay } from '@/lib/dates';
+import { hashPassword } from '@/lib/password';
+import { buildPatientSummaries } from '@/lib/patient-summary';
 
+const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER', 'UNSPECIFIED'];
+
+// Care-team patients of the signed-in clinician
 export async function GET() {
+  const auth = await requireApiUser(['CLINICIAN']);
+  if ('response' in auth) return auth.response;
   try {
-    const patients = await db.patient.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // Enrich with session counts
-    const enriched = await Promise.all(
-      patients.map(async (p) => {
-        const completedCount = await db.session.count({
-          where: { patientId: p.id, status: 'completed' },
-        });
-        const recent7d = await db.session.count({
-          where: {
-            patientId: p.id,
-            status: 'completed',
-            startedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-          },
-        });
-        const lastSession = await db.session.findFirst({
-          where: { patientId: p.id, status: 'completed' },
-          orderBy: { startedAt: 'desc' },
-          select: { avgAccuracy: true },
-        });
-        return {
-          ...p,
-          assignedExerciseIds: JSON.parse(p.assignedExerciseIds),
-          totalSessions: completedCount,
-          recentSessions7d: recent7d,
-          latestAccuracy: lastSession ? Math.round(lastSession.avgAccuracy) : 0,
-        };
-      })
-    );
-
-    return NextResponse.json(enriched);
+    const patients = await db.patient.findMany({ where: patientScope(auth.user), orderBy: { createdAt: 'desc' } });
+    return NextResponse.json(await buildPatientSummaries(patients));
   } catch (error) {
-    console.error('Patients GET error:', error);
-    return NextResponse.json({ error: 'Failed to fetch patients' }, { status: 500 });
+    return serverError('Patients GET error', error);
   }
 }
 
-export async function POST(req: NextRequest) {
+// Register a patient in the clinician's organization (clinician becomes PRIMARY).
+// With `email`, a login is created and a one-time temporary password returned.
+export async function POST(req: Request) {
+  const auth = await requireApiUser(['CLINICIAN']);
+  if ('response' in auth) return auth.response;
+  const body = await readJson(req);
+  if (!body) return badRequest('Invalid JSON body');
+
+  const name = optionalString(body.name, 200);
+  if (!name) return badRequest('name is required');
+  if (body.dateOfBirth != null && !isValidDay(body.dateOfBirth)) return badRequest('dateOfBirth must be YYYY-MM-DD');
+  const gender = (body.gender ?? 'UNSPECIFIED') as Gender;
+  if (!GENDERS.includes(gender)) return badRequest(`gender must be one of ${GENDERS.join(', ')}`);
+  const email = typeof body.email === 'string' && body.email.trim() ? body.email.trim().toLowerCase() : null;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return badRequest('email is invalid');
+
   try {
-    const body = await req.json();
-    const { name, age, gender, condition, phone } = body;
+    const clinician = await db.clinician.findUnique({ where: { id: auth.user.clinicianId! } });
+    if (!clinician) return jsonError('Clinician profile not found', 403);
+    if (email && (await db.user.findUnique({ where: { email } }))) return jsonError('Email already in use', 409);
 
-    if (!name || !name.trim()) {
-      return NextResponse.json({ error: 'ชื่อจำเป็นต้องกรอก' }, { status: 400 });
-    }
-
+    const temporaryPassword = email ? randomBytes(9).toString('base64url') : null;
     const patient = await db.patient.create({
       data: {
-        name: name.trim(),
-        age: age || null,
-        gender: gender || 'ไม่ระบุ',
-        condition: condition || '',
-        phone: phone || '',
-        assignedExerciseIds: '[]',
+        name,
+        dateOfBirth: body.dateOfBirth ? dateOnly(body.dateOfBirth as string) : null,
+        gender,
+        condition: optionalString(body.condition) ?? null,
+        phone: optionalString(body.phone, 50) ?? null,
+        organization: { connect: { id: clinician.organizationId } },
+        careAssignments: { create: { clinicianId: clinician.id, role: 'PRIMARY' } },
+        ...(email && temporaryPassword
+          ? { user: { create: { email, name, role: 'PATIENT' as const, passwordHash: await hashPassword(temporaryPassword) } } }
+          : {}),
       },
     });
 
-    return NextResponse.json({ ...patient, assignedExerciseIds: [], totalSessions: 0, recentSessions7d: 0, latestAccuracy: 0 });
+    const [summary] = await buildPatientSummaries([patient]);
+    return NextResponse.json({ ...summary, loginEmail: email, temporaryPassword }, { status: 201 });
   } catch (error) {
-    console.error('Patients POST error:', error);
-    return NextResponse.json({ error: 'Failed to create patient' }, { status: 500 });
+    return serverError('Patients POST error', error);
   }
 }

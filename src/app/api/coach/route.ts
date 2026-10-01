@@ -1,5 +1,6 @@
 import ZAI from 'z-ai-web-dev-sdk';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiUser } from '@/lib/auth-guard';
 
 const SYSTEM_PROMPT = `คุณคือ AI Physio Coach — นักกายภาพบำบัด AI ที่เป็นมิตรและเป็นกันเอง
 คุณมีหน้าที่:
@@ -32,6 +33,10 @@ async function getZAI() {
 }
 
 export async function POST(req: NextRequest) {
+  // Paid AI service: only signed-in patients during a session
+  const auth = await requireApiUser(['PATIENT']);
+  if ('response' in auth) return auth.response;
+
   try {
     const { exerciseName, currentAngles, targetJoints, repCount, setCount } = await req.json();
 

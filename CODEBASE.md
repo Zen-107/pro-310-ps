@@ -16,20 +16,17 @@ project-root/
 │   │   ├── login/page.tsx           # Email/password sign-in
 │   │   ├── layout.tsx               # Global layout + metadata
 │   │   ├── globals.css              # Global styles
-│   │   └── api/                     # API routes (Backend)
-│   │       ├── seed/                # POST: Initialize database with exercises & sample patients
-│   │       ├── coach/               # POST: AI Coach feedback (z-ai LLM integration)
-│   │       ├── exercises/           # GET: List all exercises
-│   │       ├── patients/            # GET/POST: Patient CRUD operations
-│   │       │   └── [id]/            # GET: Fetch single patient with session history
-│   │       ├── sessions/            # GET/POST: Session management
-│   │       │   ├── [id]/            # GET: Fetch single session details
-│   │       │   └── [id]/logs/       # POST: Save joint angle logs during session
-│   │       ├── reports/             # GET/POST: Clinical report generation (AI powered)
-│   │       │   └── [sessionId]/     # GET/POST: Generate clinical summary with z-ai
-│   │       ├── stats/               # GET: Fetch statistics & trends for patient
-│   │       ├── profile/             # GET: Fetch current user profile
-│   │       ├── tts/                 # POST: Text-to-speech for AI Coach feedback
+│   │   └── api/                     # API routes (all require login; role + care-team scoped)
+│   │       ├── auth/[...nextauth]/  # next-auth
+│   │       ├── me/                  # GET: signed-in profile
+│   │       ├── exercises/           # GET: published library (targets, formulas, citations)
+│   │       ├── patients/            # GET/POST (clinician)  · [id]/ GET/PATCH/DELETE(archive)
+│   │       ├── prescriptions/       # GET/POST · [id]/ · [id]/items/ · [id]/items/[itemId]/
+│   │       ├── quests/              # GET history · today/ GET (patient, generated on demand)
+│   │       ├── sessions/            # GET/POST · [id]/ GET/PATCH · [id]/logs/ · [id]/review/
+│   │       ├── reports/[sessionId]/ # GET metrics+formulas · POST AI summary (stored)
+│   │       ├── stats/               # GET progress statistics
+│   │       ├── coach/ · tts/        # AI coach + speech (patient)
 │   │       └── route.ts             # Root API health check
 │   │
 │   ├── components/
@@ -95,46 +92,51 @@ project-root/
 
 ## 🌐 API Endpoints Quick Reference
 
-### Seed & Setup
-- ~~POST /api/seed~~ — replaced by `bun run db:seed` (route will be removed in the API refactor)
-
-### Exercises
-- **GET /api/exercises** — List all exercises with details
-- **GET /api/exercises?category=knee** — Filter by category
-
-### Patients
-- **GET /api/patients** — List all patients with summary stats
-- **GET /api/patients/[id]** — Get patient detail + session history
-- **POST /api/patients** — Create new patient
-
-### Sessions
-- **GET /api/sessions** — List all sessions across patients
-- **GET /api/sessions?patientId=[id]** — Filter sessions by patient
-- **POST /api/sessions** — Create new session for exercise
-  - Body: `{ exerciseId, patientId }`
-  - Returns: `{ id, exerciseId, patientId, startedAt, status }`
-- **GET /api/sessions/[id]** — Get session details with logs
-- **POST /api/sessions/[id]/logs** — Save joint angle logs (batched, max 200 rows per request)
-  - Body: `{ logs: [{ repNumber, jointName, angle, idealAngle, deviation, isCorrect }, ...] }` (a single log object is also accepted)
-
-### AI Coach
-- **POST /api/coach** — Generate AI feedback based on current angles
-  - Input: `{ exerciseName, currentAngles, targetJoints, repCount, setCount }`
-  - Output: `{ feedback: "เข่าขวางอได้ดี! แต่ลองงออีกนิด..." }`
-
-### Clinical Reports
-- **GET /api/reports/[sessionId]** — Fetch session summary (joint by joint)
-- **POST /api/reports/[sessionId]** — Generate clinical summary with LLM
-  - Output: `{ sessionId, exerciseName, jointReport, clinicalSummary, generatedAt }`
-
-### Stats & Analytics
-- **GET /api/stats?patientId=[id]&days=30** — Fetch time-series stats
-  - Output: `{ dailyData, totalSessions, avgAccuracy, categoryData, romData }`
+Every route requires a signed-in user (next-auth session cookie). **Scope:** a PATIENT sees only their own data; a CLINICIAN sees patients they have a `CareAssignment` with. Records outside scope return **404** (IDs are not leaked); wrong role returns **403**.
 
 ### Account
-- **GET /api/me** — Signed-in user + clinician/patient profile (requires login)
+- **GET /api/me** — signed-in user + clinician/patient profile
 - **/api/auth/*** — next-auth (sign-in, sign-out, session, csrf)
-- ~~GET /api/profile~~ — superseded by /api/me (removed in the API refactor)
+
+### Exercises (any role)
+- **GET /api/exercises** — PUBLISHED library with `targetJoints` (formula, isPrimary, rationale) and `references` (citations); filters `?category=&bodyPart=&difficulty=`
+
+### Patients (CLINICIAN, care team)
+- **GET /api/patients** — care-team patients with summary stats
+- **POST /api/patients** — register a patient in your organization (you become PRIMARY). Optional `email` creates a login and returns a one-time `temporaryPassword`
+- **GET /api/patients/[id]** — detail: summary, recent sessions, ROM per exercise, joint trends, care team (a PATIENT may read their own record without clinical notes/alerts)
+- **PATCH /api/patients/[id]** — profile fields and `clinicalNotes`
+- **DELETE /api/patients/[id]** — archive (never hard-deleted)
+
+### Prescriptions (CLINICIAN writes; PATIENT reads own)
+- **GET /api/prescriptions?patientId=** — with items and merged targets
+- **POST /api/prescriptions** — `{ patientId, title, notes?, startDate?, endDate?, items? }`
+- **GET / PATCH / DELETE /api/prescriptions/[id]** — DELETE = cancel
+- **POST /api/prescriptions/[id]/items** — `{ exerciseId, sets?, repsPerSet?, restSeconds?, daysOfWeek?, targetOverrides? }` (PUBLISHED exercises only; override joints must exist on the exercise; min ≤ ideal ≤ max)
+- **PATCH / DELETE /api/prescriptions/[id]/items/[itemId]** — `targetOverrides` replaces all overrides
+
+### Quests
+- **GET /api/quests/today** (PATIENT) — today's quests, generated on demand from active prescriptions (Asia/Bangkok calendar); earlier unfinished quests become MISSED
+- **GET /api/quests?patientId=&days=14** — history + adherence %
+
+### Sessions
+- **GET /api/sessions?patientId=&status=&limit=** — sessions in scope
+- **POST /api/sessions** (PATIENT) — `{ questId }` or `{ exerciseId }` (free practice). Snapshots merged targets, formulas and algorithm version; returns the exercise to run
+- **GET /api/sessions/[id]** — metrics, target snapshot, reps, joint logs, review
+- **PATCH /api/sessions/[id]** (owning PATIENT, once) — `{ status: COMPLETED|CANCELLED, totalReps, avgAccuracy, romMinAngle, romMaxAngle, primaryJoint }`; server sets `endedAt`, `romDegrees` and the quest status
+- **POST /api/sessions/[id]/logs** (owning PATIENT) — `{ reps: [...], logs: [...] }`, ≤ 200 rows/request; logs link to reps by `repNumber`; locked after review
+- **POST /api/sessions/[id]/review** (CLINICIAN) — `{ status: APPROVED|NEEDS_ATTENTION, comment? }`
+
+### Reports
+- **GET /api/reports/[sessionId]** — metrics with explicit formulas (`angleDefinition`, `scoring`), targets (basis + rationale), per-joint and per-rep results, stored AI summary, review (AI summary and review comment are clinician-only)
+- **POST /api/reports/[sessionId]** (CLINICIAN) — generate + store an AI clinical summary
+
+### Stats
+- **GET /api/stats?patientId=&days=30** — `profile` (streak, totals), `dailyData`, `categoryData`, `romData`
+
+### AI Coach (PATIENT)
+- **POST /api/coach** — feedback from current visible target angles
+- **POST /api/tts** — text-to-speech for coach feedback
 
 ---
 
@@ -456,8 +458,8 @@ const [statsData, setStatsData] = useState<StatsData>();  // dailyData, avgAccur
 const [loading, setLoading] = useState(true);
 
 useEffect(() => {
-  // Fetch /api/profile
-  // Fetch /api/stats?patientId=X&days=30
+  // Fetch /api/stats?days=30   (includes profile: streak, totals)
+  // Fetch /api/quests/today     (today's prescribed quests)
 }, [currentPatientId]);
 ```
 
@@ -590,8 +592,8 @@ bun run db:studio          # browse data
 # 1. Start dev server
 bun run dev
 
-# 2. Seed data
-curl -X POST http://localhost:3000/api/seed
+# 2. Seed data (wipes the database)
+bun run db:seed
 
 # 3. Open browser
 # http://localhost:3000

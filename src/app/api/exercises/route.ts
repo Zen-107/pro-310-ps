@@ -1,32 +1,35 @@
-import { db } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
+import type { BodyPart, Difficulty, ExerciseCategory, Prisma } from '@prisma/client';
+import { db } from '@/lib/db';
+import { requireApiUser } from '@/lib/auth-guard';
+import { serverError } from '@/lib/api-utils';
+import { exerciseDTO, exerciseInclude } from '@/lib/presenters';
 
+const CATEGORIES: ExerciseCategory[] = ['knee', 'shoulder', 'hip', 'back', 'neck', 'ankle'];
+const BODY_PARTS: BodyPart[] = ['upper', 'lower', 'full'];
+const DIFFICULTIES: Difficulty[] = ['beginner', 'intermediate', 'advanced'];
+
+// Published exercise library (with targets, formulas and citations)
 export async function GET(req: NextRequest) {
+  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  if ('response' in auth) return auth.response;
+
+  const params = req.nextUrl.searchParams;
+  const pick = <T extends string>(key: string, allowed: T[]) => {
+    const v = params.get(key) as T | null;
+    return v && allowed.includes(v) ? v : undefined;
+  };
+  const where: Prisma.ExerciseWhereInput = {
+    status: 'PUBLISHED',
+    category: pick('category', CATEGORIES),
+    bodyPart: pick('bodyPart', BODY_PARTS),
+    difficulty: pick('difficulty', DIFFICULTIES),
+  };
+
   try {
-    const { searchParams } = new URL(req.url);
-    const category = searchParams.get('category');
-    const bodyPart = searchParams.get('bodyPart');
-    const difficulty = searchParams.get('difficulty');
-
-    const exercises = await db.exercise.findMany({
-      where: {
-        ...(category && category !== 'all' ? { category } : {}),
-        ...(bodyPart && bodyPart !== 'all' ? { bodyPart } : {}),
-        ...(difficulty && difficulty !== 'all' ? { difficulty } : {}),
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    // Parse JSON fields
-    const parsed = exercises.map((ex) => ({
-      ...ex,
-      instructions: JSON.parse(ex.instructions),
-      targetJoints: JSON.parse(ex.targetJoints),
-    }));
-
-    return NextResponse.json(parsed);
+    const exercises = await db.exercise.findMany({ where, include: exerciseInclude, orderBy: { createdAt: 'asc' } });
+    return NextResponse.json(exercises.map((ex) => exerciseDTO(ex)));
   } catch (error) {
-    console.error('Exercises GET error:', error);
-    return NextResponse.json({ error: 'Failed to fetch exercises' }, { status: 500 });
+    return serverError('Exercises GET error', error);
   }
 }

@@ -1,7 +1,12 @@
 import ZAI from 'z-ai-web-dev-sdk';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiUser } from '@/lib/auth-guard';
 
 export async function POST(req: NextRequest) {
+  // Paid AI service: only signed-in patients during a session
+  const auth = await requireApiUser(['PATIENT']);
+  if ('response' in auth) return auth.response;
+
   try {
     const { text } = await req.json();
 
