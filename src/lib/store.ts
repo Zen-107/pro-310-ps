@@ -1,17 +1,11 @@
 import { create } from 'zustand';
 
-export type UserRole = 'patient' | 'doctor';
-
 export type PatientTab = 'dashboard' | 'exercises' | 'camera' | 'history';
 export type DoctorTab = 'overview' | 'patients' | 'reports' | 'plans';
 
 export type ActiveTab = PatientTab | DoctorTab;
 
 interface AppState {
-  // Role
-  role: UserRole;
-  setRole: (role: UserRole) => void;
-
   // Navigation
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
@@ -52,13 +46,6 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  role: 'patient',
-  setRole: (role) => {
-    set({ role, selectedPatientId: null });
-    if (role === 'patient') set({ activeTab: 'dashboard' });
-    else set({ activeTab: 'overview' });
-  },
-
   activeTab: 'dashboard',
   setActiveTab: (tab) => set({ activeTab: tab }),
 

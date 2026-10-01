@@ -12,7 +12,8 @@
 project-root/
 ├── src/
 │   ├── app/                          # Next.js App Router
-│   │   ├── page.tsx                 # Main entry point (role switcher: patient/doctor)
+│   │   ├── page.tsx                 # Server entry: requires login, renders AppShell by role
+│   │   ├── login/page.tsx           # Email/password sign-in
 │   │   ├── layout.tsx               # Global layout + metadata
 │   │   ├── globals.css              # Global styles
 │   │   └── api/                     # API routes (Backend)
@@ -38,7 +39,6 @@ project-root/
 │   │   │   └── sonner.tsx           # Toaster for `toast()` from 'sonner' (mounted in layout.tsx)
 │   │   │
 │   │   └── physio/                  # Custom physio app components
-│   │       ├── patient-selector.tsx        # Screen: Select which patient identity to use
 │   │       ├── live-session-view.tsx       # Screen: Live camera + skeleton overlay + real-time angle feedback
 │   │       ├── dashboard-view.tsx          # Screen: Patient progress, stats, streak, badges
 │   │       ├── exercises-view.tsx          # Screen: Browse & filter exercises by category
@@ -131,8 +131,10 @@ project-root/
 - **GET /api/stats?patientId=[id]&days=30** — Fetch time-series stats
   - Output: `{ dailyData, totalSessions, avgAccuracy, categoryData, romData }`
 
-### Profile
-- **GET /api/profile** — Fetch current user/patient info
+### Account
+- **GET /api/me** — Signed-in user + clinician/patient profile (requires login)
+- **/api/auth/*** — next-auth (sign-in, sign-out, session, csrf)
+- ~~GET /api/profile~~ — superseded by /api/me (removed in the API refactor)
 
 ---
 
@@ -167,6 +169,17 @@ Exercise (DRAFT | PUBLISHED | RETIRED)
 - Patients are archived (`archivedAt`), never hard-deleted.
 - `streak` / total minutes are computed from sessions, not stored.
 
+## 🔐 Authentication (next-auth v4)
+
+- **Credentials login** (email + password) at `/login`; passwords hashed with scrypt (`src/lib/password.ts`).
+- **JWT sessions** (8 h). The token carries `role` (`CLINICIAN` | `PATIENT` | `ADMIN`), `clinicianId`, `patientId` and `organizationId` (`src/lib/auth.ts`, types in `src/types/next-auth.d.ts`).
+- **Pages:** `src/app/page.tsx` is a server component — no session → redirect to `/login`. The role decides which tabs `AppShell` shows (clinician dashboard vs patient app). Admin accounts have no screens yet.
+- **API routes:** guard with `requireApiUser(roles?)` from `src/lib/auth-guard.ts` (401 when signed out, 403 for the wrong role). `GET /api/me` returns the signed-in user's profile.
+- Unknown emails still run a password check (constant-ish timing); `callbackUrl` only accepts same-site paths.
+- Env: `NEXTAUTH_URL`, `NEXTAUTH_SECRET` (see `.env.example`).
+
+---
+
 ## 🔑 Key Files Explained
 
 ### **src/lib/store.ts** — Global State Management (Zustand)
@@ -174,9 +187,7 @@ Exercise (DRAFT | PUBLISHED | RETIRED)
 Manages all client-side state:
 ```typescript
 interface AppState {
-  // Role switching
-  role: 'patient' | 'doctor';
-  setRole: (role) => void;
+  // (role now comes from the login session, not the store)
   
   // Navigation
   activeTab: 'dashboard' | 'exercises' | 'camera' | 'history' | 'overview' | 'patients' | 'reports' | 'plans';
@@ -207,7 +218,7 @@ interface AppState {
 
 **Usage in components:**
 ```tsx
-const { role, setRole, activeTab, setActiveTab, currentSessionId } = useAppStore();
+const { activeTab, setActiveTab, currentSessionId } = useAppStore();
 ```
 
 ---
