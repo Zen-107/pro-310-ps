@@ -91,7 +91,7 @@ export function HistoryView() {
   });
 
   // Stats calculations
-  const completedSessions = sessions.filter((s) => s.status === 'completed');
+  const completedSessions = sessions.filter((s) => s.status === 'COMPLETED');
   const avgAccuracy =
     completedSessions.length > 0
       ? Math.round(
@@ -370,12 +370,12 @@ export function HistoryView() {
                               <Badge
                                 variant="secondary"
                                 className={
-                                  session.status === 'completed'
+                                  session.status === 'COMPLETED'
                                     ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
                                     : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                                 }
                               >
-                                {session.status === 'completed' ? 'สำเร็จ' : 'ไม่สำเร็จ'}
+                                {session.status === 'COMPLETED' ? 'สำเร็จ' : 'ไม่สำเร็จ'}
                               </Badge>
                             </div>
                             <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">

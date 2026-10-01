@@ -21,6 +21,9 @@ interface AppState {
   // Exercise selection
   selectedExerciseId: string | null;
   setSelectedExerciseId: (id: string | null) => void;
+  // Patient: quest picked on the dashboard → highlighted in the camera tab
+  selectedQuestId: string | null;
+  setSelectedQuestId: (id: string | null) => void;
 
   // Session state
   isSessionActive: boolean;
@@ -57,6 +60,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   selectedExerciseId: null,
   setSelectedExerciseId: (id) => set({ selectedExerciseId: id }),
+  selectedQuestId: null,
+  setSelectedQuestId: (id) => set({ selectedQuestId: id }),
 
   isSessionActive: false,
   setIsSessionActive: (active) => set({ isSessionActive: active }),

@@ -43,6 +43,19 @@ import { useAppStore } from '@/lib/store';
 // Types
 // ---------------------------------------------------------------------------
 
+interface QuestSummary {
+  id: string;
+  status: string;
+  prescription: { clinicianName: string };
+  exercise: { nameTh: string; sets: number; repsPerSet: number };
+}
+
+interface TodayQuests {
+  total: number;
+  completed: number;
+  quests: QuestSummary[];
+}
+
 interface ProfileData {
   id: string;
   name: string;
@@ -248,28 +261,33 @@ function isBadgeEarned(
 export function DashboardView({ onStartSession }: { onStartSession: () => void }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<StatsData | null>(null);
+  const [quests, setQuests] = useState<TodayQuests | null>(null);
   const [loading, setLoading] = useState(true);
 
   const currentPatientId = useAppStore((s) => s.currentPatientId);
+  const setSelectedQuestId = useAppStore((s) => s.setSelectedQuestId);
 
   useEffect(() => {
     let cancelled = false;
     async function fetchData() {
       try {
         if (!currentPatientId) return;
-        const [profileRes, statsRes] = await Promise.all([
-          fetch(`/api/profile?patientId=${currentPatientId}`),
-          fetch(`/api/stats?days=30&patientId=${currentPatientId}`),
+        const [statsRes, questsRes] = await Promise.all([
+          fetch('/api/stats?days=30'),
+          fetch('/api/quests/today'),
         ]);
-
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          if (!cancelled) setProfile(profileData);
-        }
 
         if (statsRes.ok) {
           const statsData = await statsRes.json();
-          if (!cancelled) setStats(statsData);
+          if (!cancelled) {
+            setStats(statsData);
+            setProfile(statsData.profile ?? null);
+          }
+        }
+
+        if (questsRes.ok) {
+          const questData = await questsRes.json();
+          if (!cancelled) setQuests(questData);
         }
       } catch {
         // Silently handle — skeletons will remain shown
@@ -349,6 +367,59 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
               <Play className="size-5" />
               เริ่มฝึกกายภาพ
             </Button>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* ── Today's Quests ── */}
+      <motion.div variants={itemVariants}>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center justify-between text-base">
+              <span className="flex items-center gap-2">
+                <Target className="h-4 w-4 text-emerald-600" />
+                ภารกิจวันนี้
+              </span>
+              {quests && quests.total > 0 && (
+                <Badge variant="secondary">
+                  {quests.completed}/{quests.total} สำเร็จ
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {loading ? (
+              <Skeleton className="h-14 w-full" />
+            ) : !quests || quests.total === 0 ? (
+              <p className="text-sm text-muted-foreground">วันนี้ไม่มีภารกิจจากแพทย์/นักกายภาพ</p>
+            ) : (
+              quests.quests.map((q) => (
+                <div key={q.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{q.exercise.nameTh}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {q.exercise.sets} เซ็ต × {q.exercise.repsPerSet} ครั้ง · {q.prescription.clinicianName}
+                    </p>
+                  </div>
+                  {q.status === 'COMPLETED' ? (
+                    <Badge className="shrink-0 bg-emerald-600 text-white">
+                      <CheckCircle className="mr-1 h-3 w-3" /> สำเร็จ
+                    </Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700"
+                      onClick={() => {
+                        setSelectedQuestId(q.id);
+                        onStartSession();
+                      }}
+                    >
+                      <Play className="mr-1 h-3.5 w-3.5" /> เริ่ม
+                    </Button>
+                  )}
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
       </motion.div>

@@ -20,6 +20,14 @@ import { useAppStore } from '@/lib/store';
 import { categoryLabel } from '@/lib/exercises-data';
 import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
 import {
+  ReportFormulas,
+  ReportReps,
+  ReviewPanel,
+  type ReportRep,
+  type ReportReview,
+  type ReportTarget,
+} from '@/components/physio/report-transparency';
+import {
   FileText,
   RefreshCw,
   Loader2,
@@ -66,6 +74,10 @@ interface Session {
 
 interface JointReport {
   joint: string;
+  nameTh: string;
+  formula: string | null;
+  target: { idealAngle: number; minAngle: number; maxAngle: number; angleBasis: string } | null;
+  samples: number;
   avgAngle: number;
   maxAngle: number;
   minAngle: number;
@@ -79,13 +91,24 @@ interface ReportData {
   exerciseNameEn: string;
   category: string;
   startedAt: string;
-  endedAt: string;
+  endedAt: string | null;
+  status: string;
   totalReps: number;
   avgAccuracy: number;
   maxRom: number;
+  romMinAngle: number | null;
+  romMaxAngle: number | null;
+  primaryJoint: string | null;
+  algorithmVersion: string;
+  angleDefinition: string;
+  scoring: Record<string, string>;
+  targets: ReportTarget[];
   jointReport: JointReport[];
-  clinicalSummary: string;
-  generatedAt: string;
+  reps: ReportRep[];
+  /** Latest stored AI summary (null until generated) */
+  clinicalSummary: string | null;
+  generatedAt: string | null;
+  review: ReportReview | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -133,6 +156,7 @@ export function DoctorReports() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [report, setReport] = useState<ReportData | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   /* ---- Fetch patients ---- */
@@ -204,7 +228,24 @@ export function DoctorReports() {
     setSelectedPatientId(value);
   }
 
-  /* ---- Generate / regenerate report ---- */
+  /* ---- Open a session's report (metrics, formulas, stored AI summary) ---- */
+  async function openReport(sessionId: string) {
+    setSelectedSessionId(sessionId);
+    setLoadingReport(true);
+    setReport(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reports/${sessionId}`);
+      if (!res.ok) throw new Error('ไม่สามารถโหลดรายงานได้');
+      setReport(await res.json());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+    } finally {
+      setLoadingReport(false);
+    }
+  }
+
+  /* ---- Generate / regenerate the AI clinical summary ---- */
   async function generateReport(sessionId: string) {
     setSelectedSessionId(sessionId);
     setGenerating(true);
@@ -227,7 +268,7 @@ export function DoctorReports() {
 
   /* ---- Derived data ---- */
   const completedSessions = useMemo(
-    () => sessions.filter((s) => s.status === 'completed'),
+    () => sessions.filter((s) => s.status === 'COMPLETED'),
     [sessions]
   );
 
@@ -316,7 +357,7 @@ export function DoctorReports() {
 
       {/* ---- Report Display Area ---- */}
       <AnimatePresence mode="wait">
-        {(report || generating || error) && activePatientId && (
+        {(report || generating || loadingReport || error) && activePatientId && (
           <motion.div
             key="report"
             initial={{ opacity: 0, y: 20 }}
@@ -340,8 +381,8 @@ export function DoctorReports() {
                       </h3>
                       <p className="text-xs text-slate-300 truncate">
                         {report
-                          ? `หมวด ${categoryLabel(report.category)} · สร้างเมื่อ ${formatThaiDate(report.generatedAt)}`
-                          : 'AI กำลังวิเคราะห์ข้อมูลเซสชัน...'}
+                          ? `หมวด ${categoryLabel(report.category)} · ${report.generatedAt ? `สรุป AI เมื่อ ${formatThaiDate(report.generatedAt)}` : 'ยังไม่มีสรุป AI'}`
+                          : generating ? 'AI กำลังวิเคราะห์ข้อมูลเซสชัน...' : 'กำลังโหลดรายงาน...'}
                       </p>
                     </div>
                   </div>
@@ -353,7 +394,7 @@ export function DoctorReports() {
                       onClick={() => generateReport(selectedSessionId)}
                     >
                       <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                      สร้างใหม่
+                      {report.clinicalSummary ? 'สร้างสรุปใหม่' : 'สร้างสรุป AI'}
                     </Button>
                   )}
                 </div>
@@ -361,7 +402,7 @@ export function DoctorReports() {
 
               <CardContent className="p-5 sm:p-6 space-y-6">
                 {/* Loading spinner state */}
-                {generating && !report && (
+                {(generating || loadingReport) && !report && (
                   <div className="py-16 flex flex-col items-center">
                     <div className="relative mb-4">
                       <Loader2 className="h-12 w-12 animate-spin text-emerald-500" />
@@ -398,7 +439,7 @@ export function DoctorReports() {
                 )}
 
                 {/* Report content */}
-                {report && !generating && (
+                {report && !generating && !loadingReport && (
                   <>
                     {/* ---- Stats Row ---- */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -501,7 +542,14 @@ export function DoctorReports() {
                                     transition={{ delay: 0.3 + i * 0.06 }}
                                     className="border-t last:border-b-0 hover:bg-muted/30 transition-colors"
                                   >
-                                    <td className="p-3 font-medium">{j.joint}</td>
+                                    <td className="p-3">
+                                      <span className="font-medium">{j.nameTh}</span>
+                                      {j.target && (
+                                        <div className="text-[11px] text-muted-foreground tabular-nums">
+                                          เป้าหมาย {j.target.minAngle}°–{j.target.maxAngle}° · {j.samples} ครั้ง
+                                        </div>
+                                      )}
+                                    </td>
                                     <td className="p-3 text-center font-bold tabular-nums">
                                       {j.avgAngle}°
                                     </td>
@@ -543,6 +591,20 @@ export function DoctorReports() {
 
                     <Separator />
 
+                    <ReportFormulas
+                      angleDefinition={report.angleDefinition}
+                      scoring={report.scoring}
+                      targets={report.targets}
+                      algorithmVersion={report.algorithmVersion}
+                      romMinAngle={report.romMinAngle}
+                      romMaxAngle={report.romMaxAngle}
+                      primaryJoint={report.primaryJoint}
+                    />
+
+                    <ReportReps reps={report.reps} />
+
+                    <Separator />
+
                     {/* ---- Clinical Summary (Markdown) ---- */}
                     <motion.div
                       initial={{ opacity: 0, y: 10 }}
@@ -554,13 +616,34 @@ export function DoctorReports() {
                         สรุปคลินิก (AI)
                       </h4>
                       <div className="prose prose-sm max-w-none dark:prose-invert p-5 rounded-xl bg-muted/40 border border-dashed border-muted-foreground/20 prose-headings:text-emerald-700 dark:prose-headings:text-emerald-400 prose-strong:text-foreground prose-li:marker:text-amber-500">
-                        <ReactMarkdown>{report.clinicalSummary}</ReactMarkdown>
+                        {report.clinicalSummary ? (
+                          <ReactMarkdown>{report.clinicalSummary}</ReactMarkdown>
+                        ) : (
+                          <div className="not-prose flex flex-col items-center gap-2 py-4 text-center">
+                            <p className="text-sm text-muted-foreground">ยังไม่มีสรุปคลินิกสำหรับเซสชันนี้</p>
+                            <Button size="sm" variant="outline" onClick={() => generateReport(report.sessionId)}>
+                              <Sparkles className="h-3.5 w-3.5 mr-1.5" /> สร้างสรุปด้วย AI
+                            </Button>
+                          </div>
+                        )}
                       </div>
                       <p className="text-[10px] text-muted-foreground/60 mt-2 px-1 italic">
                         หมายเหตุ: รายงานนี้สร้างโดย AI จากข้อมูลการตรวจจับท่าทาง
                         แพทย์ควรพิจารณาร่วมกับการตรวจแบบตัวต่อตัว
                       </p>
                     </motion.div>
+
+                    {report.status === 'COMPLETED' && (
+                      <>
+                        <Separator />
+                        <ReviewPanel
+                          key={report.sessionId}
+                          sessionId={report.sessionId}
+                          review={report.review}
+                          onReviewed={(review) => setReport((r) => (r ? { ...r, review } : r))}
+                        />
+                      </>
+                    )}
                   </>
                 )}
               </CardContent>
@@ -582,10 +665,10 @@ export function DoctorReports() {
                 <ClipboardList className="h-10 w-10 text-emerald-500/60" />
               </div>
               <p className="text-sm font-medium text-muted-foreground">
-                เลือกเซสชันจากรายการด้านล่างเพื่อสร้างรายงานคลินิก
+                เลือกเซสชันจากรายการด้านล่างเพื่อดูรายงานคลินิก
               </p>
               <p className="text-xs text-muted-foreground/70 mt-1">
-                ระบบจะใช้ AI วิเคราะห์ข้อมูลข้อต่อและสร้างสรุปผลอัตโนมัติ
+                แสดงสูตรคำนวณ ผลรายข้อต่อ/รายครั้ง สรุป AI และการรับรองผล
               </p>
             </CardContent>
           </Card>
@@ -625,7 +708,7 @@ export function DoctorReports() {
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.03 }}
-                      onClick={() => generateReport(s.id)}
+                      onClick={() => openReport(s.id)}
                       className={`
                         flex items-center justify-between p-3.5 rounded-xl cursor-pointer
                         transition-all duration-150 group

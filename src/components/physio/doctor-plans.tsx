@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -19,21 +19,18 @@ import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
 import { CATEGORIES, DIFFICULTY_COLORS, DIFFICULTY_LABELS } from '@/lib/exercises-data';
 import {
-  Dumbbell,
-  Clock,
-  Target,
-  ChevronDown,
-  ChevronRight,
-  StickyNote,
-  Layers,
+  ClipboardList,
+  Plus,
+  Trash2,
+  Save,
+  RotateCcw,
   UserCircle,
   Loader2,
-  FileText,
-  Timer,
-  BarChart3,
-  Zap,
-  AlertCircle,
+  Pause,
+  Play,
   CheckCircle2,
+  StickyNote,
+  Target,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -43,8 +40,16 @@ interface Patient {
   name: string;
   age: number | null;
   condition: string;
-  assignedExerciseIds: string[];
-  therapistNotes: string | null;
+}
+
+interface Target {
+  name: string;
+  nameTh: string;
+  idealAngle: number;
+  minAngle: number;
+  maxAngle: number;
+  isPrimary?: boolean;
+  overridden?: boolean;
 }
 
 interface Exercise {
@@ -56,678 +61,534 @@ interface Exercise {
   sets: number;
   repsPerSet: number;
   restSeconds: number;
-  targetJoints: unknown[];
-  icon: string;
-  bodyPart: string;
+  targetJoints: Target[];
 }
 
-// ── Constants ──────────────────────────────────────────────────────────
+interface PrescriptionItem {
+  id: string;
+  exerciseId: string;
+  sets: number;
+  repsPerSet: number;
+  restSeconds: number;
+  daysOfWeek: number[];
+  exercise: { id: string; nameTh: string; name: string; category: string; difficulty: string };
+  targets: Target[];
+}
+
+interface Prescription {
+  id: string;
+  title: string;
+  notes: string | null;
+  status: 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+  startDate: string;
+  clinician: { name: string };
+  items: PrescriptionItem[];
+}
+
+const DAY_LABELS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+const STATUS_LABEL: Record<Prescription['status'], string> = {
+  ACTIVE: 'ใช้งาน',
+  PAUSED: 'พักไว้',
+  COMPLETED: 'เสร็จสิ้น',
+  CANCELLED: 'ยกเลิก',
+};
+
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`);
+  return body as T;
+}
 
 // ── Component ──────────────────────────────────────────────────────────
 
 export function DoctorPlans() {
   const { selectedPatientId, setSelectedPatientId } = useAppStore();
 
-  // Data
   const [patients, setPatients] = useState<Patient[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [loadingPatients, setLoadingPatients] = useState(true);
-  const [loadingExercises, setLoadingExercises] = useState(true);
+  const [loading, setLoading] = useState(true);
 
-  // Local state for the selected patient
-  const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set());
+  const [prescriptions, setPrescriptions] = useState<Prescription[] | null>(null);
+  const [newTitle, setNewTitle] = useState('');
+  const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState('');
-  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
+  const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Saving states
-  const [savingExercises, setSavingExercises] = useState(false);
-  const [savingNotes, setSavingNotes] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-
-  // Debounce refs
-  const saveExerciseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveNotesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── Fetch patients ──────────────────────────────────────
+  // ── Load care-team patients + exercise library ──────────
   useEffect(() => {
-    fetch('/api/patients')
-      .then((r) => {
-        if (!r.ok) throw new Error(`Patients fetch failed: ${r.status}`);
-        return r.json();
+    let cancelled = false;
+    Promise.all([api<Patient[]>('/api/patients'), api<Exercise[]>('/api/exercises')])
+      .then(([p, e]) => {
+        if (cancelled) return;
+        setPatients(Array.isArray(p) ? p : []);
+        setExercises(Array.isArray(e) ? e : []);
       })
-      .then((d: Patient[]) => {
-        setPatients(Array.isArray(d) ? d : []);
-        setLoadingPatients(false);
-      })
-      .catch(() => {
-        toast.error('ไม่สามารถโหลดรายชื่อคนไข้ได้');
-        setLoadingPatients(false);
-      });
-  }, []);
-
-  // ── Fetch exercises ────────────────────────────────────
-  useEffect(() => {
-    fetch('/api/exercises')
-      .then((r) => {
-        if (!r.ok) throw new Error(`Exercises fetch failed: ${r.status}`);
-        return r.json();
-      })
-      .then((d: Exercise[]) => {
-        setExercises(Array.isArray(d) ? d : []);
-        setLoadingExercises(false);
-      })
-      .catch(() => {
-        toast.error('ไม่สามารถโหลดท่าบำบัดได้');
-        setLoadingExercises(false);
-      });
-  }, []);
-
-  // ── Sync state when selected patient changes (adjusted during render) ──
-  const [syncedFor, setSyncedFor] = useState<{ id: string | null; patients: Patient[] } | null>(null);
-  if (!syncedFor || syncedFor.id !== selectedPatientId || syncedFor.patients !== patients) {
-    setSyncedFor({ id: selectedPatientId, patients });
-    if (!selectedPatientId) {
-      setEnabledIds(new Set());
-      setNotes('');
-    } else {
-      const patient = patients.find((p) => p.id === selectedPatientId);
-      if (patient) {
-        setEnabledIds(new Set(patient.assignedExerciseIds || []));
-        setNotes(patient.therapistNotes || '');
-        // Expand all categories by default
-        setExpandedCats(new Set(CATEGORIES.map((c) => c.id)));
-      }
-    }
-  }
-
-  // ── Cleanup debounce timers on unmount ─────────────────
-  useEffect(() => {
+      .catch(() => toast.error('ไม่สามารถโหลดข้อมูลได้'))
+      .finally(() => !cancelled && setLoading(false));
     return () => {
-      if (saveExerciseTimer.current) clearTimeout(saveExerciseTimer.current);
-      if (saveNotesTimer.current) clearTimeout(saveNotesTimer.current);
+      cancelled = true;
     };
   }, []);
 
-  // ── Save exercise assignments (debounced) ──────────────
-  const saveExerciseAssignments = useCallback(
-    async (ids: string[]) => {
-      if (!selectedPatientId) return;
-      setSavingExercises(true);
-      try {
-        const res = await fetch(`/api/patients/${selectedPatientId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assignedExerciseIds: ids }),
-        });
-        if (!res.ok) throw new Error('Save failed');
-        setLastSavedAt(new Date());
-      } catch {
-        toast.error('บันทึกท่าบำบัดไม่สำเร็จ กรุณาลองอีกครั้ง');
-      } finally {
-        setSavingExercises(false);
-      }
-    },
-    [selectedPatientId],
-  );
-
-  // ── Save therapist notes (debounced) ───────────────────
-  const saveTherapistNotes = useCallback(
-    async (text: string) => {
-      if (!selectedPatientId) return;
-      setSavingNotes(true);
-      try {
-        const res = await fetch(`/api/patients/${selectedPatientId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ therapistNotes: text }),
-        });
-        if (!res.ok) throw new Error('Save failed');
-      } catch {
-        toast.error('บันทึกคำแนะนำไม่สำเร็จ กรุณาลองอีกครั้ง');
-      } finally {
-        setSavingNotes(false);
-      }
-    },
-    [selectedPatientId],
-  );
-
-  // ── Toggle exercise ────────────────────────────────────
-  function handleToggleExercise(id: string) {
-    setEnabledIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-
-      // Debounce auto-save (800ms)
-      const newIds = Array.from(next);
-      if (saveExerciseTimer.current) clearTimeout(saveExerciseTimer.current);
-      saveExerciseTimer.current = setTimeout(() => {
-        saveExerciseAssignments(newIds).then(() => {
-          toast.success('บันทึกแผนการรักษาเรียบร้อย', {
-            description: `${newIds.length} ท่าบำบัด`,
-          });
-        });
-      }, 800);
-
-      return next;
-    });
+  // ── Load prescriptions for the selected patient ─────────
+  const [prevPatientId, setPrevPatientId] = useState(selectedPatientId);
+  if (prevPatientId !== selectedPatientId) {
+    setPrevPatientId(selectedPatientId);
+    setPrescriptions(null);
   }
 
-  // ── Notes change ───────────────────────────────────────
+  useEffect(() => {
+    if (!selectedPatientId) return;
+    let cancelled = false;
+    api<Prescription[]>(`/api/prescriptions?patientId=${selectedPatientId}`)
+      .then((list) => {
+        if (cancelled) return;
+        setPrescriptions(list);
+        setNotes(list.find((p) => p.status === 'ACTIVE' || p.status === 'PAUSED')?.notes ?? '');
+      })
+      .catch(() => !cancelled && toast.error('ไม่สามารถโหลดแผนการรักษาได้'));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPatientId]);
+
+  useEffect(() => () => {
+    if (notesTimer.current) clearTimeout(notesTimer.current);
+  }, []);
+
+  // The plan being edited: the active (or paused) prescription
+  const plan = prescriptions?.find((p) => p.status === 'ACTIVE' || p.status === 'PAUSED') ?? null;
+  const replacePlan = (updated: Prescription) =>
+    setPrescriptions((list) => (list ? list.map((p) => (p.id === updated.id ? updated : p)) : [updated]));
+
+  async function run<T>(fn: () => Promise<T>, success?: string): Promise<T | null> {
+    setBusy(true);
+    try {
+      const result = await fn();
+      if (success) toast.success(success);
+      return result;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createPlan() {
+    if (!selectedPatientId) return;
+    const created = await run(
+      () => api<Prescription>('/api/prescriptions', {
+        method: 'POST',
+        body: JSON.stringify({ patientId: selectedPatientId, title: newTitle.trim() || 'แผนการรักษา' }),
+      }),
+      'สร้างแผนการรักษาแล้ว'
+    );
+    if (created) {
+      setPrescriptions((list) => [created, ...(list ?? [])]);
+      setNewTitle('');
+      setNotes('');
+    }
+  }
+
+  async function setStatus(status: Prescription['status']) {
+    if (!plan) return;
+    const updated = await run(
+      () => api<Prescription>(`/api/prescriptions/${plan.id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+      `สถานะแผน: ${STATUS_LABEL[status]}`
+    );
+    if (updated) replacePlan(updated);
+  }
+
   function handleNotesChange(value: string) {
     setNotes(value);
-    if (saveNotesTimer.current) clearTimeout(saveNotesTimer.current);
-    saveNotesTimer.current = setTimeout(() => {
-      saveTherapistNotes(value).then(() => {
+    if (!plan) return;
+    const planId = plan.id;
+    if (notesTimer.current) clearTimeout(notesTimer.current);
+    notesTimer.current = setTimeout(async () => {
+      try {
+        replacePlan(await api<Prescription>(`/api/prescriptions/${planId}`, { method: 'PATCH', body: JSON.stringify({ notes: value }) }));
         toast.success('บันทึกคำแนะนำเรียบร้อย');
-      });
-    }, 1200);
+      } catch {
+        toast.error('บันทึกคำแนะนำไม่สำเร็จ');
+      }
+    }, 1000);
   }
 
-  // ── Toggle category expand ─────────────────────────────
-  function toggleCat(catId: string) {
-    setExpandedCats((prev) => {
-      const next = new Set(prev);
-      if (next.has(catId)) next.delete(catId);
-      else next.add(catId);
-      return next;
-    });
+  async function addExercise(exerciseId: string) {
+    if (!plan) return;
+    const updated = await run(
+      () => api<Prescription>(`/api/prescriptions/${plan.id}/items`, { method: 'POST', body: JSON.stringify({ exerciseId }) }),
+      'เพิ่มท่าในแผนแล้ว'
+    );
+    if (updated) replacePlan(updated);
   }
 
-  // ── Computed ───────────────────────────────────────────
-  const enabledExercises = exercises.filter((e) => enabledIds.has(e.id));
-  const totalTime = enabledExercises.reduce(
-    (sum, e) => sum + e.sets * e.repsPerSet * 4 + e.sets * e.restSeconds,
-    0,
+  async function removeItem(itemId: string) {
+    if (!plan) return;
+    const updated = await run(
+      () => api<Prescription>(`/api/prescriptions/${plan.id}/items/${itemId}`, { method: 'DELETE' }),
+      'นำท่าออกจากแผนแล้ว'
+    );
+    if (updated) replacePlan(updated);
+  }
+
+  async function saveItem(itemId: string, body: Record<string, unknown>) {
+    if (!plan) return;
+    const updated = await run(
+      () => api<Prescription>(`/api/prescriptions/${plan.id}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+      'บันทึกการตั้งค่าท่าแล้ว'
+    );
+    if (updated) replacePlan(updated);
+  }
+
+  // ── Render ──────────────────────────────────────────────
+  if (loading) return <PlansSkeleton />;
+
+  const header = (
+    <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+      <div>
+        <h2 className="text-2xl font-bold tracking-tight">แผนการรักษา</h2>
+        <p className="text-muted-foreground mt-1">
+          กำหนดภารกิจรายวัน (ท่า, จำนวนเซ็ต/ครั้ง, วัน และมุมเป้าหมาย) ให้ผู้ป่วยแต่ละคน
+        </p>
+      </div>
+      {patients.length > 0 && (
+        <div className="w-full sm:w-72">
+          <Select value={selectedPatientId || undefined} onValueChange={setSelectedPatientId}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="เลือกคนไข้..." />
+            </SelectTrigger>
+            <SelectContent>
+              {patients.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                  {p.age ? ` (${p.age} ปี)` : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </div>
   );
-  const enabledCats = new Set(enabledExercises.map((e) => e.category));
-  const diffCount = { beginner: 0, intermediate: 0, advanced: 0 };
-  enabledExercises.forEach((e) => {
-    const d = e.difficulty as 'beginner' | 'intermediate' | 'advanced';
-    if (d in diffCount) diffCount[d]++;
-  });
 
+  if (!selectedPatientId || patients.length === 0) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <Card className="border-dashed border-2 border-muted-foreground/20 bg-muted/10">
+          <CardContent className="flex flex-col items-center justify-center py-16 px-6 text-center">
+            <UserCircle className="w-10 h-10 text-amber-600 mb-3" />
+            <h3 className="text-lg font-semibold mb-1">
+              {patients.length === 0 ? 'ยังไม่มีผู้ป่วยในความดูแล' : 'กรุณาเลือกคนไข้'}
+            </h3>
+            <p className="text-sm text-muted-foreground max-w-sm">
+              {patients.length === 0
+                ? 'ผู้ป่วยจะแสดงที่นี่เมื่อคุณอยู่ในทีมดูแล'
+                : 'เลือกคนไข้จากเมนูด้านบนเพื่อจัดแผนการรักษา'}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (prescriptions === null) return <PlansSkeleton />;
+
+  const selectedPatient = patients.find((p) => p.id === selectedPatientId);
+  const inPlan = new Set(plan?.items.map((i) => i.exerciseId));
   const exercisesByCat = CATEGORIES.map((cat) => ({
     ...cat,
     exercises: exercises.filter((e) => e.category === cat.id),
   })).filter((c) => c.exercises.length > 0);
 
-  const selectedPatient = patients.find((p) => p.id === selectedPatientId);
-
-  // ── Render: No patient selected ────────────────────────
-  const isLoading = loadingPatients || loadingExercises;
-  if (isLoading) return <PlansSkeleton />;
-
-  if (!selectedPatientId || patients.length === 0) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">แผนการรักษา</h2>
-          <p className="text-muted-foreground mt-1">
-            จัดการท่ากายภาพบำบัดที่กำหนดให้ผู้ป่วยแต่ละคน
-          </p>
-        </div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <Card className="border-dashed border-2 border-muted-foreground/20 bg-muted/10">
-            <CardContent className="flex flex-col items-center justify-center py-16 px-6 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center mb-4">
-                <UserCircle className="w-8 h-8 text-amber-600 dark:text-amber-400" />
-              </div>
-              <h3 className="text-lg font-semibold mb-1">
-                {patients.length === 0
-                  ? 'ยังไม่มีรายชื่อคนไข้'
-                  : 'กรุณาเลือกคนไข้'}
-              </h3>
-              <p className="text-sm text-muted-foreground max-w-sm">
-                {patients.length === 0
-                  ? 'เพิ่มคนไข้จากแท็บ "รายชื่อคนไข้" ก่อนจึงจะสามารถกำหนดแผนการรักษาได้'
-                  : 'เลือกคนไข้จากเมนูด้านล่างเพื่อเริ่มจัดท่ากายภาพบำบัด'}
-              </p>
-              {patients.length > 0 && (
-                <div className="mt-6 w-full max-w-xs">
-                  <Select
-                    value={selectedPatientId || undefined}
-                    onValueChange={setSelectedPatientId}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="เลือกคนไข้..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {patients.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                          {p.condition ? ` — ${p.condition}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // ── Render: Main view ──────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">แผนการรักษา</h2>
-          <p className="text-muted-foreground mt-1">
-            จัดการท่ากายภาพบำบัดที่กำหนดให้ผู้ป่วยแต่ละคน
-          </p>
-        </div>
-        {lastSavedAt && (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-xs text-muted-foreground flex items-center gap-1"
-          >
-            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-            บันทึกล่าสุดเมื่อ{' '}
-            {lastSavedAt.toLocaleTimeString('th-TH', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </motion.p>
-        )}
-      </div>
+      {header}
 
-      {/* Patient Selector */}
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-        <Card className="border-emerald-500/20">
-          <CardContent className="p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                  <UserCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <span className="text-sm font-medium whitespace-nowrap">
-                  คนไข้:
-                </span>
-              </div>
-              <Select
-                value={selectedPatientId || undefined}
-                onValueChange={(val) => {
-                  setSelectedPatientId(val);
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-72">
-                  <SelectValue placeholder="เลือกคนไข้..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {patients.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      <span className="flex items-center gap-2">
-                        {p.name}
-                        {p.age && (
-                          <span className="text-xs text-muted-foreground">
-                            ({p.age} ปี)
-                          </span>
-                        )}
-                        {p.condition && (
-                          <Badge
-                            variant="secondary"
-                            className="text-[10px] px-1.5 py-0 h-4"
-                          >
-                            {p.condition}
-                          </Badge>
-                        )}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Plan Summary */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05 }}
-      >
+      {!plan ? (
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Layers className="h-4 w-4 text-emerald-600" />
-              สรุปแผนการรักษา
-              {selectedPatient && (
-                <span className="text-muted-foreground font-normal">
-                  — {selectedPatient.name}
-                </span>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-              <StatPill
-                icon={<Dumbbell className="h-4 w-4" />}
-                value={String(enabledExercises.length)}
-                label="ท่าที่กำหนด"
-                color="emerald"
+          <CardContent className="p-6 space-y-3">
+            <p className="font-medium">{selectedPatient?.name} ยังไม่มีแผนการรักษาที่ใช้งานอยู่</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                placeholder="ชื่อแผน เช่น โปรแกรมฟื้นฟูเข่า ระยะที่ 1"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
               />
-              <StatPill
-                icon={<Timer className="h-4 w-4" />}
-                value={`${Math.round(totalTime / 60)}`}
-                unit="นาที"
-                label="เวลาโดยประมาณ"
-                color="amber"
-              />
-              <StatPill
-                icon={<BarChart3 className="h-4 w-4" />}
-                value={String(enabledCats.size)}
-                label="หมวดหมู่"
-                color="muted"
-              />
-              <StatPill
-                icon={<Zap className="h-4 w-4" />}
-                value={String(diffCount.beginner)}
-                label="เริ่มต้น"
-                color="emerald"
-              />
-              <StatPill
-                icon={<AlertCircle className="h-4 w-4" />}
-                value={String(diffCount.intermediate + diffCount.advanced)}
-                label="กลาง-สูง"
-                color="amber"
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Saving Indicator */}
-      <AnimatePresence>
-        {(savingExercises || savingNotes) && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
-              <span>กำลังบันทึก...</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Exercise List by Category */}
-      <div className="space-y-3">
-        {exercisesByCat.map((cat, idx) => {
-          const catEnabled = cat.exercises.filter((e) =>
-            enabledIds.has(e.id),
-          ).length;
-          return (
-            <motion.div
-              key={cat.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.08 + idx * 0.04 }}
-            >
-              <Card className="overflow-hidden">
-                <button
-                  className="w-full p-4 flex items-center justify-between hover:bg-muted/30 transition-colors"
-                  onClick={() => toggleCat(cat.id)}
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: cat.color + '18' }}
-                    >
-                      <span
-                        className="text-base font-bold"
-                        style={{ color: cat.color }}
-                      >
-                        {cat.name.charAt(0)}
-                      </span>
-                    </div>
-                    <div className="text-left">
-                      <p className="text-sm font-semibold">
-                        {cat.name}{' '}
-                        <span className="font-normal text-muted-foreground">
-                          ({cat.nameEn})
-                        </span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {cat.exercises.length} ท่า · {catEnabled} เปิดใช้
-                      </p>
-                    </div>
-                  </div>
-                  {catEnabled > 0 && (
-                    <Badge
-                      variant="secondary"
-                      className="mr-2 text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                    >
-                      {catEnabled}
-                    </Badge>
-                  )}
-                  {expandedCats.has(cat.id) ? (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                  )}
-                </button>
-
-                <AnimatePresence initial={false}>
-                  {expandedCats.has(cat.id) && (
-                    <motion.div
-                      key="content"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.25, ease: 'easeInOut' }}
-                      className="overflow-hidden"
-                    >
-                      <div className="px-4 pb-4 space-y-2">
-                        {cat.exercises.map((ex) => {
-                          const isEnabled = enabledIds.has(ex.id);
-                          return (
-                            <motion.div
-                              key={ex.id}
-                              layout
-                              className={`flex items-center justify-between p-3 rounded-xl border transition-all duration-200 ${
-                                isEnabled
-                                  ? 'bg-background border-emerald-500/20 shadow-sm'
-                                  : 'bg-muted/20 border-transparent opacity-50'
-                              }`}
-                            >
-                              <div className="flex-1 min-w-0 mr-3">
-                                <p className="text-sm font-medium truncate">
-                                  {ex.nameTh}
-                                </p>
-                                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
-                                  <span className="flex items-center gap-1">
-                                    <Dumbbell className="h-3 w-3" />
-                                    {ex.sets}×{ex.repsPerSet}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <Clock className="h-3 w-3" />
-                                    {ex.restSeconds}s
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <Target className="h-3 w-3" />
-                                    {Array.isArray(ex.targetJoints)
-                                      ? ex.targetJoints.length
-                                      : 0}{' '}
-                                    ข้อต่อ
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2.5 shrink-0">
-                                <Badge
-                                  variant="secondary"
-                                  className={`text-[11px] px-2 py-0.5 ${DIFFICULTY_COLORS[ex.difficulty] || ''}`}
-                                >
-                                  {DIFFICULTY_LABELS[ex.difficulty] || ex.difficulty}
-                                </Badge>
-                                <Switch
-                                  checked={isEnabled}
-                                  onCheckedChange={() =>
-                                    handleToggleExercise(ex.id)
-                                  }
-                                  className="data-[state=checked]:bg-emerald-600"
-                                />
-                              </div>
-                            </motion.div>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </Card>
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Therapist Notes */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <StickyNote className="h-4 w-4 text-amber-500" />
-              บันทึกคำแนะนำของนักกายภาพบำบัด
-              {savingNotes && (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Textarea
-              value={notes}
-              onChange={(e) => handleNotesChange(e.target.value)}
-              placeholder="บันทึกคำแนะนำเพิ่มเติมสำหรับคนไข้ เช่น ข้อควรระวัง, ข้อจำกัด, เป้าหมายระยะสั้น..."
-              className="min-h-[120px] resize-y"
-            />
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                บันทึกอัตโนมัติเมื่อหยุดพิมพ์
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (saveNotesTimer.current) clearTimeout(saveNotesTimer.current);
-                  saveTherapistNotes(notes).then(() => {
-                    toast.success('บันทึกคำแนะนำเรียบร้อย');
-                  });
-                }}
-                disabled={savingNotes}
-                className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
-              >
-                <FileText className="h-3.5 w-3.5 mr-1.5" />
-                บันทึกเลย
+              <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={createPlan}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                สร้างแผน
               </Button>
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      ) : (
+        <>
+          {/* Plan header */}
+          <Card>
+            <CardContent className="p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <ClipboardList className="h-5 w-5 text-emerald-600" />
+                    <h3 className="text-lg font-semibold">{plan.title}</h3>
+                    <Badge variant={plan.status === 'ACTIVE' ? 'default' : 'secondary'}>{STATUS_LABEL[plan.status]}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    เริ่ม {new Date(plan.startDate).toLocaleDateString('th-TH', { dateStyle: 'medium' })} · โดย {plan.clinician.name} · {plan.items.length} ท่า
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  {plan.status === 'ACTIVE' ? (
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => setStatus('PAUSED')}>
+                      <Pause className="h-3.5 w-3.5" /> พักแผน
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => setStatus('ACTIVE')}>
+                      <Play className="h-3.5 w-3.5" /> ใช้งานต่อ
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => setStatus('COMPLETED')}>
+                    <CheckCircle2 className="h-3.5 w-3.5" /> จบแผน
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium flex items-center gap-1.5">
+                  <StickyNote className="h-4 w-4 text-amber-500" /> คำแนะนำถึงผู้ป่วย (แสดงในภารกิจ)
+                </label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => handleNotesChange(e.target.value)}
+                  placeholder="เช่น หยุดถ้าปวดเกินระดับ 5/10"
+                  className="min-h-16"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Prescribed exercises */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <Target className="h-4 w-4 text-emerald-600" /> ท่าในแผน (ภารกิจรายวัน)
+            </h3>
+            {plan.items.length === 0 ? (
+              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                ยังไม่มีท่าในแผน — เพิ่มจากคลังท่าด้านล่าง
+              </p>
+            ) : (
+              plan.items.map((item) => (
+                <PrescriptionItemEditor
+                  key={item.id}
+                  item={item}
+                  defaults={exercises.find((e) => e.id === item.exerciseId)?.targetJoints ?? []}
+                  busy={busy}
+                  onSave={(body) => saveItem(item.id, body)}
+                  onRemove={() => removeItem(item.id)}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Exercise library */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">คลังท่ากายภาพ (เผยแพร่แล้ว)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {exercisesByCat.map((cat) => (
+                <div key={cat.id}>
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">{cat.name}</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {cat.exercises.map((ex) => (
+                      <div key={ex.id} className="flex items-center justify-between gap-2 rounded-lg border p-2.5">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{ex.nameTh}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${DIFFICULTY_COLORS[ex.difficulty] || ''}`}>
+                              {DIFFICULTY_LABELS[ex.difficulty] || ex.difficulty}
+                            </Badge>
+                            <span className="text-[11px] text-muted-foreground">
+                              {ex.sets}×{ex.repsPerSet}
+                            </span>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={inPlan.has(ex.id) ? 'secondary' : 'outline'}
+                          disabled={busy || inPlan.has(ex.id)}
+                          onClick={() => addExercise(ex.id)}
+                        >
+                          {inPlan.has(ex.id) ? 'อยู่ในแผน' : <><Plus className="h-3.5 w-3.5" /> เพิ่ม</>}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
 
-// ── Stat Pill Sub-component ────────────────────────────────────────────
+// ── Item editor: dose, schedule and per-joint angle targets ─────────────
 
-function StatPill({
-  icon,
-  value,
-  unit,
-  label,
-  color,
+function PrescriptionItemEditor({
+  item,
+  defaults,
+  busy,
+  onSave,
+  onRemove,
 }: {
-  icon: React.ReactNode;
-  value: string;
-  unit?: string;
-  label: string;
-  color: 'emerald' | 'amber' | 'muted';
+  item: PrescriptionItem;
+  defaults: Target[];
+  busy: boolean;
+  onSave: (body: Record<string, unknown>) => void;
+  onRemove: () => void;
 }) {
-  const bgMap = {
-    emerald: 'bg-emerald-50 dark:bg-emerald-950/30',
-    amber: 'bg-amber-50 dark:bg-amber-950/30',
-    muted: 'bg-muted',
-  };
-  const textMap = {
-    emerald: 'text-emerald-600 dark:text-emerald-400',
-    amber: 'text-amber-600 dark:text-amber-400',
-    muted: '',
-  };
+  const [sets, setSets] = useState(String(item.sets));
+  const [reps, setReps] = useState(String(item.repsPerSet));
+  const [rest, setRest] = useState(String(item.restSeconds));
+  const [days, setDays] = useState<number[]>(item.daysOfWeek);
+  const [targets, setTargets] = useState(item.targets.map((t) => ({ ...t })));
+  const [error, setError] = useState<string | null>(null);
+
+  const defaultFor = (joint: string) => defaults.find((d) => d.name === joint);
+
+  function updateTarget(joint: string, field: 'minAngle' | 'idealAngle' | 'maxAngle', value: string) {
+    setTargets((list) => list.map((t) => (t.name === joint ? { ...t, [field]: Number(value) } : t)));
+  }
+
+  function handleSave() {
+    const dose = { sets: Number(sets), repsPerSet: Number(reps), restSeconds: Number(rest) };
+    if (!Number.isInteger(dose.sets) || dose.sets < 1 || dose.sets > 20) return setError('เซ็ตต้องเป็น 1–20');
+    if (!Number.isInteger(dose.repsPerSet) || dose.repsPerSet < 1 || dose.repsPerSet > 100) return setError('จำนวนครั้งต้องเป็น 1–100');
+    if (!Number.isInteger(dose.restSeconds) || dose.restSeconds < 0 || dose.restSeconds > 600) return setError('เวลาพักต้องเป็น 0–600 วินาที');
+    for (const t of targets) {
+      if (![t.minAngle, t.idealAngle, t.maxAngle].every(Number.isFinite) || !(t.minAngle <= t.idealAngle && t.idealAngle <= t.maxAngle)) {
+        return setError(`${t.nameTh}: ต้องเป็น ต่ำสุด ≤ เป้าหมาย ≤ สูงสุด`);
+      }
+    }
+    setError(null);
+    // Only joints that differ from the exercise default become overrides
+    const targetOverrides = targets
+      .filter((t) => {
+        const d = defaultFor(t.name);
+        return !d || d.minAngle !== t.minAngle || d.idealAngle !== t.idealAngle || d.maxAngle !== t.maxAngle;
+      })
+      .map(({ name, idealAngle, minAngle, maxAngle }) => ({ joint: name, idealAngle, minAngle, maxAngle }));
+    onSave({ ...dose, daysOfWeek: days, targetOverrides });
+  }
+
+  function resetTargets() {
+    setTargets((list) => list.map((t) => ({ ...t, ...(defaultFor(t.name) ?? {}) })));
+  }
 
   return (
-    <div
-      className={`text-center p-3 rounded-xl ${bgMap[color]} transition-colors`}
-    >
-      <div
-        className={`flex items-center justify-center gap-1.5 mb-1 ${textMap[color]}`}
-      >
-        {icon}
-      </div>
-      <p className="text-2xl font-bold">
-        {value}
-        {unit && (
-          <span className="text-sm font-normal text-muted-foreground ml-0.5">
-            {unit}
-          </span>
-        )}
-      </p>
-      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-    </div>
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-semibold">{item.exercise.nameTh}</p>
+              <p className="text-xs text-muted-foreground">{item.exercise.name}</p>
+            </div>
+            <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" disabled={busy} onClick={onRemove}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 max-w-md">
+            <label className="text-xs space-y-1">
+              <span className="text-muted-foreground">เซ็ต</span>
+              <Input type="number" min={1} max={20} value={sets} onChange={(e) => setSets(e.target.value)} />
+            </label>
+            <label className="text-xs space-y-1">
+              <span className="text-muted-foreground">ครั้ง/เซ็ต</span>
+              <Input type="number" min={1} max={100} value={reps} onChange={(e) => setReps(e.target.value)} />
+            </label>
+            <label className="text-xs space-y-1">
+              <span className="text-muted-foreground">พัก (วินาที)</span>
+              <Input type="number" min={0} max={600} value={rest} onChange={(e) => setRest(e.target.value)} />
+            </label>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">วันที่ต้องทำ {days.length === 0 && '(ทุกวัน)'}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {DAY_LABELS.map((label, d) => {
+                const on = days.includes(d);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDays((list) => (on ? list.filter((x) => x !== d) : [...list, d].sort()))}
+                    className={`h-8 w-9 rounded-md border text-xs font-medium transition-colors ${
+                      on ? 'bg-emerald-600 text-white border-emerald-600' : 'hover:bg-muted'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">มุมเป้าหมาย (องศา)</p>
+            {targets.map((t) => {
+              const d = defaultFor(t.name);
+              const changed = d && (d.minAngle !== t.minAngle || d.idealAngle !== t.idealAngle || d.maxAngle !== t.maxAngle);
+              return (
+                <div key={t.name} className="grid grid-cols-[1fr_repeat(3,4.5rem)] items-center gap-2">
+                  <span className="text-sm truncate">
+                    {t.nameTh}
+                    {t.isPrimary && <Badge variant="secondary" className="ml-1.5 text-[10px]">นับครั้ง</Badge>}
+                    {changed && <Badge className="ml-1.5 text-[10px] bg-amber-500">ปรับแล้ว</Badge>}
+                  </span>
+                  <Input aria-label="ต่ำสุด" type="number" value={t.minAngle} onChange={(e) => updateTarget(t.name, 'minAngle', e.target.value)} />
+                  <Input aria-label="เป้าหมาย" type="number" value={t.idealAngle} onChange={(e) => updateTarget(t.name, 'idealAngle', e.target.value)} />
+                  <Input aria-label="สูงสุด" type="number" value={t.maxAngle} onChange={(e) => updateTarget(t.name, 'maxAngle', e.target.value)} />
+                </div>
+              );
+            })}
+            <p className="text-[11px] text-muted-foreground text-right">ต่ำสุด · เป้าหมาย · สูงสุด</p>
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={handleSave}>
+              <Save className="h-3.5 w-3.5" /> บันทึก
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={resetTargets}>
+              <RotateCcw className="h-3.5 w-3.5" /> มุมค่าเริ่มต้น
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }
-
-// ── Loading Skeleton ───────────────────────────────────────────────────
 
 function PlansSkeleton() {
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="space-y-2">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-4 w-80" />
+        <Skeleton className="h-4 w-72" />
       </div>
-
-      {/* Patient selector */}
-      <Skeleton className="h-16 rounded-xl" />
-
-      {/* Summary stats */}
-      <div className="space-y-2">
-        <Skeleton className="h-4 w-36" />
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-xl" />
-          ))}
-        </div>
-      </div>
-
-      {/* Exercise categories */}
-      {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="space-y-2">
-          <Skeleton className="h-12 rounded-xl" />
-          <Skeleton className="h-14 rounded-xl" />
-          <Skeleton className="h-14 rounded-xl" />
-        </div>
-      ))}
-
-      {/* Notes */}
-      <Skeleton className="h-40 rounded-xl" />
+      <Skeleton className="h-36 w-full rounded-xl" />
+      <Skeleton className="h-64 w-full rounded-xl" />
     </div>
   );
 }

@@ -40,6 +40,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAppStore } from '@/lib/store';
+import { RepCounter, REP_DEFAULTS, type RepCompletion } from '@/lib/rep-counter';
 import {
   calculateAllAngles,
   isAngleCorrect,
@@ -55,8 +56,6 @@ import {
 import {
   CATEGORIES,
   DIFFICULTY_LABELS,
-  EXERCISES,
-  exerciseIdFromName,
   type TargetJoint,
 } from '@/lib/exercises-data';
 
@@ -98,8 +97,6 @@ const POSE_SCRIPT = `${POSE_BASE_URL}pose.js`;
 // ─── Pipeline tuning ───────────────────────────────────────────────────
 const ANGLE_UI_INTERVAL_MS = 100; // push live angles to the UI at ~10 Hz
 const COACH_INTERVAL_MS = 8000; // min gap between AI coach calls
-const REP_HYSTERESIS_DEG = 5; // must leave range by this much to finish a rep
-const REP_MIN_HOLD_MS = 300; // shorter visits to the range are jitter
 const LOG_FLUSH_SIZE = 20; // flush buffered joint logs at this many rows
 const LOG_FLUSH_INTERVAL_MS = 5000; // ...or this often
 const LOG_BATCH_MAX = 200; // rows per request (matches the API cap)
@@ -203,6 +200,8 @@ function formatTime(seconds: number): string {
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────
+type TargetFromAPI = TargetJoint & { isPrimary?: boolean; formula?: string | null; overridden?: boolean };
+
 interface ExerciseFromAPI {
   id: string;
   name: string;
@@ -210,7 +209,7 @@ interface ExerciseFromAPI {
   category: string;
   description: string;
   instructions: string[];
-  targetJoints: TargetJoint[];
+  targetJoints: TargetFromAPI[];
   difficulty: string;
   sets: number;
   repsPerSet: number;
@@ -218,6 +217,14 @@ interface ExerciseFromAPI {
   icon: string;
   bodyPart: string;
 }
+
+interface QuestFromAPI {
+  id: string;
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'MISSED';
+  prescription: { title: string; clinicianName: string };
+  exercise: ExerciseFromAPI;
+}
+
 
 type SessionPhase = 'pre-session' | 'active' | 'summary';
 
@@ -231,21 +238,24 @@ interface PoseInstance {
 
 interface PendingLog {
   repNumber: number;
-  jointName: string;
+  joint: string;
   angle: number;
   idealAngle: number;
+  minAngle: number;
+  maxAngle: number;
   deviation: number;
   isCorrect: boolean;
 }
 
-interface RepState {
-  inRange: boolean;
+interface PendingRep {
+  setNumber: number;
+  repNumber: number;
   enteredAt: number;
-  bestAccuracy: number;
-  bestAngles: Record<string, number>;
+  durationMs: number;
+  bestAngle: number;
+  accuracy: number;
 }
 
-const IDLE_REP: RepState = { inRange: false, enteredAt: 0, bestAccuracy: -1, bestAngles: {} };
 
 // close() on an already-closed graph can throw, so track what we closed
 const closedPoses = new WeakSet<PoseInstance>();
@@ -272,12 +282,15 @@ export function LiveSessionView() {
   const sessionAccuracy = useAppStore((s) => s.sessionAccuracy);
   const aiFeedback = useAppStore((s) => s.aiFeedback);
   const selectedExerciseId = useAppStore((s) => s.selectedExerciseId);
+  const selectedQuestId = useAppStore((s) => s.selectedQuestId);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   // ─── Local State ────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SessionPhase>('pre-session');
   const [exercises, setExercises] = useState<ExerciseFromAPI[]>([]);
   const [loadingExercises, setLoadingExercises] = useState(true);
+  const [quests, setQuests] = useState<QuestFromAPI[]>([]);
+  const [loadError, setLoadError] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState<ExerciseFromAPI | null>(null);
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -305,9 +318,9 @@ export function LiveSessionView() {
   const processingRef = useRef<boolean>(false); // true while pose.send() is in flight
   const lastFrameTimeRef = useRef<number>(0); // watchdog: timestamp of last processed frame
   const lastAngleUiRef = useRef<number>(0); // throttle for setLiveAngles
-  const repStateRef = useRef<RepState>(IDLE_REP);
-  const romRef = useRef({ min: Infinity, max: -Infinity }); // primary joint, visible frames
+  const repCounterRef = useRef<RepCounter | null>(null); // rep state per side + ROM
   const pendingLogsRef = useRef<PendingLog[]>([]);
+  const pendingRepsRef = useRef<PendingRep[]>([]);
   const stoppingRef = useRef<boolean>(false); // finalize the session exactly once
   const lastCoachCallRef = useRef<number>(0);
   const coachAbortRef = useRef<AbortController | null>(null);
@@ -338,28 +351,30 @@ export function LiveSessionView() {
     elapsedRef.current = elapsedSeconds;
   }, [elapsedSeconds]);
 
-  // ─── Fetch exercises ────────────────────────────────────────────────
+  // ─── Fetch today's quests + exercise library ────────────────────────
   useEffect(() => {
+    if (phase !== 'pre-session') return;
     let cancelled = false;
-    async function fetchExercises() {
-      let data: ExerciseFromAPI[];
+    async function load() {
       try {
-        const res = await fetch('/api/exercises');
-        if (!res.ok) throw new Error('Failed to fetch');
-        data = await res.json();
+        const [exRes, questRes] = await Promise.all([fetch('/api/exercises'), fetch('/api/quests/today')]);
+        if (!exRes.ok || !questRes.ok) throw new Error('Failed to fetch');
+        const [exData, questData] = await Promise.all([exRes.json(), questRes.json()]);
+        if (cancelled) return;
+        setExercises(Array.isArray(exData) ? exData : []);
+        setQuests(Array.isArray(questData?.quests) ? questData.quests : []);
+        setLoadError(false);
       } catch {
-        // Fallback to local data, using the same IDs the seed route creates
-        data = EXERCISES.map((ex) => ({ ...ex, id: exerciseIdFromName(ex.name) }));
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) setLoadingExercises(false);
       }
-      if (cancelled) return;
-      setExercises(data);
-      setLoadingExercises(false);
     }
-    fetchExercises();
+    load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [phase]);
 
   // ─── Timer ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -385,7 +400,6 @@ export function LiveSessionView() {
 
   const getSessionMetrics = useCallback(() => {
     const accuracies = useAppStore.getState().sessionAccuracy;
-    const rom = romRef.current;
     return {
       // One accuracy entry per completed rep, across all sets
       totalReps: accuracies.length,
@@ -393,32 +407,44 @@ export function LiveSessionView() {
         accuracies.length > 0
           ? Math.round(accuracies.reduce((a, b) => a + b, 0) / accuracies.length)
           : 0,
-      // Range of motion = degrees of movement of the primary joint
-      maxRom: rom.max >= rom.min ? Math.round(rom.max - rom.min) : 0,
+      // ROM of the side (left/right) that moved the most
+      ...(repCounterRef.current?.romSummary() ?? { primaryJoint: null, romMinAngle: null, romMaxAngle: null }),
     };
   }, []);
 
-  // Send buffered JointAngleLog rows. keepalive lets it survive page unload.
+  // Send buffered SessionRep + JointAngleLog rows in batches (reps first, so
+  // logs can be linked to them). keepalive lets it survive page unload.
   const flushLogs = useCallback(async (keepalive = false) => {
     const sessionId = useAppStore.getState().currentSessionId;
-    const rows = pendingLogsRef.current;
-    if (!sessionId || rows.length === 0) return;
+    const reps = pendingRepsRef.current;
+    const logs = pendingLogsRef.current;
+    if (!sessionId || reps.length + logs.length === 0) return;
+    pendingRepsRef.current = [];
     pendingLogsRef.current = [];
 
-    const send = (logs: PendingLog[]) =>
+    type Batch = { reps: PendingRep[]; logs: PendingLog[] };
+    const batches: Batch[] = [];
+    let current: Batch = { reps: [], logs: [] };
+    const push = (add: (b: Batch) => void) => {
+      if (current.reps.length + current.logs.length >= LOG_BATCH_MAX) {
+        batches.push(current);
+        current = { reps: [], logs: [] };
+      }
+      add(current);
+    };
+    reps.forEach((r) => push((b) => b.reps.push(r)));
+    logs.forEach((l) => push((b) => b.logs.push(l)));
+    batches.push(current);
+
+    const send = (batch: Batch) =>
       fetch(`/api/sessions/${sessionId}/logs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logs }),
+        body: JSON.stringify(batch),
         keepalive,
       }).then((res) => {
         if (!res.ok) throw new Error(`Log flush failed: ${res.status}`);
       });
-
-    const batches: PendingLog[][] = [];
-    for (let i = 0; i < rows.length; i += LOG_BATCH_MAX) {
-      batches.push(rows.slice(i, i + LOG_BATCH_MAX));
-    }
 
     if (keepalive) {
       batches.forEach((b) => send(b).catch(() => {}));
@@ -429,9 +455,9 @@ export function LiveSessionView() {
         await send(batches[i]);
       } catch {
         // Requeue the unsent rows for the next flush, bounded in size
-        pendingLogsRef.current = [...batches.slice(i).flat(), ...pendingLogsRef.current].slice(
-          -LOG_BUFFER_MAX
-        );
+        const rest = batches.slice(i);
+        pendingRepsRef.current = [...rest.flatMap((b) => b.reps), ...pendingRepsRef.current].slice(-LOG_BUFFER_MAX);
+        pendingLogsRef.current = [...rest.flatMap((b) => b.logs), ...pendingLogsRef.current].slice(-LOG_BUFFER_MAX);
         return;
       }
     }
@@ -456,11 +482,7 @@ export function LiveSessionView() {
       fetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'cancelled',
-          endedAt: new Date().toISOString(),
-          ...getSessionMetrics(),
-        }),
+        body: JSON.stringify({ status: 'CANCELLED', ...getSessionMetrics() }),
         keepalive: true,
       }).catch(() => {});
       st.setIsSessionActive(false);
@@ -554,30 +576,37 @@ export function LiveSessionView() {
   );
 
   // ─── Start exercise ─────────────────────────────────────────────────
-  const handleStartExercise = useCallback(async (exercise: ExerciseFromAPI) => {
+  // Start from a prescribed quest ({ questId }) or as free practice ({ exerciseId }).
+  // The server returns the exercise with the prescription's dose and angle
+  // overrides applied; the session runs on those merged targets.
+  const handleStartExercise = useCallback(async (start: { questId: string } | { exerciseId: string }) => {
     setConnecting(true);
     try {
       const st = useAppStore.getState();
       const sessionRes = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exerciseId: exercise.id, patientId: st.currentPatientId }),
+        body: JSON.stringify(start),
       });
       const sessionData = await sessionRes.json().catch(() => null);
-      if (!sessionRes.ok || !sessionData?.id) {
-        toast.error('ไม่สามารถเริ่มเซสชันได้ กรุณาลองใหม่อีกครั้ง');
+      if (!sessionRes.ok || !sessionData?.id || !sessionData.exercise) {
+        toast.error(sessionData?.error === 'This quest is not due today'
+          ? 'ภารกิจนี้ไม่ได้กำหนดไว้สำหรับวันนี้'
+          : 'ไม่สามารถเริ่มเซสชันได้ กรุณาลองใหม่อีกครั้ง');
         return;
       }
+      const exercise = sessionData.exercise as ExerciseFromAPI;
 
       st.clearSessionData();
       st.setSelectedExerciseId(exercise.id);
+      st.setSelectedQuestId(null);
       st.setIsSessionActive(true);
       st.setCurrentSessionId(sessionData.id);
 
       stoppingRef.current = false;
-      repStateRef.current = IDLE_REP;
-      romRef.current = { min: Infinity, max: -Infinity };
+      repCounterRef.current = new RepCounter(exercise.targetJoints, REP_DEFAULTS);
       pendingLogsRef.current = [];
+      pendingRepsRef.current = [];
       lastCoachCallRef.current = 0;
       lastAngleUiRef.current = 0;
       detectionActiveRef.current = false;
@@ -618,11 +647,7 @@ export function LiveSessionView() {
         await fetch(`/api/sessions/${st.currentSessionId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: 'completed',
-            endedAt: new Date().toISOString(),
-            ...metrics,
-          }),
+          body: JSON.stringify({ status: 'COMPLETED', ...metrics }),
         });
       } catch {
         // ignore
@@ -940,77 +965,57 @@ export function LiveSessionView() {
         ctx.stroke();
       });
 
-      // ─── Rep detection ─────────────────────────────────────────────
-      // A rep = enter the target range, hold ≥ REP_MIN_HOLD_MS, then leave it
-      // by REP_HYSTERESIS_DEG. It is scored on the best angle reached inside.
-      const primary = targetJoints[0];
-      const angle = primary ? angles[primary.name] : undefined;
-      if (exercise && primary && angle !== undefined) {
-        const rom = romRef.current;
-        rom.min = Math.min(rom.min, angle);
-        rom.max = Math.max(rom.max, angle);
+      // ─── Rep detection (see lib/rep-counter.ts) ────────────────────
+      const completeRep = (rep: RepCompletion): boolean => {
+        if (!exercise) return false;
+        const st = useAppStore.getState();
+        st.addAccuracy(rep.bestAccuracy);
+        const repNumber = st.sessionAccuracy.length + 1;
 
-        const inRange = angle >= primary.minAngle && angle <= primary.maxAngle;
-        let rep = repStateRef.current;
-        if (!rep.inRange && inRange) {
-          rep = { inRange: true, enteredAt: now, bestAccuracy: -1, bestAngles: {} };
-          repStateRef.current = rep;
-        }
+        pendingRepsRef.current.push({
+          setNumber: st.currentSet,
+          repNumber,
+          enteredAt: rep.enteredAt,
+          durationMs: rep.durationMs,
+          bestAngle: rep.bestAngles[rep.target.name],
+          accuracy: rep.bestAccuracy,
+        });
+        // One JointAngleLog row per visible target joint, at the rep's best moment
+        targetJoints.forEach((tj) => {
+          const a = rep.bestAngles[tj.name];
+          if (a === undefined) return;
+          const { correct, deviation } = isAngleCorrect(a, tj.idealAngle, tj.minAngle, tj.maxAngle);
+          pendingLogsRef.current.push({
+            repNumber,
+            joint: tj.name,
+            angle: a,
+            idealAngle: tj.idealAngle,
+            minAngle: tj.minAngle,
+            maxAngle: tj.maxAngle,
+            deviation: Math.round(deviation * 10) / 10,
+            isCorrect: correct,
+          });
+        });
+        if (pendingRepsRef.current.length + pendingLogsRef.current.length >= LOG_FLUSH_SIZE) flushLogs();
 
-        if (rep.inRange && inRange) {
-          const { percentAccuracy } = isAngleCorrect(
-            angle,
-            primary.idealAngle,
-            primary.minAngle,
-            primary.maxAngle
-          );
-          if (percentAccuracy > rep.bestAccuracy) {
-            rep.bestAccuracy = percentAccuracy;
-            rep.bestAngles = angles;
+        // Advance rep/set counters
+        const newRep = st.currentRep + 1;
+        if (newRep >= exercise.repsPerSet) {
+          if (st.currentSet + 1 > exercise.sets) {
+            st.setCurrentRep(newRep);
+            handleStopSession();
+            return true;
           }
-        } else if (
-          rep.inRange &&
-          (angle < primary.minAngle - REP_HYSTERESIS_DEG ||
-            angle > primary.maxAngle + REP_HYSTERESIS_DEG)
-        ) {
-          repStateRef.current = IDLE_REP;
-          if (now - rep.enteredAt >= REP_MIN_HOLD_MS) {
-            const st = useAppStore.getState();
-            st.addAccuracy(rep.bestAccuracy);
-            const repNumber = st.sessionAccuracy.length + 1;
-
-            // Buffer one JointAngleLog row per visible target joint
-            targetJoints.forEach((tj) => {
-              const a = rep.bestAngles[tj.name];
-              if (a === undefined) return;
-              const { correct, deviation } = isAngleCorrect(a, tj.idealAngle, tj.minAngle, tj.maxAngle);
-              pendingLogsRef.current.push({
-                repNumber,
-                jointName: tj.name,
-                angle: a,
-                idealAngle: tj.idealAngle,
-                deviation: Math.round(deviation * 10) / 10,
-                isCorrect: correct,
-              });
-            });
-            if (pendingLogsRef.current.length >= LOG_FLUSH_SIZE) flushLogs();
-
-            // Advance rep/set counters
-            const newRep = st.currentRep + 1;
-            if (newRep >= exercise.repsPerSet) {
-              if (st.currentSet + 1 > exercise.sets) {
-                st.setCurrentRep(newRep);
-                handleStopSession();
-                return;
-              }
-              st.setCurrentSet(st.currentSet + 1);
-              st.setCurrentRep(0);
-            } else {
-              st.setCurrentRep(newRep);
-            }
-          }
+          st.setCurrentSet(st.currentSet + 1);
+          st.setCurrentRep(0);
+        } else {
+          st.setCurrentRep(newRep);
         }
-      }
+        return false;
+      };
+
+      const completion = repCounterRef.current?.update(angles, now);
+      if (completion && completeRep(completion)) return;
 
       // Coach feedback (self-throttled to COACH_INTERVAL_MS)
       callCoach(angles);
@@ -1032,6 +1037,7 @@ export function LiveSessionView() {
     const st = useAppStore.getState();
     st.clearSessionData();
     st.setSelectedExerciseId(null);
+    st.setSelectedQuestId(null);
   }, []);
 
   // =====================================================================
@@ -1060,9 +1066,78 @@ export function LiveSessionView() {
               เลือกท่าฝึก
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              เลือกท่ากายภาพบำบัดที่ต้องการฝึก จากนั้นกดเริ่มฝึกเพื่อเข้าสู่เซสชัน
+              ทำภารกิจที่ผู้ดูแลของคุณกำหนดไว้สำหรับวันนี้ หรือเลือกท่าเพื่อฝึกอิสระ
             </p>
           </motion.div>
+
+          {/* Today's quests (prescribed by the care team) */}
+          {!loadingExercises && !loadError && (
+            <section className="mb-8">
+              <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+                <Target className="h-5 w-5 text-emerald-600" />
+                ภารกิจวันนี้
+                <span className="text-sm font-normal text-muted-foreground">
+                  ({quests.filter((q) => q.status === 'COMPLETED').length}/{quests.length} สำเร็จ)
+                </span>
+              </h2>
+              {quests.length === 0 ? (
+                <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                  วันนี้ไม่มีภารกิจจากแพทย์/นักกายภาพ — เลือกฝึกอิสระจากรายการด้านล่างได้
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {quests.map((quest) => {
+                    const done = quest.status === 'COMPLETED';
+                    const overridden = quest.exercise.targetJoints.some((t) => t.overridden);
+                    return (
+                      <Card
+                        key={quest.id}
+                        className={`${quest.id === selectedQuestId ? 'ring-2 ring-emerald-500' : ''} ${done ? 'opacity-75' : ''}`}
+                      >
+                        <CardContent className="space-y-2 p-4">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="font-semibold leading-tight">{quest.exercise.nameTh}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {quest.prescription.title} · {quest.prescription.clinicianName}
+                              </p>
+                            </div>
+                            {done ? (
+                              <Badge className="bg-emerald-600 text-white">
+                                <CheckCircle className="mr-1 h-3 w-3" /> สำเร็จ
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline">{quest.status === 'IN_PROGRESS' ? 'กำลังทำ' : 'รอทำ'}</Badge>
+                            )}
+                          </div>
+                          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <RotateCcw className="h-3 w-3" />
+                            {quest.exercise.sets} เซ็ต × {quest.exercise.repsPerSet} ครั้ง · พัก {quest.exercise.restSeconds} วินาที
+                          </p>
+                          {overridden && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400">มุมเป้าหมายปรับโดยผู้ดูแลของคุณ</p>
+                          )}
+                          <Button
+                            className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+                            size="sm"
+                            disabled={connecting}
+                            onClick={() => handleStartExercise({ questId: quest.id })}
+                          >
+                            {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                            {done ? 'ฝึกซ้ำ' : 'เริ่มภารกิจ'}
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          {!loadingExercises && !loadError && (
+            <h2 className="mb-3 text-lg font-semibold">ฝึกอิสระ</h2>
+          )}
 
           {/* Exercise Grid */}
           {loadingExercises ? (
@@ -1081,14 +1156,14 @@ export function LiveSessionView() {
                 </Card>
               ))}
             </div>
-          ) : exercises.length === 0 ? (
+          ) : loadError || exercises.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <CameraOff className="mb-4 h-12 w-12 text-muted-foreground" />
               <p className="text-lg font-medium text-muted-foreground">
-                ไม่พบท่าฝึก
+                {loadError ? 'โหลดข้อมูลไม่สำเร็จ' : 'ไม่พบท่าฝึก'}
               </p>
               <p className="text-sm text-muted-foreground">
-                กรุณาเพิ่มท่าฝึกในระบบก่อน
+                {loadError ? 'กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่' : 'กรุณาเพิ่มท่าฝึกในระบบก่อน'}
               </p>
             </div>
           ) : (
@@ -1158,7 +1233,7 @@ export function LiveSessionView() {
                           className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
                           size="sm"
                           disabled={connecting}
-                          onClick={() => handleStartExercise(exercise)}
+                          onClick={() => handleStartExercise({ exerciseId: exercise.id })}
                         >
                           {connecting ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />

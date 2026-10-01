@@ -142,7 +142,7 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const sessionsToday = sessions.filter(
-      (s) => s.status === 'completed' && new Date(s.startedAt) >= todayStart
+      (s) => s.status === 'COMPLETED' && new Date(s.startedAt) >= todayStart
     ).length;
 
     // Overall average accuracy (from patients with at least 1 session)
