@@ -113,7 +113,7 @@ ${jointReport.map((j) => `- ${j.joint}: เฉลี่ย ${j.avgAngle}°, ค�
 
     const completion = await zai.chat.completions.create({
       messages: [
-        { role: 'assistant', content: 'คุณคือนักกายภาพบำบัดที่เขียนรายงานคลินิก ใช้ภาษาไทยที่เป็นมืออาชีพ แต่อ่านง่าย' },
+        { role: 'system', content: 'คุณคือนักกายภาพบำบัดที่เขียนรายงานคลินิก ใช้ภาษาไทยที่เป็นมืออาชีพ แต่อ่านง่าย' },
         { role: 'user', content: prompt },
       ],
       thinking: { type: 'disabled' },

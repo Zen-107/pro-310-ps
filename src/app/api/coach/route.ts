@@ -58,7 +58,7 @@ ${angleInfo || 'ไม่มีข้อมูลมุมข้อต่อ'}
 
     const completion = await zai.chat.completions.create({
       messages: [
-        { role: 'assistant', content: SYSTEM_PROMPT },
+        { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
       ],
       thinking: { type: 'disabled' },

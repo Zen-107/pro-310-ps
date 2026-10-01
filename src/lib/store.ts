@@ -36,7 +36,7 @@ interface AppState {
 
   // Live session data
   liveAngles: Record<string, number>;
-  setLiveAngle: (joint: string, angle: number) => void;
+  setLiveAngles: (angles: Record<string, number>) => void;
   clearLiveAngles: () => void;
   currentRep: number;
   setCurrentRep: (rep: number) => void;
@@ -49,10 +49,6 @@ interface AppState {
   // AI feedback
   aiFeedback: string;
   setAiFeedback: (feedback: string) => void;
-
-  // Skeleton
-  skeletonLandmarks: Array<{ x: number; y: number; z: number }>;
-  setSkeletonLandmarks: (landmarks: Array<{ x: number; y: number; z: number }>) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -81,8 +77,7 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentSessionId: (id) => set({ currentSessionId: id }),
 
   liveAngles: {},
-  setLiveAngle: (joint, angle) =>
-    set((state) => ({ liveAngles: { ...state.liveAngles, [joint]: angle } })),
+  setLiveAngles: (angles) => set({ liveAngles: angles }),
   clearLiveAngles: () => set({ liveAngles: {} }),
 
   currentRep: 0,
@@ -99,12 +94,8 @@ export const useAppStore = create<AppState>((set) => ({
       sessionAccuracy: [],
       liveAngles: {},
       aiFeedback: '',
-      skeletonLandmarks: [],
     }),
 
   aiFeedback: '',
   setAiFeedback: (feedback) => set({ aiFeedback: feedback }),
-
-  skeletonLandmarks: [],
-  setSkeletonLandmarks: (landmarks) => set({ skeletonLandmarks: landmarks }),
 }));

@@ -30,6 +30,7 @@ import {
   StretchHorizontal,
   Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -42,8 +43,11 @@ import { useAppStore } from '@/lib/store';
 import {
   calculateAllAngles,
   isAngleCorrect,
+  isVisible,
   formatAngle,
+  getAngleStatus,
   getAngleStatusColor,
+  ANGLE_STATUS_HEX,
   LANDMARKS,
   SKELETON_CONNECTIONS,
   type Landmark,
@@ -51,7 +55,8 @@ import {
 import {
   CATEGORIES,
   DIFFICULTY_LABELS,
-  type ExerciseData,
+  EXERCISES,
+  exerciseIdFromName,
   type TargetJoint,
 } from '@/lib/exercises-data';
 
@@ -84,80 +89,99 @@ const bodyPartLabels: Record<string, string> = {
   full: 'ทั้งตัว',
 };
 
-// ─── MediaPipe sources ─────────────────────────────────────────────────
-// ROOT-CAUSE FIX: previously we loaded `@mediapipe/pose@0.1` from a CDN.
-// That legacy build creates its inference worker from a same-origin Blob
-// whose internals `importScripts()` the *page-relative* asset paths — on
-// http://localhost:3000 those requests 404, so `pose.initialize()` never
-// resolves and `onResults` is NEVER called. The camera showed a live image
-// but no skeleton ever appeared. We now ship ALL MediaPipe WASM/model files
-// locally in /public/mediapipe/pose (same-origin → blob worker works, no
-// CDN dependency at runtime, faster init, fully offline-capable).
-const LOCAL_POSE_BASE = '/mediapipe/pose/';
-const LOCAL_POSE_CDN = `${LOCAL_POSE_BASE}pose.js`;
-const LOCAL_CAMERA_UTILS = '/mediapipe/camera_utils.js';
+// ─── MediaPipe source (CDN) ────────────────────────────────────────────
+// The loader script and its WASM/model files (via locateFile) must come from
+// the same pinned version, otherwise the blob worker's importScripts() fails.
+const POSE_BASE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/';
+const POSE_SCRIPT = `${POSE_BASE_URL}pose.js`;
 
-// Fallback CDN (pinned to the SAME version as the local copy so model +
-// loader binaries always match). Used only if the local script fails.
-const MP_BASE = 'https://cdn.jsdelivr.net/npm';
-const POSE_VERSION = '0.5.1675469404';
-const CDN_POSE_BASE_URL = `${MP_BASE}/@mediapipe/pose@${POSE_VERSION}/`;
-const CDN_POSE_CDN = `${CDN_POSE_BASE_URL}pose.js`;
-const CDN_CAMERA_UTILS = `${MP_BASE}/@mediapipe/camera_utils@0.3/camera_utils.js`;
+// ─── Pipeline tuning ───────────────────────────────────────────────────
+const ANGLE_UI_INTERVAL_MS = 100; // push live angles to the UI at ~10 Hz
+const COACH_INTERVAL_MS = 8000; // min gap between AI coach calls
+const REP_HYSTERESIS_DEG = 5; // must leave range by this much to finish a rep
+const REP_MIN_HOLD_MS = 300; // shorter visits to the range are jitter
+const LOG_FLUSH_SIZE = 20; // flush buffered joint logs at this many rows
+const LOG_FLUSH_INTERVAL_MS = 5000; // ...or this often
+const LOG_BATCH_MAX = 200; // rows per request (matches the API cap)
+const LOG_BUFFER_MAX = 500; // drop oldest rows beyond this if the API is down
+
+// Target joint name → landmark index used for coloring
+const JOINT_INDEX: Record<string, number> = {
+  left_shoulder: LANDMARKS.LEFT_SHOULDER,
+  right_shoulder: LANDMARKS.RIGHT_SHOULDER,
+  left_elbow: LANDMARKS.LEFT_ELBOW,
+  right_elbow: LANDMARKS.RIGHT_ELBOW,
+  left_hip: LANDMARKS.LEFT_HIP,
+  right_hip: LANDMARKS.RIGHT_HIP,
+  left_knee: LANDMARKS.LEFT_KNEE,
+  right_knee: LANDMARKS.RIGHT_KNEE,
+  left_ankle: LANDMARKS.LEFT_ANKLE,
+  right_ankle: LANDMARKS.RIGHT_ANKLE,
+};
+
+const KEY_INDICES = [
+  LANDMARKS.LEFT_SHOULDER,
+  LANDMARKS.RIGHT_SHOULDER,
+  LANDMARKS.LEFT_ELBOW,
+  LANDMARKS.RIGHT_ELBOW,
+  LANDMARKS.LEFT_WRIST,
+  LANDMARKS.RIGHT_WRIST,
+  LANDMARKS.LEFT_HIP,
+  LANDMARKS.RIGHT_HIP,
+  LANDMARKS.LEFT_KNEE,
+  LANDMARKS.RIGHT_KNEE,
+  LANDMARKS.LEFT_ANKLE,
+  LANDMARKS.RIGHT_ANKLE,
+];
 
 // ─── Helper: load script (with timeout + retry) ────────────────────────
 function loadScript(src: string, timeoutMs = 20000): Promise<void> {
   return new Promise((resolve, reject) => {
-    // If the global provided by this script already exists, skip re-loading
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
-    if (existing && existing.dataset.loaded === 'true') {
+    if (existing?.dataset.loaded === 'true') {
       resolve();
       return;
     }
+    // Reuse a tag that is still loading; failed tags are removed below, so a
+    // retry always gets a fresh <script> that actually re-requests the file.
     const s = existing ?? document.createElement('script');
-    s.src = src;
     // IMPORTANT: do NOT set crossOrigin here. The MediaPipe loader creates a
     // same-origin Blob worker that importScripts() these CDN files; adding
     // crossorigin can trigger opaque-response failures in some browsers.
     let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Timeout loading: ${src}`));
-      }
-    }, timeoutMs);
-    s.onload = () => {
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      if (!settled) {
-        settled = true;
-        s.dataset.loaded = 'true';
-        resolve();
-      }
+      s.remove();
+      reject(new Error(message));
     };
-    s.onerror = () => {
+    const timer = setTimeout(() => fail(`Timeout loading: ${src}`), timeoutMs);
+    s.addEventListener('load', () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Failed to load: ${src}`));
-      }
-    };
-    if (!existing) document.head.appendChild(s);
+      s.dataset.loaded = 'true';
+      resolve();
+    });
+    s.addEventListener('error', () => fail(`Failed to load: ${src}`));
+    if (!existing) {
+      s.src = src;
+      document.head.appendChild(s);
+    }
   });
 }
 
 async function loadScriptWithRetry(src: string, attempts = 2): Promise<void> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
+  for (let i = 0; ; i++) {
     try {
       await loadScript(src);
       return;
     } catch (err) {
-      lastErr = err;
-      // wait a bit before retrying
+      if (i >= attempts - 1) throw err;
       await new Promise((r) => setTimeout(r, 800 * (i + 1)));
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error(`Failed to load: ${src}`);
 }
 
 // ─── Helper: format time MM:SS ────────────────────────────────────────
@@ -186,12 +210,58 @@ interface ExerciseFromAPI {
 
 type SessionPhase = 'pre-session' | 'active' | 'summary';
 
+interface PoseInstance {
+  setOptions: (opts: Record<string, unknown>) => Promise<void>;
+  onResults: (cb: (results: unknown) => void) => void;
+  initialize: () => Promise<void>;
+  close: () => void;
+  send: (input: { image: HTMLVideoElement }) => Promise<void>;
+}
+
+interface PendingLog {
+  repNumber: number;
+  jointName: string;
+  angle: number;
+  idealAngle: number;
+  deviation: number;
+  isCorrect: boolean;
+}
+
+interface RepState {
+  inRange: boolean;
+  enteredAt: number;
+  bestAccuracy: number;
+  bestAngles: Record<string, number>;
+}
+
+const IDLE_REP: RepState = { inRange: false, enteredAt: 0, bestAccuracy: -1, bestAngles: {} };
+
+// close() on an already-closed graph can throw, so track what we closed
+const closedPoses = new WeakSet<PoseInstance>();
+function closePose(pose: PoseInstance | null) {
+  if (!pose || closedPoses.has(pose)) return;
+  closedPoses.add(pose);
+  try {
+    pose.close();
+  } catch {
+    // already closed
+  }
+}
+
 // =====================================================================
 // MAIN COMPONENT
 // =====================================================================
 export function LiveSessionView() {
   // ─── Store ──────────────────────────────────────────────────────────
-  const store = useAppStore();
+  // Per-field selectors so only what's rendered triggers re-renders. The
+  // per-frame pipeline reads/writes through useAppStore.getState() instead.
+  const liveAngles = useAppStore((s) => s.liveAngles);
+  const currentRep = useAppStore((s) => s.currentRep);
+  const currentSet = useAppStore((s) => s.currentSet);
+  const sessionAccuracy = useAppStore((s) => s.sessionAccuracy);
+  const aiFeedback = useAppStore((s) => s.aiFeedback);
+  const selectedExerciseId = useAppStore((s) => s.selectedExerciseId);
+  const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   // ─── Local State ────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SessionPhase>('pre-session');
@@ -203,6 +273,7 @@ export function LiveSessionView() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
   const [detectionActive, setDetectionActive] = useState(false); // true once landmarks arrive
+  const [personVisible, setPersonVisible] = useState(false);
   const [mediaPipeError, setMediaPipeError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [coachLoading, setCoachLoading] = useState(false);
@@ -217,63 +288,66 @@ export function LiveSessionView() {
   // ─── Refs ───────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const poseRef = useRef<unknown>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const coachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastCoachCallRef = useRef<number>(0);
-  const repStateRef = useRef<{ wasInRange: boolean; lockTime: number }>({
-    wasInRange: false,
-    lockTime: 0,
-  });
+  const poseRef = useRef<PoseInstance | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const sessionStartTimeRef = useRef<number>(0);
-  const maxRomRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const processingRef = useRef<boolean>(false); // true while pose.send() is in flight
-  const isPausedRef = useRef<boolean>(false); // mirror of isPaused for use inside callbacks
   const lastFrameTimeRef = useRef<number>(0); // watchdog: timestamp of last processed frame
+  const lastAngleUiRef = useRef<number>(0); // throttle for setLiveAngles
+  const repStateRef = useRef<RepState>(IDLE_REP);
+  const romRef = useRef({ min: Infinity, max: -Infinity }); // primary joint, visible frames
+  const pendingLogsRef = useRef<PendingLog[]>([]);
+  const stoppingRef = useRef<boolean>(false); // finalize the session exactly once
+  const lastCoachCallRef = useRef<number>(0);
+  const coachAbortRef = useRef<AbortController | null>(null);
   // ── Latest-value refs for the pose pipeline ──────────────────────────
-  // pose.onResults and the init effect are registered ONCE (empty deps) so
-  // they never re-run, but handlePoseResults reads exercise/store data that
-  // changes over time. We mirror those values into refs so the callback
-  // always sees fresh data without needing to re-register onResults.
+  // pose.onResults is registered ONCE per session, so values that change
+  // over time are mirrored into refs and read from there.
   const handlePoseResultsRef = useRef<(results: unknown) => void>(() => {});
   const selectedExerciseRef = useRef<ExerciseFromAPI | null>(null);
+  const isPausedRef = useRef<boolean>(false);
+  const ttsEnabledRef = useRef<boolean>(false);
+  const elapsedRef = useRef<number>(0);
   const detectionActiveRef = useRef<boolean>(false); // one-shot guard for setDetectionActive
+  const personVisibleRef = useRef<boolean>(false);
 
-  // keep the ref in sync so onResults callback (registered once) sees latest value
   useEffect(() => {
     isPausedRef.current = isPaused;
   }, [isPaused]);
 
-  // Mirror changing values into refs — see note above the ref declarations.
   useEffect(() => {
     selectedExerciseRef.current = selectedExercise;
   }, [selectedExercise]);
 
+  useEffect(() => {
+    ttsEnabledRef.current = ttsEnabled;
+  }, [ttsEnabled]);
+
+  useEffect(() => {
+    elapsedRef.current = elapsedSeconds;
+  }, [elapsedSeconds]);
+
   // ─── Fetch exercises ────────────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
     async function fetchExercises() {
+      let data: ExerciseFromAPI[];
       try {
         const res = await fetch('/api/exercises');
         if (!res.ok) throw new Error('Failed to fetch');
-        const data = await res.json();
-        setExercises(data);
+        data = await res.json();
       } catch {
-        // Fallback to exercises-data
-        const { EXERCISES } = await import('@/lib/exercises-data');
-        setExercises(
-          EXERCISES.map((ex, idx) => ({
-            ...ex,
-            id: `local-${idx}`,
-            targetJoints: ex.targetJoints,
-            instructions: ex.instructions,
-          }))
-        );
-      } finally {
-        setLoadingExercises(false);
+        // Fallback to local data, using the same IDs the seed route creates
+        data = EXERCISES.map((ex) => ({ ...ex, id: exerciseIdFromName(ex.name) }));
       }
+      if (cancelled) return;
+      setExercises(data);
+      setLoadingExercises(false);
     }
     fetchExercises();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ─── Timer ──────────────────────────────────────────────────────────
@@ -288,152 +362,255 @@ export function LiveSessionView() {
     };
   }, [phase, isPaused]);
 
-  // ─── Cleanup on unmount ─────────────────────────────────────────────
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (coachTimerRef.current) clearTimeout(coachTimerRef.current);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
+  // ─── Session helpers (refs + store snapshot only → stable) ──────────
+  const releaseMedia = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    closePose(poseRef.current);
+    poseRef.current = null;
+  }, []);
+
+  const getSessionMetrics = useCallback(() => {
+    const accuracies = useAppStore.getState().sessionAccuracy;
+    const rom = romRef.current;
+    return {
+      // One accuracy entry per completed rep, across all sets
+      totalReps: accuracies.length,
+      avgAccuracy:
+        accuracies.length > 0
+          ? Math.round(accuracies.reduce((a, b) => a + b, 0) / accuracies.length)
+          : 0,
+      // Range of motion = degrees of movement of the primary joint
+      maxRom: rom.max >= rom.min ? Math.round(rom.max - rom.min) : 0,
     };
   }, []);
 
-  // ─── TTS helper ─────────────────────────────────────────────────────
-  const speakText = useCallback(
-    async (text: string) => {
-      if (!ttsEnabled) return;
-      try {
-        const res = await fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-        });
-        if (!res.ok) return;
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.play().catch(() => {});
-        audio.onended = () => URL.revokeObjectURL(url);
-      } catch {
-        // Silently fail TTS
-      }
-    },
-    [ttsEnabled]
-  );
+  // Send buffered JointAngleLog rows. keepalive lets it survive page unload.
+  const flushLogs = useCallback(async (keepalive = false) => {
+    const sessionId = useAppStore.getState().currentSessionId;
+    const rows = pendingLogsRef.current;
+    if (!sessionId || rows.length === 0) return;
+    pendingLogsRef.current = [];
 
-  // ─── AI Coach call (debounced) ──────────────────────────────────────
+    const send = (logs: PendingLog[]) =>
+      fetch(`/api/sessions/${sessionId}/logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ logs }),
+        keepalive,
+      }).then((res) => {
+        if (!res.ok) throw new Error(`Log flush failed: ${res.status}`);
+      });
+
+    const batches: PendingLog[][] = [];
+    for (let i = 0; i < rows.length; i += LOG_BATCH_MAX) {
+      batches.push(rows.slice(i, i + LOG_BATCH_MAX));
+    }
+
+    if (keepalive) {
+      batches.forEach((b) => send(b).catch(() => {}));
+      return;
+    }
+    for (let i = 0; i < batches.length; i++) {
+      try {
+        await send(batches[i]);
+      } catch {
+        // Requeue the unsent rows for the next flush, bounded in size
+        pendingLogsRef.current = [...batches.slice(i).flat(), ...pendingLogsRef.current].slice(
+          -LOG_BUFFER_MAX
+        );
+        return;
+      }
+    }
+  }, []);
+
+  // Periodic log flush while a session is active
+  useEffect(() => {
+    if (phase !== 'active') return;
+    const id = setInterval(() => flushLogs(), LOG_FLUSH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [phase, flushLogs]);
+
+  // ─── Abandoned session (unmount / tab close) ────────────────────────
+  // Saves what we have as "cancelled" instead of leaving it in_progress.
+  useEffect(() => {
+    const abandonSession = () => {
+      const st = useAppStore.getState();
+      const sessionId = st.currentSessionId;
+      if (!sessionId || stoppingRef.current) return;
+      stoppingRef.current = true;
+      flushLogs(true);
+      fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'cancelled',
+          endedAt: new Date().toISOString(),
+          ...getSessionMetrics(),
+        }),
+        keepalive: true,
+      }).catch(() => {});
+      st.setIsSessionActive(false);
+      st.setCurrentSessionId(null);
+    };
+
+    window.addEventListener('pagehide', abandonSession);
+    return () => {
+      window.removeEventListener('pagehide', abandonSession);
+      abandonSession();
+      if (timerRef.current) clearInterval(timerRef.current);
+      coachAbortRef.current?.abort();
+      releaseMedia();
+    };
+  }, [flushLogs, getSessionMetrics, releaseMedia]);
+
+  // ─── TTS helper ─────────────────────────────────────────────────────
+  const speakText = useCallback(async (text: string) => {
+    if (!ttsEnabledRef.current) return;
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      // Don't start talking after the session has ended
+      if (!useAppStore.getState().isSessionActive) return;
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      audio.play().catch(() => URL.revokeObjectURL(url));
+    } catch {
+      // Silently fail TTS
+    }
+  }, []);
+
+  // ─── AI Coach call (throttled, one request in flight) ───────────────
   const callCoach = useCallback(
-    (currentAngles: Record<string, number>) => {
-      if (!selectedExercise) return;
+    (angles: Record<string, number>) => {
+      const exercise = selectedExerciseRef.current;
+      if (!exercise || coachAbortRef.current) return;
       const now = Date.now();
-      if (now - lastCoachCallRef.current < 8000) return;
+      if (now - lastCoachCallRef.current < COACH_INTERVAL_MS) return;
+
+      // Only send angles for visible target joints
+      const currentAngles: Record<string, number> = {};
+      exercise.targetJoints.forEach((tj) => {
+        if (angles[tj.name] !== undefined) currentAngles[tj.name] = angles[tj.name];
+      });
+      if (Object.keys(currentAngles).length === 0) return;
       lastCoachCallRef.current = now;
 
+      const controller = new AbortController();
+      coachAbortRef.current = controller;
+      const { currentRep: repCount, currentSet: setCount } = useAppStore.getState();
       setCoachLoading(true);
       fetch('/api/coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          exerciseName: selectedExercise.nameTh,
+          exerciseName: exercise.nameTh,
           currentAngles,
-          targetJoints: selectedExercise.targetJoints,
-          repCount: store.currentRep,
-          setCount: store.currentSet,
+          targetJoints: exercise.targetJoints,
+          repCount,
+          setCount,
         }),
+        signal: controller.signal,
       })
-        .then((res) => res.json())
+        .then((res) => {
+          if (!res.ok) throw new Error(`Coach failed: ${res.status}`);
+          return res.json();
+        })
         .then((data) => {
+          if (controller.signal.aborted) return;
           const fb = data.feedback || 'ทำดีมากครับ! ทำต่อไปเลย';
-          store.setAiFeedback(fb);
+          useAppStore.getState().setAiFeedback(fb);
           speakText(fb);
         })
         .catch(() => {
-          store.setAiFeedback('ทำดีมากครับ! ทำต่อไปเลย');
+          if (controller.signal.aborted) return;
+          useAppStore.getState().setAiFeedback('ทำดีมากครับ! ทำต่อไปเลย');
         })
         .finally(() => {
+          if (coachAbortRef.current === controller) coachAbortRef.current = null;
           setCoachLoading(false);
         });
     },
-    [selectedExercise, store, speakText]
+    [speakText]
   );
 
   // ─── Start exercise ─────────────────────────────────────────────────
-  const handleStartExercise = useCallback(
-    async (exercise: ExerciseFromAPI) => {
-      setConnecting(true);
-      try {
-        // Create session
-        const sessionRes = await fetch('/api/sessions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ exerciseId: exercise.id, patientId: store.currentPatientId }),
-        });
-        const sessionData = await sessionRes.json();
-
-        // Update store
-        store.setSelectedExerciseId(exercise.id);
-        store.setIsSessionActive(true);
-        store.setCurrentSessionId(sessionData.id);
-        store.clearSessionData();
-        store.setCurrentSet(1);
-        store.setCurrentRep(0);
-
-        setSelectedExercise(exercise);
-        setPhase('active');
-        setElapsedSeconds(0);
-        sessionStartTimeRef.current = Date.now();
-        maxRomRef.current = 0;
-        repStateRef.current = { wasInRange: false, lockTime: 0 };
-        lastCoachCallRef.current = 0;
-      } catch {
-        setConnecting(false);
-      } finally {
-        setConnecting(false);
+  const handleStartExercise = useCallback(async (exercise: ExerciseFromAPI) => {
+    setConnecting(true);
+    try {
+      const st = useAppStore.getState();
+      const sessionRes = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exerciseId: exercise.id, patientId: st.currentPatientId }),
+      });
+      const sessionData = await sessionRes.json().catch(() => null);
+      if (!sessionRes.ok || !sessionData?.id) {
+        toast.error('ไม่สามารถเริ่มเซสชันได้ กรุณาลองใหม่อีกครั้ง');
+        return;
       }
-    },
-    [store]
-  );
+
+      st.clearSessionData();
+      st.setSelectedExerciseId(exercise.id);
+      st.setIsSessionActive(true);
+      st.setCurrentSessionId(sessionData.id);
+
+      stoppingRef.current = false;
+      repStateRef.current = IDLE_REP;
+      romRef.current = { min: Infinity, max: -Infinity };
+      pendingLogsRef.current = [];
+      lastCoachCallRef.current = 0;
+      lastAngleUiRef.current = 0;
+      detectionActiveRef.current = false;
+      personVisibleRef.current = false;
+
+      setSelectedExercise(exercise);
+      setMediaPipeError(null);
+      setCameraError(null);
+      setDetectionActive(false);
+      setPersonVisible(false);
+      setIsPaused(false);
+      setElapsedSeconds(0);
+      setPhase('active');
+    } catch {
+      toast.error('ไม่สามารถเริ่มเซสชันได้ กรุณาตรวจสอบการเชื่อมต่อ');
+    } finally {
+      setConnecting(false);
+    }
+  }, []);
 
   // ─── Stop session ───────────────────────────────────────────────────
   const handleStopSession = useCallback(async () => {
-    // Stop camera
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
 
-    // Stop MediaPipe (close WASM graph + release worker)
-    try {
-      const pose = poseRef.current as { close?: () => void } | null;
-      if (pose?.close) pose.close();
-    } catch {
-      // ignore
-    }
-    poseRef.current = null;
+    coachAbortRef.current?.abort();
+    releaseMedia();
     setMediaPipeLoaded(false);
     setDetectionActive(false);
     detectionActiveRef.current = false;
 
-    // Finalize session
-    const totalReps = store.currentRep;
-    const accuracies = store.sessionAccuracy;
-    const avgAccuracy =
-      accuracies.length > 0
-        ? Math.round(accuracies.reduce((a, b) => a + b, 0) / accuracies.length)
-        : 0;
+    const st = useAppStore.getState();
+    const metrics = getSessionMetrics();
 
-    if (store.currentSessionId) {
+    if (st.currentSessionId) {
+      await flushLogs();
       try {
-        await fetch(`/api/sessions/${store.currentSessionId}`, {
+        await fetch(`/api/sessions/${st.currentSessionId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: 'completed',
             endedAt: new Date().toISOString(),
-            totalReps,
-            avgAccuracy,
-            maxRom: maxRomRef.current,
+            ...metrics,
           }),
         });
       } catch {
@@ -442,19 +619,18 @@ export function LiveSessionView() {
     }
 
     setSummaryData({
-      totalReps,
-      avgAccuracy,
-      totalTime: elapsedSeconds,
-      perRepAccuracy: accuracies,
+      totalReps: metrics.totalReps,
+      avgAccuracy: metrics.avgAccuracy,
+      totalTime: elapsedRef.current,
+      perRepAccuracy: useAppStore.getState().sessionAccuracy,
     });
 
-    // Reset store
-    store.setIsSessionActive(false);
-    store.setCurrentSessionId(null);
-    store.setSelectedExerciseId(null);
+    st.setIsSessionActive(false);
+    st.setCurrentSessionId(null);
+    st.setSelectedExerciseId(null);
 
     setPhase('summary');
-  }, [store, elapsedSeconds]);
+  }, [flushLogs, getSessionMetrics, releaseMedia]);
 
   // ─── Toggle pause ───────────────────────────────────────────────────
   const handleTogglePause = useCallback(() => {
@@ -467,38 +643,16 @@ export function LiveSessionView() {
 
     let cancelled = false;
     let rafId = 0;
+    let pose: PoseInstance | null = null;
 
     async function initMediaPipe() {
-      // Track which base URL the loader scripts came from so locateFile()
-      // fetches matching WASM/model binaries (local vs CDN must never mix).
-      let poseBaseUrl = LOCAL_POSE_BASE;
-
       try {
-        // 1) Load MediaPipe scripts: LOCAL first (instant, offline-safe),
-        //    fall back to the pinned CDN version only if local fails.
-        try {
-          await loadScriptWithRetry(LOCAL_CAMERA_UTILS, 1);
-          await loadScriptWithRetry(LOCAL_POSE_CDN, 1);
-          poseBaseUrl = LOCAL_POSE_BASE;
-        } catch {
-          if (cancelled) return;
-          console.warn('[MediaPipe] local assets failed, falling back to CDN');
-          await loadScriptWithRetry(CDN_CAMERA_UTILS);
-          await loadScriptWithRetry(CDN_POSE_CDN);
-          poseBaseUrl = CDN_POSE_BASE_URL;
-        }
-
+        // 1) Load the pinned MediaPipe Pose loader from the CDN
+        await loadScriptWithRetry(POSE_SCRIPT);
         if (cancelled) return;
 
-        // Access window globals
         const w = window as unknown as {
-          Pose: new (config: { locateFile: (file: string) => string }) => {
-            setOptions: (opts: Record<string, unknown>) => Promise<void>;
-            onResults: (cb: (results: unknown) => void) => void;
-            initialize: () => Promise<void>;
-            close: () => void;
-            send: (input: { image: HTMLVideoElement } | HTMLVideoElement) => Promise<void>;
-          };
+          Pose?: new (config: { locateFile: (file: string) => string }) => PoseInstance;
         };
 
         if (!w.Pose) {
@@ -556,15 +710,13 @@ export function LiveSessionView() {
         await waitForVideoReady(video);
         if (cancelled) return;
 
-        // 3) Create Pose instance (WASM assets fetched via locateFile).
-        //    NOTE: `poseBaseUrl` MUST point at the same origin/version the
-        //    pose.js loader came from — mixing a local loader with CDN WASM
-        //    (or vice versa) breaks the blob worker's importScripts().
-        const pose = new w.Pose({
-          locateFile: (file: string) => `${poseBaseUrl}${file}`,
+        // 3) Create Pose instance (WASM assets fetched via locateFile)
+        const instance = new w.Pose({
+          locateFile: (file: string) => `${POSE_BASE_URL}${file}`,
         });
+        pose = instance;
 
-        await pose.setOptions({
+        await instance.setOptions({
           // IMPORTANT: MediaPipe's `selfieMode` on the legacy Pose JS API does
           // NOT mirror landmark.x — it only flips left/right landmark indices.
           // We keep it OFF and draw RAW coordinates instead; both <video> and
@@ -578,55 +730,50 @@ export function LiveSessionView() {
           minTrackingConfidence: 0.5,
         });
 
-        pose.onResults((results: unknown) => {
-          if (cancelled) return;
-          if (isPausedRef.current) return;
-          // Indirection through a ref: this callback is registered once, but
-          // handlePoseResults is re-created when exercise/store change. The
-          // ref always points at the LATEST version of the handler.
+        instance.onResults((results: unknown) => {
+          if (cancelled || isPausedRef.current) return;
           handlePoseResultsRef.current(results);
         });
 
-        // DIAGNOSTIC FIX: `initialize()` used to hang forever when the WASM
-        // graph failed to boot (CDN blocked / mixed origins). An unresolvable
-        // await meant NO error UI, NO skeleton, just an eternal spinner.
-        // We now race it against a 60s timeout so failures surface clearly.
-        const initTimeout = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('MediaPipe initialize timeout')), 60000)
-        );
+        // initialize() can hang forever when the WASM graph fails to boot;
+        // race it against a timeout so the failure surfaces in the UI.
+        let initTimer: ReturnType<typeof setTimeout> | undefined;
+        const initTimeout = new Promise<never>((_, reject) => {
+          initTimer = setTimeout(() => reject(new Error('MediaPipe initialize timeout')), 60000);
+        });
         try {
-          await Promise.race([pose.initialize(), initTimeout]);
+          await Promise.race([instance.initialize(), initTimeout]);
         } catch (err) {
           if (cancelled) return;
           console.error('[MediaPipe] initialize() failed/timed out:', err);
-          try { pose.close(); } catch { /* already closed */ }
+          closePose(instance);
           setMediaPipeError(
             'โมเดล AI ไม่สามารถเริ่มต้นได้ (WASM โหลดไม่สำเร็จ) — กดเริ่มใหม่หรือตรวจสอบอินเทอร์เน็ต'
           );
           return;
+        } finally {
+          clearTimeout(initTimer);
         }
         if (cancelled) return;
-        poseRef.current = pose;
+        poseRef.current = instance;
         setMediaPipeLoaded(true);
 
-        // 4) Drive detection with our own rAF loop instead of camera_utils'
-        //    internal setInterval. This is more robust: it naturally throttles
-        //    to the display refresh rate and never queues frames while the
-        //    WASM model is still busy (pose.send is awaited per frame).
+        // 4) Drive detection with our own rAF loop: throttles to the display
+        //    refresh rate and never queues frames while the model is busy.
         const sendLoop = async () => {
           if (cancelled) return;
           const v = videoRef.current;
           if (v && v.readyState >= 2 && !processingRef.current) {
             processingRef.current = true;
             try {
-              await pose.send({ image: v });
+              await instance.send({ image: v });
             } catch {
               // ignore single-frame inference errors, keep looping
             } finally {
               processingRef.current = false;
             }
           }
-          rafId = requestAnimationFrame(sendLoop);
+          if (!cancelled) rafId = requestAnimationFrame(sendLoop);
         };
         rafId = requestAnimationFrame(sendLoop);
       } catch (err) {
@@ -673,103 +820,68 @@ export function LiveSessionView() {
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      // Covers a graph created but not yet handed to poseRef (init in flight)
+      closePose(pose);
     };
   }, [phase]);
 
-  // ─── Handle pose results ────────────────────────────────────────────
+  // ─── Handle pose results (runs every processed frame) ───────────────
   const handlePoseResults = useCallback(
     (results: unknown) => {
-      const r = results as {
-        poseLandmarks?: Landmark[];
-        image?: HTMLVideoElement | HTMLCanvasElement;
-      };
+      if (stoppingRef.current) return;
+      const r = results as { poseLandmarks?: Landmark[] };
 
-      if (!canvasRef.current) return;
-
-      const landmarks = r.poseLandmarks;
       const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (!canvas || !video) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const video = videoRef.current;
-      if (!video) return;
-
-      // Match canvas to displayed video size
+      // Match canvas to video size
       if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Watchdog: remember when we last received a processed frame
-      lastFrameTimeRef.current = Date.now();
+      const now = Date.now();
+      lastFrameTimeRef.current = now;
 
-      // No person detected this frame → clear skeleton + show hint
-      if (!landmarks || landmarks.length < 33) {
-        store.setSkeletonLandmarks([]);
-        return;
+      // Only re-render when presence actually changes, not every frame
+      const landmarks = r.poseLandmarks;
+      const hasPerson = !!landmarks && landmarks.length >= 33;
+      if (hasPerson !== personVisibleRef.current) {
+        personVisibleRef.current = hasPerson;
+        setPersonVisible(hasPerson);
       }
+      if (!landmarks || !hasPerson) return;
 
-      // First successful detection → flip watchdog to "active" (only once —
-      // calling setState every frame would re-render the component 30x/sec)
       if (!detectionActiveRef.current) {
         detectionActiveRef.current = true;
         setDetectionActive(true);
       }
 
-      // Calculate angles
-      const angles = calculateAllAngles(landmarks);
+      // Angles (aspect-corrected; low-visibility joints are omitted)
+      const aspect =
+        video.videoWidth > 0 && video.videoHeight > 0 ? video.videoWidth / video.videoHeight : 1;
+      const angles = calculateAllAngles(landmarks, aspect);
 
-      // Update store angles
-      Object.entries(angles).forEach(([joint, angle]) => {
-        store.setLiveAngle(joint, angle);
-      });
+      // Throttled UI update: one store write per ~100 ms
+      if (now - lastAngleUiRef.current >= ANGLE_UI_INTERVAL_MS) {
+        lastAngleUiRef.current = now;
+        useAppStore.getState().setLiveAngles(angles);
+      }
 
-      // Store landmarks
-      store.setSkeletonLandmarks(landmarks.map((l) => ({ x: l.x, y: l.y, z: l.z })));
+      const exercise = selectedExerciseRef.current;
+      const targetJoints = exercise?.targetJoints || [];
 
-      // Determine colors for connections
-      const targetJoints = selectedExerciseRef.current?.targetJoints || [];
-
-      // Build a map of joint index -> color based on target joints
+      // Status color per target joint landmark
       const jointColorMap: Record<number, string> = {};
-      const JOINT_MAP: Record<string, number> = {
-        left_shoulder: LANDMARKS.LEFT_SHOULDER,
-        right_shoulder: LANDMARKS.RIGHT_SHOULDER,
-        left_elbow: LANDMARKS.LEFT_ELBOW,
-        right_elbow: LANDMARKS.RIGHT_ELBOW,
-        left_wrist: LANDMARKS.LEFT_WRIST,
-        right_wrist: LANDMARKS.RIGHT_WRIST,
-        left_hip: LANDMARKS.LEFT_HIP,
-        right_hip: LANDMARKS.RIGHT_HIP,
-        left_knee: LANDMARKS.LEFT_KNEE,
-        right_knee: LANDMARKS.RIGHT_KNEE,
-        left_ankle: LANDMARKS.LEFT_ANKLE,
-        right_ankle: LANDMARKS.RIGHT_ANKLE,
-      };
-
-      // Color for each target joint
-      const jointStatusColor: Record<string, string> = {};
       targetJoints.forEach((tj) => {
-        const currentAngle = angles[tj.name];
-        if (currentAngle !== undefined) {
-          if (currentAngle >= tj.minAngle && currentAngle <= tj.maxAngle) {
-            jointStatusColor[tj.name] = '#10b981'; // green
-          } else {
-            const dev = Math.min(
-              Math.abs(currentAngle - tj.minAngle),
-              Math.abs(currentAngle - tj.maxAngle)
-            );
-            jointStatusColor[tj.name] = dev <= 15 ? '#f59e0b' : '#ef4444'; // amber / red
-          }
-        }
-      });
-
-      // Map joint name to color
-      Object.entries(jointStatusColor).forEach(([name, color]) => {
-        const idx = JOINT_MAP[name];
-        if (idx !== undefined) {
-          jointColorMap[idx] = color;
+        const angle = angles[tj.name];
+        const idx = JOINT_INDEX[tj.name];
+        if (angle !== undefined && idx !== undefined) {
+          jointColorMap[idx] = ANGLE_STATUS_HEX[getAngleStatus(angle, tj.minAngle, tj.maxAngle)];
         }
       });
 
@@ -781,27 +893,20 @@ export function LiveSessionView() {
       SKELETON_CONNECTIONS.forEach(([i, j]) => {
         const lm1 = landmarks[i];
         const lm2 = landmarks[j];
-        if (!lm1 || !lm2) return;
-        if ((lm1.visibility ?? 0) < 0.5 || (lm2.visibility ?? 0) < 0.5) return;
+        if (!isVisible(lm1) || !isVisible(lm2)) return;
 
-        const x1 = lm1.x * canvas.width;
-        const y1 = lm1.y * canvas.height;
-        const x2 = lm2.x * canvas.width;
-        const y2 = lm2.y * canvas.height;
-
-        // Determine line color
-        let lineColor = '#10b981'; // default green
         const c1 = jointColorMap[i];
         const c2 = jointColorMap[j];
-        if (c1 === '#ef4444' || c2 === '#ef4444') {
-          lineColor = '#ef4444';
-        } else if (c1 === '#f59e0b' || c2 === '#f59e0b') {
-          lineColor = '#f59e0b';
+        let lineColor = ANGLE_STATUS_HEX.good;
+        if (c1 === ANGLE_STATUS_HEX.bad || c2 === ANGLE_STATUS_HEX.bad) {
+          lineColor = ANGLE_STATUS_HEX.bad;
+        } else if (c1 === ANGLE_STATUS_HEX.warn || c2 === ANGLE_STATUS_HEX.warn) {
+          lineColor = ANGLE_STATUS_HEX.warn;
         }
 
         ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
+        ctx.moveTo(lm1.x * canvas.width, lm1.y * canvas.height);
+        ctx.lineTo(lm2.x * canvas.width, lm2.y * canvas.height);
         ctx.strokeStyle = lineColor;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
@@ -809,31 +914,12 @@ export function LiveSessionView() {
       });
 
       // Draw joint circles
-      const keyIndices = [
-        LANDMARKS.LEFT_SHOULDER,
-        LANDMARKS.RIGHT_SHOULDER,
-        LANDMARKS.LEFT_ELBOW,
-        LANDMARKS.RIGHT_ELBOW,
-        LANDMARKS.LEFT_WRIST,
-        LANDMARKS.RIGHT_WRIST,
-        LANDMARKS.LEFT_HIP,
-        LANDMARKS.RIGHT_HIP,
-        LANDMARKS.LEFT_KNEE,
-        LANDMARKS.RIGHT_KNEE,
-        LANDMARKS.LEFT_ANKLE,
-        LANDMARKS.RIGHT_ANKLE,
-      ];
-
-      keyIndices.forEach((idx) => {
+      KEY_INDICES.forEach((idx) => {
         const lm = landmarks[idx];
-        if (!lm || (lm.visibility ?? 0) < 0.5) return;
-
-        const x = lm.x * canvas.width; // raw coords; CSS -scale-x-100 handles mirroring
-        const y = lm.y * canvas.height;
-
+        if (!isVisible(lm)) return;
         ctx.beginPath();
-        ctx.arc(x, y, 6, 0, 2 * Math.PI);
-        ctx.fillStyle = jointColorMap[idx] || '#10b981';
+        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = jointColorMap[idx] || ANGLE_STATUS_HEX.good;
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2;
@@ -841,71 +927,85 @@ export function LiveSessionView() {
       });
 
       // ─── Rep detection ─────────────────────────────────────────────
-      if (targetJoints.length > 0) {
-        const primaryTarget = targetJoints[0];
-        const currentAngle = angles[primaryTarget.name];
-        if (currentAngle !== undefined) {
-          const inRange =
-            currentAngle >= primaryTarget.minAngle &&
-            currentAngle <= primaryTarget.maxAngle;
-          const now = Date.now();
-          const state = repStateRef.current;
+      // A rep = enter the target range, hold ≥ REP_MIN_HOLD_MS, then leave it
+      // by REP_HYSTERESIS_DEG. It is scored on the best angle reached inside.
+      const primary = targetJoints[0];
+      const angle = primary ? angles[primary.name] : undefined;
+      if (exercise && primary && angle !== undefined) {
+        const rom = romRef.current;
+        rom.min = Math.min(rom.min, angle);
+        rom.max = Math.max(rom.max, angle);
 
-          // Track max ROM
-          if (currentAngle > maxRomRef.current) {
-            maxRomRef.current = currentAngle;
+        const inRange = angle >= primary.minAngle && angle <= primary.maxAngle;
+        let rep = repStateRef.current;
+        if (!rep.inRange && inRange) {
+          rep = { inRange: true, enteredAt: now, bestAccuracy: -1, bestAngles: {} };
+          repStateRef.current = rep;
+        }
+
+        if (rep.inRange && inRange) {
+          const { percentAccuracy } = isAngleCorrect(
+            angle,
+            primary.idealAngle,
+            primary.minAngle,
+            primary.maxAngle
+          );
+          if (percentAccuracy > rep.bestAccuracy) {
+            rep.bestAccuracy = percentAccuracy;
+            rep.bestAngles = angles;
           }
+        } else if (
+          rep.inRange &&
+          (angle < primary.minAngle - REP_HYSTERESIS_DEG ||
+            angle > primary.maxAngle + REP_HYSTERESIS_DEG)
+        ) {
+          repStateRef.current = IDLE_REP;
+          if (now - rep.enteredAt >= REP_MIN_HOLD_MS) {
+            const st = useAppStore.getState();
+            st.addAccuracy(rep.bestAccuracy);
+            const repNumber = st.sessionAccuracy.length + 1;
 
-          if (inRange && !state.wasInRange && now - state.lockTime > 500) {
-            // Entered target range → count rep
-            const newRep = store.currentRep + 1;
-            store.setCurrentRep(newRep);
+            // Buffer one JointAngleLog row per visible target joint
+            targetJoints.forEach((tj) => {
+              const a = rep.bestAngles[tj.name];
+              if (a === undefined) return;
+              const { correct, deviation } = isAngleCorrect(a, tj.idealAngle, tj.minAngle, tj.maxAngle);
+              pendingLogsRef.current.push({
+                repNumber,
+                jointName: tj.name,
+                angle: a,
+                idealAngle: tj.idealAngle,
+                deviation: Math.round(deviation * 10) / 10,
+                isCorrect: correct,
+              });
+            });
+            if (pendingLogsRef.current.length >= LOG_FLUSH_SIZE) flushLogs();
 
-            // Calculate accuracy for this rep
-            const { percentAccuracy } = isAngleCorrect(
-              currentAngle,
-              primaryTarget.idealAngle,
-              primaryTarget.minAngle,
-              primaryTarget.maxAngle
-            );
-            store.addAccuracy(percentAccuracy);
-
-            repStateRef.current = { wasInRange: true, lockTime: now };
-
-            // Check set completion
-            if (newRep >= (selectedExercise?.repsPerSet || 10)) {
-              const newSet = store.currentSet + 1;
-              if (newSet > (selectedExercise?.sets || 3)) {
-                // Session complete
+            // Advance rep/set counters
+            const newRep = st.currentRep + 1;
+            if (newRep >= exercise.repsPerSet) {
+              if (st.currentSet + 1 > exercise.sets) {
+                st.setCurrentRep(newRep);
                 handleStopSession();
                 return;
               }
-              store.setCurrentSet(newSet);
-              store.setCurrentRep(0);
-              repStateRef.current = { wasInRange: false, lockTime: now };
+              st.setCurrentSet(st.currentSet + 1);
+              st.setCurrentRep(0);
+            } else {
+              st.setCurrentRep(newRep);
             }
-
-            // Trigger coach feedback
-            callCoach(angles);
-          } else if (!inRange) {
-            state.wasInRange = false;
           }
         }
       }
 
-      // Periodic coach call (~8 seconds)
-      const now = Date.now();
-      if (now - lastCoachCallRef.current >= 8000 && !coachLoading) {
-        callCoach(angles);
-      }
+      // Coach feedback (self-throttled to COACH_INTERVAL_MS)
+      callCoach(angles);
     },
-    [selectedExercise, store, callCoach, coachLoading, handleStopSession]
+    [callCoach, flushLogs, handleStopSession]
   );
 
-  // Keep the ref pointed at the newest handler version so the once-registered
-  // pose.onResults callback never runs a stale closure (this was the root
-  // cause of "camera works but no skeleton": an old closure could early-return
-  // or read outdated exercise data while drawing nothing).
+  // Keep the ref pointed at the newest handler so the once-registered
+  // pose.onResults callback never runs a stale closure.
   useEffect(() => {
     handlePoseResultsRef.current = handlePoseResults;
   }, [handlePoseResults]);
@@ -915,18 +1015,17 @@ export function LiveSessionView() {
     setPhase('pre-session');
     setSelectedExercise(null);
     setSummaryData(null);
-    store.clearSessionData();
-    store.setAiFeedback('');
-    store.clearLiveAngles();
-    store.setSelectedExerciseId(null);
-  }, [store]);
+    const st = useAppStore.getState();
+    st.clearSessionData();
+    st.setSelectedExerciseId(null);
+  }, []);
 
   // =====================================================================
   // RENDER: Pre-Session Screen
   // =====================================================================
   if (phase === 'pre-session') {
     // Exercise picked in the Exercises tab is shown first and highlighted
-    const preselectedId = store.selectedExerciseId;
+    const preselectedId = selectedExerciseId;
     const orderedExercises = preselectedId
       ? [
           ...exercises.filter((e) => e.id === preselectedId),
@@ -1108,7 +1207,7 @@ export function LiveSessionView() {
           )}
 
           {/* No-person hint once detection is running */}
-          {detectionActive && store.skeletonLandmarks.length === 0 && (
+          {detectionActive && !personVisible && (
             <div className="absolute inset-x-0 top-20 z-20 mx-auto flex max-w-md items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm text-white backdrop-blur-sm">
               <PersonStanding className="h-4 w-4 text-emerald-400" />
               ถอยหลังให้เห็นลำตัว/ขาทั้งข้างในกรอบกล้อง
@@ -1147,8 +1246,8 @@ export function LiveSessionView() {
                 {selectedExercise?.nameTh || 'กำลังฝึก...'}
               </p>
               <p className="text-xs text-white/60">
-                เซ็ต {store.currentSet}/{selectedExercise?.sets || 3} • ซ้ำ{' '}
-                {store.currentRep}/{selectedExercise?.repsPerSet || 10}
+                เซ็ต {currentSet}/{selectedExercise?.sets || 3} • ซ้ำ{' '}
+                {currentRep}/{selectedExercise?.repsPerSet || 10}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1204,7 +1303,7 @@ export function LiveSessionView() {
                       </h4>
                       <div className="space-y-2">
                         {(selectedExercise?.targetJoints || []).map((tj) => {
-                          const current = store.liveAngles[tj.name];
+                          const current = liveAngles[tj.name];
                           if (current === undefined) return null;
                           const colorClass = getAngleStatusColor(
                             current,
@@ -1212,14 +1311,7 @@ export function LiveSessionView() {
                             tj.maxAngle
                           );
                           const colorHex =
-                            current >= tj.minAngle && current <= tj.maxAngle
-                              ? '#10b981'
-                              : Math.min(
-                                  Math.abs(current - tj.minAngle),
-                                  Math.abs(current - tj.maxAngle)
-                                ) <= 15
-                                ? '#f59e0b'
-                                : '#ef4444';
+                            ANGLE_STATUS_HEX[getAngleStatus(current, tj.minAngle, tj.maxAngle)];
 
                           return (
                             <div
@@ -1258,7 +1350,7 @@ export function LiveSessionView() {
                             </div>
                           );
                         })}
-                        {Object.keys(store.liveAngles).length === 0 && (
+                        {Object.keys(liveAngles).length === 0 && (
                           <p className="text-xs text-white/40">
                             รอข้อมูลจากกล้อง...
                           </p>
@@ -1282,9 +1374,9 @@ export function LiveSessionView() {
                               กำลังเริ่มต้น AI...
                             </span>
                           </div>
-                        ) : store.aiFeedback ? (
+                        ) : aiFeedback ? (
                           <p className="text-xs leading-relaxed text-white/80">
-                            {store.aiFeedback}
+                            {aiFeedback}
                           </p>
                         ) : (
                           <p className="text-xs text-white/40">
@@ -1306,36 +1398,36 @@ export function LiveSessionView() {
                         <div className="flex items-center justify-between rounded-lg bg-white/5 p-2.5">
                           <span className="text-xs text-white/60">เซ็ต</span>
                           <span className="font-mono text-sm font-bold text-white">
-                            {store.currentSet} / {selectedExercise?.sets || 3}
+                            {currentSet} / {selectedExercise?.sets || 3}
                           </span>
                         </div>
                         <div className="rounded-lg bg-white/5 p-2.5">
                           <div className="mb-1.5 flex items-center justify-between">
                             <span className="text-xs text-white/60">
-                              ซ้ำ (เซ็ต {store.currentSet})
+                              ซ้ำ (เซ็ต {currentSet})
                             </span>
                             <span className="font-mono text-sm font-bold text-white">
-                              {store.currentRep} / {selectedExercise?.repsPerSet || 10}
+                              {currentRep} / {selectedExercise?.repsPerSet || 10}
                             </span>
                           </div>
                           <Progress
                             value={
                               selectedExercise?.repsPerSet
-                                ? (store.currentRep / selectedExercise.repsPerSet) * 100
+                                ? (currentRep / selectedExercise.repsPerSet) * 100
                                 : 0
                             }
                             className="h-2 bg-white/10"
                           />
                         </div>
-                        {store.sessionAccuracy.length > 0 && (
+                        {sessionAccuracy.length > 0 && (
                           <div className="flex items-center justify-between rounded-lg bg-white/5 p-2.5">
                             <span className="text-xs text-white/60">
                               ความแม่นยำเฉลี่ย
                             </span>
                             <span className="text-sm font-bold text-emerald-400">
                               {Math.round(
-                                store.sessionAccuracy.reduce((a, b) => a + b, 0) /
-                                  store.sessionAccuracy.length
+                                sessionAccuracy.reduce((a, b) => a + b, 0) /
+                                  sessionAccuracy.length
                               )}
                               %
                             </span>
@@ -1503,7 +1595,7 @@ export function LiveSessionView() {
                   className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700"
                   onClick={() => {
                     handleBackToHome();
-                    store.setActiveTab('dashboard');
+                    setActiveTab('dashboard');
                   }}
                 >
                   กลับหน้าหลัก

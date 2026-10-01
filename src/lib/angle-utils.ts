@@ -11,6 +11,8 @@ export interface Landmark {
 // Key landmark indices
 export const LANDMARKS = {
   NOSE: 0,
+  LEFT_EAR: 7,
+  RIGHT_EAR: 8,
   LEFT_SHOULDER: 11,
   RIGHT_SHOULDER: 12,
   LEFT_ELBOW: 13,
@@ -23,7 +25,12 @@ export const LANDMARKS = {
   RIGHT_KNEE: 26,
   LEFT_ANKLE: 27,
   RIGHT_ANKLE: 28,
+  LEFT_FOOT_INDEX: 31,
+  RIGHT_FOOT_INDEX: 32,
 } as const;
+
+// Landmarks below this visibility are treated as missing
+export const MIN_VISIBILITY = 0.5;
 
 // Skeleton connections for drawing
 export const SKELETON_CONNECTIONS: [number, number][] = [
@@ -41,16 +48,22 @@ export const SKELETON_CONNECTIONS: [number, number][] = [
   [LANDMARKS.RIGHT_KNEE, LANDMARKS.RIGHT_ANKLE],
 ];
 
+export function isVisible(lm: Landmark | undefined): lm is Landmark {
+  return !!lm && (lm.visibility ?? 0) >= MIN_VISIBILITY;
+}
+
 /**
  * Calculate angle between three points (in degrees)
  * @param a - First point (e.g., shoulder)
  * @param b - Vertex point (e.g., elbow)
  * @param c - Third point (e.g., wrist)
- * @returns Angle in degrees
+ * @param aspect - Image width / height. MediaPipe normalizes x by width and
+ *   y by height, so x must be rescaled for angles to be geometrically correct.
+ * @returns Angle in degrees (0-180)
  */
-export function calculateAngle(a: Landmark, b: Landmark, c: Landmark): number {
+export function calculateAngle(a: Landmark, b: Landmark, c: Landmark, aspect = 1): number {
   const radians =
-    Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+    Math.atan2(c.y - b.y, (c.x - b.x) * aspect) - Math.atan2(a.y - b.y, (a.x - b.x) * aspect);
   let angle = Math.abs(radians * (180.0 / Math.PI));
 
   if (angle > 180) {
@@ -61,96 +74,55 @@ export function calculateAngle(a: Landmark, b: Landmark, c: Landmark): number {
 }
 
 /**
- * Calculate all relevant joint angles from pose landmarks
+ * Calculate all relevant joint angles from pose landmarks.
+ * Joints whose landmarks are below MIN_VISIBILITY are omitted (undefined).
  */
-export function calculateAllAngles(landmarks: Landmark[]): Record<string, number> {
+export function calculateAllAngles(landmarks: Landmark[], aspect = 1): Record<string, number> {
   const angles: Record<string, number> = {};
 
-  const lm = (idx: number): Landmark => ({
-    x: landmarks[idx].x,
-    y: landmarks[idx].y,
-    z: landmarks[idx].z,
-    visibility: landmarks[idx].visibility,
-  });
+  const joint = (name: string, a: number, b: number, c: number) => {
+    const [pa, pb, pc] = [landmarks[a], landmarks[b], landmarks[c]];
+    if (isVisible(pa) && isVisible(pb) && isVisible(pc)) {
+      angles[name] = calculateAngle(pa, pb, pc, aspect);
+    }
+  };
 
-  // Left knee angle (hip-knee-ankle)
-  angles.left_knee = calculateAngle(
-    lm(LANDMARKS.LEFT_HIP),
-    lm(LANDMARKS.LEFT_KNEE),
-    lm(LANDMARKS.LEFT_ANKLE)
-  );
+  // Knee (hip-knee-ankle): 180 = straight leg
+  joint('left_knee', LANDMARKS.LEFT_HIP, LANDMARKS.LEFT_KNEE, LANDMARKS.LEFT_ANKLE);
+  joint('right_knee', LANDMARKS.RIGHT_HIP, LANDMARKS.RIGHT_KNEE, LANDMARKS.RIGHT_ANKLE);
 
-  // Right knee angle
-  angles.right_knee = calculateAngle(
-    lm(LANDMARKS.RIGHT_HIP),
-    lm(LANDMARKS.RIGHT_KNEE),
-    lm(LANDMARKS.RIGHT_ANKLE)
-  );
+  // Shoulder (hip-shoulder-elbow): 0 = arm down, 180 = arm overhead
+  joint('left_shoulder', LANDMARKS.LEFT_HIP, LANDMARKS.LEFT_SHOULDER, LANDMARKS.LEFT_ELBOW);
+  joint('right_shoulder', LANDMARKS.RIGHT_HIP, LANDMARKS.RIGHT_SHOULDER, LANDMARKS.RIGHT_ELBOW);
 
-  // Left shoulder angle (hip-shoulder-elbow)
-  angles.left_shoulder = calculateAngle(
-    lm(LANDMARKS.LEFT_HIP),
-    lm(LANDMARKS.LEFT_SHOULDER),
-    lm(LANDMARKS.LEFT_ELBOW)
-  );
+  // Elbow (shoulder-elbow-wrist): 180 = straight arm
+  joint('left_elbow', LANDMARKS.LEFT_SHOULDER, LANDMARKS.LEFT_ELBOW, LANDMARKS.LEFT_WRIST);
+  joint('right_elbow', LANDMARKS.RIGHT_SHOULDER, LANDMARKS.RIGHT_ELBOW, LANDMARKS.RIGHT_WRIST);
 
-  // Right shoulder angle
-  angles.right_shoulder = calculateAngle(
-    lm(LANDMARKS.RIGHT_HIP),
-    lm(LANDMARKS.RIGHT_SHOULDER),
-    lm(LANDMARKS.RIGHT_ELBOW)
-  );
+  // Hip (shoulder-hip-knee): 180 = upright
+  joint('left_hip', LANDMARKS.LEFT_SHOULDER, LANDMARKS.LEFT_HIP, LANDMARKS.LEFT_KNEE);
+  joint('right_hip', LANDMARKS.RIGHT_SHOULDER, LANDMARKS.RIGHT_HIP, LANDMARKS.RIGHT_KNEE);
 
-  // Left elbow angle (shoulder-elbow-wrist)
-  angles.left_elbow = calculateAngle(
-    lm(LANDMARKS.LEFT_SHOULDER),
-    lm(LANDMARKS.LEFT_ELBOW),
-    lm(LANDMARKS.LEFT_WRIST)
-  );
+  // Ankle dorsiflexion: 90 − angle(knee, ankle, toes).
+  // 0 = foot perpendicular to shin, positive = toes pulled toward shin.
+  const ankle = (name: string, knee: number, ank: number, toe: number) => {
+    const [pk, pa, pt] = [landmarks[knee], landmarks[ank], landmarks[toe]];
+    if (isVisible(pk) && isVisible(pa) && isVisible(pt)) {
+      angles[name] = Math.round((90 - calculateAngle(pk, pa, pt, aspect)) * 10) / 10;
+    }
+  };
+  ankle('left_ankle', LANDMARKS.LEFT_KNEE, LANDMARKS.LEFT_ANKLE, LANDMARKS.LEFT_FOOT_INDEX);
+  ankle('right_ankle', LANDMARKS.RIGHT_KNEE, LANDMARKS.RIGHT_ANKLE, LANDMARKS.RIGHT_FOOT_INDEX);
 
-  // Right elbow angle
-  angles.right_elbow = calculateAngle(
-    lm(LANDMARKS.RIGHT_SHOULDER),
-    lm(LANDMARKS.RIGHT_ELBOW),
-    lm(LANDMARKS.RIGHT_WRIST)
-  );
-
-  // Left hip angle (shoulder-hip-knee)
-  angles.left_hip = calculateAngle(
-    lm(LANDMARKS.LEFT_SHOULDER),
-    lm(LANDMARKS.LEFT_HIP),
-    lm(LANDMARKS.LEFT_KNEE)
-  );
-
-  // Right hip angle
-  angles.right_hip = calculateAngle(
-    lm(LANDMARKS.RIGHT_SHOULDER),
-    lm(LANDMARKS.RIGHT_HIP),
-    lm(LANDMARKS.RIGHT_KNEE)
-  );
-
-  // Left ankle angle (knee-ankle-foot)
-  angles.left_ankle = calculateAngle(
-    lm(LANDMARKS.LEFT_KNEE),
-    lm(LANDMARKS.LEFT_ANKLE),
-    { x: landmarks[LANDMARKS.LEFT_ANKLE].x, y: 1, z: 0 }
-  );
-
-  // Right ankle angle
-  angles.right_ankle = calculateAngle(
-    lm(LANDMARKS.RIGHT_KNEE),
-    lm(LANDMARKS.RIGHT_ANKLE),
-    { x: landmarks[LANDMARKS.RIGHT_ANKLE].x, y: 1, z: 0 }
-  );
-
-  // Neck angle (based on nose relative to shoulders)
-  const midShoulderX = (landmarks[LANDMARKS.LEFT_SHOULDER].x + landmarks[LANDMARKS.RIGHT_SHOULDER].x) / 2;
-  const midShoulderY = (landmarks[LANDMARKS.LEFT_SHOULDER].y + landmarks[LANDMARKS.RIGHT_SHOULDER].y) / 2;
-  angles.neck = calculateAngle(
-    { x: midShoulderX - 0.1, y: midShoulderY, z: 0 },
-    { x: midShoulderX, y: midShoulderY, z: 0 },
-    { x: landmarks[LANDMARKS.NOSE].x, y: landmarks[LANDMARKS.NOSE].y, z: 0 }
-  );
+  // Neck rotation (yaw): angle of the ear-to-ear line in the x/z plane.
+  // 0 = facing the camera, ~90 = full profile. MediaPipe z is a relative depth
+  // estimate on roughly the same scale as x, so this is an approximation.
+  const leftEar = landmarks[LANDMARKS.LEFT_EAR];
+  const rightEar = landmarks[LANDMARKS.RIGHT_EAR];
+  if (isVisible(leftEar) && isVisible(rightEar)) {
+    const yaw = Math.atan2(leftEar.z - rightEar.z, leftEar.x - rightEar.x) * (180 / Math.PI);
+    angles.neck = Math.round(Math.min(Math.abs(yaw), 180 - Math.abs(yaw)) * 10) / 10;
+  }
 
   return angles;
 }
@@ -165,7 +137,7 @@ export function isAngleCorrect(
   maxAngle: number
 ): { correct: boolean; deviation: number; percentAccuracy: number } {
   const deviation = Math.abs(currentAngle - idealAngle);
-  const tolerance = (maxAngle - minAngle) / 2;
+  const tolerance = Math.max((maxAngle - minAngle) / 2, 1);
   const correct = currentAngle >= minAngle && currentAngle <= maxAngle;
   const percentAccuracy = Math.max(0, 100 - (deviation / tolerance) * 50);
   return { correct, deviation, percentAccuracy: Math.round(percentAccuracy) };
@@ -178,6 +150,27 @@ export function formatAngle(angle: number): string {
   return `${Math.round(angle)}°`;
 }
 
+export type AngleStatus = 'good' | 'warn' | 'bad';
+
+// Canvas colors for each status (emerald-500 / amber-500 / red-500)
+export const ANGLE_STATUS_HEX: Record<AngleStatus, string> = {
+  good: '#10b981',
+  warn: '#f59e0b',
+  bad: '#ef4444',
+};
+
+/**
+ * Classify an angle: in range = good, within 15° of range = warn, else bad
+ */
+export function getAngleStatus(currentAngle: number, minAngle: number, maxAngle: number): AngleStatus {
+  if (currentAngle >= minAngle && currentAngle <= maxAngle) return 'good';
+  const deviation = Math.min(
+    Math.abs(currentAngle - minAngle),
+    Math.abs(currentAngle - maxAngle)
+  );
+  return deviation <= 15 ? 'warn' : 'bad';
+}
+
 /**
  * Get angle status color class
  */
@@ -186,16 +179,9 @@ export function getAngleStatusColor(
   minAngle: number,
   maxAngle: number
 ): string {
-  if (currentAngle >= minAngle && currentAngle <= maxAngle) {
-    return 'text-emerald-500';
-  }
-  const deviation = Math.min(
-    Math.abs(currentAngle - minAngle),
-    Math.abs(currentAngle - maxAngle)
-  );
-  if (deviation <= 15) {
-    return 'text-amber-500';
-  }
+  const status = getAngleStatus(currentAngle, minAngle, maxAngle);
+  if (status === 'good') return 'text-emerald-500';
+  if (status === 'warn') return 'text-amber-500';
   return 'text-red-500';
 }
 

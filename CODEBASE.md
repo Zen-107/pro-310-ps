@@ -62,8 +62,7 @@ project-root/
 │   └── custom.db                   # SQLite database file
 │
 ├── public/                          # Static assets
-│   ├── logo.svg
-│   └── mediapipe/                   # (gitignored) local MediaPipe Pose assets; falls back to CDN if missing
+│   └── logo.svg                    # (MediaPipe Pose is loaded from jsDelivr, pinned version)
 │
 ├── .env                             # Environment variables
 ├── package.json                    # Dependencies & scripts
@@ -114,8 +113,8 @@ project-root/
   - Body: `{ exerciseId, patientId }`
   - Returns: `{ id, exerciseId, patientId, startedAt, status }`
 - **GET /api/sessions/[id]** — Get session details with logs
-- **POST /api/sessions/[id]/logs** — Save joint angle log during session
-  - Body: `{ repNumber, jointName, angle, idealAngle, deviation, isCorrect }`
+- **POST /api/sessions/[id]/logs** — Save joint angle logs (batched, max 200 rows per request)
+  - Body: `{ logs: [{ repNumber, jointName, angle, idealAngle, deviation, isCorrect }, ...] }` (a single log object is also accepted)
 
 ### AI Coach
 - **POST /api/coach** — Generate AI feedback based on current angles
@@ -192,7 +191,7 @@ model Session {
   endedAt      DateTime?
   totalReps    Int      @default(0)             # Completed reps count
   avgAccuracy  Float    @default(0)             # 0-100%
-  maxRom       Float    @default(0)             # Maximum angle achieved (degrees)
+  maxRom       Float    @default(0)             # Range of motion of the primary joint: max − min angle (degrees)
   status       String   @default("in_progress") # "completed", "cancelled"
   notes        String?
   createdAt    DateTime @default(now())
@@ -252,10 +251,9 @@ interface AppState {
   currentSet: number;
   sessionAccuracy: number[];                   # Array of accuracy scores per rep
   aiFeedback: string;                          # Latest AI Coach message
-  
-  // Skeleton tracking
-  skeletonLandmarks: Array<{ x, y, z }>;       # 33 MediaPipe landmarks
 }
+// liveAngles is updated in one setLiveAngles() call, throttled to ~10 Hz.
+// The per-frame pipeline writes via useAppStore.getState() to avoid re-renders.
 ```
 
 **Usage in components:**
@@ -297,7 +295,7 @@ export function calculateAngle(a: Landmark, b: Landmark, c: Landmark): number {
 }
 
 // Extract all joint angles from pose landmarks
-export function calculateAllAngles(landmarks: Landmark[]): Record<string, number> {
+export function calculateAllAngles(landmarks: Landmark[], aspect = 1): Record<string, number> {
   const angles = {};
   angles.left_knee = calculateAngle(lm(LEFT_HIP), lm(LEFT_KNEE), lm(LEFT_ANKLE));
   angles.right_knee = calculateAngle(lm(RIGHT_HIP), lm(RIGHT_KNEE), lm(RIGHT_ANKLE));
@@ -324,88 +322,42 @@ export function isAngleCorrect(
 **Key equations:**
 - **Angle calculation:** Uses `atan2()` to compute angle between vectors
 - **Accuracy scoring:** Penalty based on deviation from ideal angle
-- **ROM (Range of Motion):** Max angle achieved during session
+- **Aspect correction:** x is scaled by `videoWidth / videoHeight` (MediaPipe normalizes x and y separately)
+- **Visibility:** joints whose landmarks have `visibility < 0.5` are omitted from the result
+- **Ankle:** `90 − angle(knee, ankle, foot_index)` → dorsiflexion in degrees (0 = neutral)
+- **Neck:** head yaw from the ear-to-ear line in the x/z plane (0 = facing camera; approximate)
+- **ROM (Range of Motion):** max − min angle of the primary joint during the session
 
 ---
 
 ### **src/components/physio/live-session-view.tsx** — Core Camera Component
 
-This is the heart of the app. Handles:
+This is the heart of the app. Pipeline per session:
 
-1. **MediaPipe Setup (CDN)**
-   ```typescript
-   const POSE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js';
-   
-   async function loadScript(src: string) {
-     // Load MediaPipe from CDN
-   }
-   ```
+1. **MediaPipe Setup (CDN, pinned)** — `pose.js` and its WASM/model files are loaded from
+   `cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/` (loader and `locateFile` must use the same
+   version). Failed `<script>` tags are removed so retries re-request; `initialize()` is raced against a 60 s timeout.
 
-2. **Webcam Stream**
-   ```typescript
-   navigator.mediaDevices.getUserMedia({ video: true })
-     .then(stream => {
-       videoRef.current.srcObject = stream;
-     });
-   ```
+2. **Webcam Stream** — `getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } })`
+   is opened before the model loads so permission errors show immediately.
 
-3. **Real-time Pose Detection Loop**
-   ```typescript
-   const onFrame = async () => {
-     const results = await pose.send({ image: canvasRef.current });
-     // results.poseLandmarks = 33 points with x, y, z coordinates
-   };
-   ```
+3. **Detection Loop** — a `requestAnimationFrame` loop calls `pose.send({ image: video })`, skipping
+   frames while a previous `send()` is in flight. `onResults` is registered once and dispatches through a ref.
 
-4. **Angle Calculation & Accuracy Scoring**
-   ```typescript
-   const angles = calculateAllAngles(results.poseLandmarks);
-   // angles = { left_knee: 95, right_knee: 92, ... }
-   
-   const accuracies = targetJoints.map(joint => {
-     const { correct, percentAccuracy } = isAngleCorrect(
-       angles[joint.name],
-       joint.idealAngle,
-       joint.minAngle,
-       joint.maxAngle
-     );
-     return percentAccuracy;
-   });
-   ```
+4. **Per frame** — `calculateAllAngles(landmarks, videoWidth / videoHeight)`, draw the skeleton on the
+   canvas, push `liveAngles` to the store at most every 100 ms.
 
-5. **AI Coach Feedback (Every 2-3 frames)**
-   ```typescript
-   const response = await fetch('/api/coach', {
-     method: 'POST',
-     body: JSON.stringify({
-       exerciseName: selectedExercise.nameTh,
-       currentAngles: angles,
-       targetJoints: selectedExercise.targetJoints,
-       repCount: currentRep,
-       setCount: currentSet,
-     }),
-   });
-   const { feedback } = await response.json();
-   setAiFeedback(feedback);  // Display to user
-   ```
+5. **Reps & accuracy** — on the first target joint: a rep is *enter range → hold ≥ 300 ms → leave range
+   by 5°*. It is scored with `isAngleCorrect` on the best angle reached while in range.
+   ROM = max − min of that joint (visible frames only).
 
-6. **Session Logging**
-   ```typescript
-   // After each rep, save logs to database
-   for (const joint of targetJoints) {
-     await fetch(`/api/sessions/${currentSessionId}/logs`, {
-       method: 'POST',
-       body: JSON.stringify({
-         repNumber: currentRep,
-         jointName: joint.name,
-         angle: angles[joint.name],
-         idealAngle: joint.idealAngle,
-         deviation: Math.abs(angles[joint.name] - joint.idealAngle),
-         isCorrect: angles[joint.name] >= joint.minAngle && angles[joint.name] <= joint.maxAngle,
-       }),
-     });
-   }
-   ```
+6. **AI Coach** — `POST /api/coach` at most every 8 s with only the visible target-joint angles; one
+   request in flight, aborted on stop/unmount.
+
+7. **Session Logging** — each completed rep buffers one `JointAngleLog` row per visible target joint.
+   The buffer is flushed to `POST /api/sessions/[id]/logs` as `{ logs: [...] }` every 5 s or at 20 rows,
+   and before the final `PATCH /api/sessions/[id]` (`completed`). Leaving the view or closing the tab
+   mid-session flushes with `keepalive` and saves the session as `cancelled`.
 
 ---
 

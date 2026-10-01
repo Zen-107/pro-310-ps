@@ -9,6 +9,3 @@ tsconfig.tsbuildinfo
 # Local database
 /db/*.db
 /db/*.db-journal
-
-# MediaPipe assets
-public/mediapipe/
