@@ -1,2 +1,14 @@
+# Environment
+.env
+
+# Build outputs
+.next/
+node_modules/
+tsconfig.tsbuildinfo
+
+# Local database
+/db/*.db
+/db/*.db-journal
+
 # MediaPipe assets
 public/mediapipe/
