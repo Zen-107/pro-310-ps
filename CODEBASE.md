@@ -56,10 +56,11 @@ project-root/
 │   │   └── utils.ts                # General utilities (cn)
 │
 ├── prisma/
-│   └── schema.prisma               # Database schema (SQLite)
+│   ├── schema.prisma               # Database schema (PostgreSQL)
+│   ├── migrations/                 # Versioned SQL migrations
+│   └── seed.ts                     # Demo data + exercise citations (bun run db:seed)
 │
-├── db/
-│   └── custom.db                   # SQLite database file
+├── docker-compose.yml               # Local PostgreSQL
 │
 ├── public/                          # Static assets
 │   └── logo.svg                    # (MediaPipe Pose is loaded from jsDelivr, pinned version)
@@ -82,7 +83,7 @@ project-root/
 | **Frontend** | Next.js 14 + React 18 | Full-stack web framework |
 | **Styling** | Tailwind CSS + shadcn/ui | Component library & styling |
 | **State** | Zustand | Client-side state management |
-| **Database** | SQLite + Prisma ORM | Persistent data storage |
+| **Database** | PostgreSQL + Prisma ORM (migrations) | Persistent data storage |
 | **Computer Vision** | MediaPipe (Web) | Pose detection & skeleton tracking |
 | **Math** | Vector algebra (JavaScript) | Angle calculation & ROM validation |
 | **AI/LLM** | Z-AI Web SDK | Coach feedback & clinical reports |
@@ -95,7 +96,7 @@ project-root/
 ## 🌐 API Endpoints Quick Reference
 
 ### Seed & Setup
-- **POST /api/seed** — Initialize database: create exercises, sample patients
+- ~~POST /api/seed~~ — replaced by `bun run db:seed` (route will be removed in the API refactor)
 
 ### Exercises
 - **GET /api/exercises** — List all exercises with details
@@ -137,86 +138,34 @@ project-root/
 
 ## 💾 Database Schema
 
-### Exercise
-```prisma
-model Exercise {
-  id              String   @id                    # ex_knee_flexion
-  name            String                         # "Knee Flexion"
-  nameTh          String                         # "การงอเข่า"
-  category        String                         # "knee", "shoulder", etc.
-  description     String
-  instructions    String                         # JSON array of steps
-  targetJoints    String                         # JSON: [{name, idealAngle, minAngle, maxAngle}]
-  difficulty      String   @default("beginner")
-  sets            Int      @default(3)
-  repsPerSet      Int      @default(10)
-  restSeconds     Int      @default(30)
-  icon            String   @default("Activity")
-  bodyPart        String                         # "lower", "upper", "full"
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  sessions        Session[]
-}
+PostgreSQL via Prisma — full definition in [`prisma/schema.prisma`](prisma/schema.prisma), migrations in `prisma/migrations/`.
+
+```
+Organization (HOSPITAL | CLINIC)
+ ├─ Clinician (DOCTOR | PHYSIOTHERAPIST) ── CareAssignment (PRIMARY | SUPPORTING) ──┐
+ └─ Patient ───────────────────────────────────────────────────────────────────────┘
+      └─ Prescription (by a clinician)
+           └─ PrescriptionItem (exercise, sets/reps/rest, daysOfWeek, PrescriptionTargetOverride[])
+                └─ Quest (one per due day)
+                     └─ ExerciseSession → SessionRep → JointAngleLog
+                          ├─ SessionReview (clinician sign-off)
+                          └─ ClinicalReport (stored AI summary)
+
+User (login: ADMIN | CLINICIAN | PATIENT) ── 1:1 ── Clinician / Patient
+
+Exercise (DRAFT | PUBLISHED | RETIRED)
+ ├─ ExerciseJointTarget (joint, ideal/min/max, isPrimary, formula, angleBasis)
+ └─ ExerciseReference (EXACT | CLOSE | PARTIAL) ── ExerciseSource (citation + verification)
+                                               └─ ReferenceMeasurement (ground-truth angles)
 ```
 
-### Patient
-```prisma
-model Patient {
-  id                  String   @id
-  name                String                     # Patient name (Thai)
-  age                 Int?
-  gender              String   @default("ไม่ระบุ")
-  condition           String   @default("")     # Medical condition description
-  phone               String   @default("")
-  assignedExerciseIds String   @default("[]")   # JSON array of exercise IDs
-  therapistNotes      String   @default("")
-  streak              Int      @default(0)      # Consecutive days with sessions
-  totalMinutes        Int      @default(0)
-  lastActiveAt        DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  sessions            Session[]
-}
-```
-
-### Session
-```prisma
-model Session {
-  id           String   @id
-  exerciseId   String
-  exercise     Exercise @relation(fields: [exerciseId], references: [id])
-  patientId    String
-  patient      Patient  @relation(fields: [patientId], references: [id])
-  startedAt    DateTime @default(now())
-  endedAt      DateTime?
-  totalReps    Int      @default(0)             # Completed reps count
-  avgAccuracy  Float    @default(0)             # 0-100%
-  maxRom       Float    @default(0)             # Range of motion of the primary joint: max − min angle (degrees)
-  status       String   @default("in_progress") # "completed", "cancelled"
-  notes        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  logs         JointAngleLog[]
-}
-```
-
-### JointAngleLog
-```prisma
-model JointAngleLog {
-  id          String   @id
-  sessionId   String
-  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  repNumber   Int      @default(0)
-  timestamp   DateTime @default(now())
-  jointName   String                           # "left_knee", "right_shoulder", etc.
-  angle       Float                            # Current measured angle
-  idealAngle  Float                            # Target angle from exercise definition
-  deviation   Float                            # |angle - idealAngle|
-  isCorrect   Boolean  @default(false)         # Within acceptable range?
-}
-```
-
----
+**Key rules**
+- Only `PUBLISHED` exercises can be prescribed. An exercise is publishable when it has at least one `VERIFIED` source **and** its primary target is measurable by the angle engine (`formula` not null). The reason for a `DRAFT` is stored in `statusNote`.
+- `angleBasis` records where a target angle came from (`DEVELOPER_ESTIMATE`, `SOURCE_STATED`, `GROUND_TRUTH_EXTRACTED`, `CLINICIAN_SET`). The seeded sources describe technique only, so seeded angles are `DEVELOPER_ESTIMATE`.
+- `ExerciseSource.verifiedByType` is `CLINICIAN` or `DEVELOPER`; seeded citations are developer-verified (`verifiedByName = "VERIFIED BY DEV"`), not clinically reviewed.
+- `ExerciseSession.targetSnapshot` + `algorithmVersion` freeze the exact targets and formulas used, so later prescription edits never change past reports. Formulas live in `src/lib/joint-formulas.ts`.
+- Patients are archived (`archivedAt`), never hard-deleted.
+- `streak` / total minutes are computed from sessions, not stored.
 
 ## 🔑 Key Files Explained
 
@@ -263,70 +212,49 @@ const { role, setRole, activeTab, setActiveTab, currentSessionId } = useAppStore
 
 ---
 
-### **src/lib/angle-utils.ts** — Core Math Engine
+### **src/lib/angle-utils.ts** — Core Math Engine (`angle-utils@3`)
 
-The most critical file for the AI Coach system. Contains all pose estimation logic:
+All joint angles use the vector dot product with the vertex at B:
 
-```typescript
-// MediaPipe Landmark Indices
-export const LANDMARKS = {
-  NOSE: 0,
-  LEFT_SHOULDER: 11,
-  RIGHT_SHOULDER: 12,
-  LEFT_ELBOW: 13,
-  RIGHT_ELBOW: 14,
-  LEFT_WRIST: 15,
-  RIGHT_WRIST: 16,
-  LEFT_HIP: 23,
-  RIGHT_HIP: 24,
-  LEFT_KNEE: 25,
-  RIGHT_KNEE: 26,
-  LEFT_ANKLE: 27,
-  RIGHT_ANKLE: 28,
-};
-
-// Calculate angle between 3 points (using vector math)
-export function calculateAngle(a: Landmark, b: Landmark, c: Landmark): number {
-  // vertex angle at point b
-  const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-  let angle = Math.abs(radians * (180.0 / Math.PI));
-  if (angle > 180) angle = 360 - angle;
-  return Math.round(angle * 10) / 10;  // 1 decimal place
-}
-
-// Extract all joint angles from pose landmarks
-export function calculateAllAngles(landmarks: Landmark[], aspect = 1): Record<string, number> {
-  const angles = {};
-  angles.left_knee = calculateAngle(lm(LEFT_HIP), lm(LEFT_KNEE), lm(LEFT_ANKLE));
-  angles.right_knee = calculateAngle(lm(RIGHT_HIP), lm(RIGHT_KNEE), lm(RIGHT_ANKLE));
-  angles.left_shoulder = calculateAngle(lm(LEFT_HIP), lm(LEFT_SHOULDER), lm(LEFT_ELBOW));
-  // ... etc for all joints
-  return angles;
-}
-
-// Check if angle is within acceptable range
-export function isAngleCorrect(
-  currentAngle: number,
-  idealAngle: number,
-  minAngle: number,
-  maxAngle: number
-): { correct: boolean; deviation: number; percentAccuracy: number } {
-  const deviation = Math.abs(currentAngle - idealAngle);
-  const tolerance = (maxAngle - minAngle) / 2;
-  const correct = currentAngle >= minAngle && currentAngle <= maxAngle;
-  const percentAccuracy = Math.max(0, 100 - (deviation / tolerance) * 50);
-  return { correct, deviation, percentAccuracy: Math.round(percentAccuracy) };
-}
+```
+θ = arccos( (A − B) · (C − B) / (|A − B| · |C − B|) )     cosine clipped to [−1, 1]
 ```
 
-**Key equations:**
-- **Angle calculation:** Uses `atan2()` to compute angle between vectors
-- **Accuracy scoring:** Penalty based on deviation from ideal angle
-- **Aspect correction:** x is scaled by `videoWidth / videoHeight` (MediaPipe normalizes x and y separately)
-- **Visibility:** joints whose landmarks have `visibility < 0.5` are omitted from the result
-- **Ankle:** `90 − angle(knee, ankle, foot_index)` → dorsiflexion in degrees (0 = neutral)
-- **Neck:** head yaw from the ear-to-ear line in the x/z plane (0 = facing camera; approximate)
-- **ROM (Range of Motion):** max − min angle of the primary joint during the session
+```typescript
+export function angleAt(a: Vec3, b: Vec3, c: Vec3): number | null {
+  const v1 = sub(a, b), v2 = sub(c, b);
+  const m1 = length(v1), m2 = length(v2);
+  if (m1 < 1e-6 || m2 < 1e-6) return null;               // coincident points → no angle
+  const cos = Math.min(1, Math.max(-1, dot(v1, v2) / (m1 * m2)));
+  return round1(Math.acos(cos) * 180 / Math.PI);
+}
+
+// image = poseLandmarks (normalized, has visibility); world = poseWorldLandmarks (metres)
+calculateAllAngles(image, { aspect: videoWidth / videoHeight, world });
+```
+
+**Inputs and safeguards**
+- **3D world landmarks** (metres, equal scale on x/y/z) are used when MediaPipe provides them; otherwise image landmarks with x × aspect ratio (2D). Raw normalized x/y/z are never mixed, because each axis has a different scale.
+- Measurements whose landmarks have `visibility < 0.5`, or whose vectors have zero length, are **omitted** (never reported as 0°).
+- Every measurement's formula is listed in `src/lib/joint-formulas.ts` (stored on each `ExerciseJointTarget.formula`).
+
+| Measurement | Formula | Used by |
+|---|---|---|
+| `left/right_knee` | angle(hip, knee, ankle) | Knee Flexion, Wall Squat |
+| `left/right_hip` | angle(shoulder, hip, knee) | Hip Bridge |
+| `left/right_hip_flexion` | 180 − angle(shoulder, hip, knee) | Straight Leg Raise |
+| `hip_opening` | angle(left_knee, mid_hip, right_knee) | Clamshell |
+| `left/right_shoulder` | angle(hip, shoulder, elbow) | Shoulder Flexion/Abduction, Arm Circles |
+| `left/right_ankle` | 90 − angle(knee, ankle, foot_index) | Ankle Dorsiflexion |
+| `neck` | head yaw from the ear-to-ear line (x/z) | Neck Rotation |
+| `spine_flexion` | ±(180 − angle(ear, shoulder, hip)), + = head below trunk line — **proxy** | Cat-Cow |
+| `left/right_shoulder_extension` | ±angle(hip, shoulder, elbow), + = elbow above trunk line — **proxy** | Prone Scapular Squeeze |
+
+Signed measurements decide "above/below the trunk line" in image space (y down), so they work whichever way the patient faces.
+
+**Scoring:** `isAngleCorrect()` → in range = correct; accuracy = max(0, 100 − deviation/tolerance × 50), tolerance = (max − min)/2. **ROM** = max − min of the primary measurement during the session.
+
+**Targets** are developer estimates (`angleBasis = DEVELOPER_ESTIMATE`) bounded by normative ROM (Physiopedia; Soucie et al., *Haemophilia* 2011), with the reasoning stored in `ExerciseJointTarget.rationale`.
 
 ---
 
@@ -344,7 +272,7 @@ This is the heart of the app. Pipeline per session:
 3. **Detection Loop** — a `requestAnimationFrame` loop calls `pose.send({ image: video })`, skipping
    frames while a previous `send()` is in flight. `onResults` is registered once and dispatches through a ref.
 
-4. **Per frame** — `calculateAllAngles(landmarks, videoWidth / videoHeight)`, draw the skeleton on the
+4. **Per frame** — `calculateAllAngles(poseLandmarks, { aspect, world: poseWorldLandmarks })` (3D when available), draw the skeleton on the
    canvas, push `liveAngles` to the store at most every 100 ms.
 
 5. **Reps & accuracy** — on the first target joint: a rep is *enter range → hold ≥ 300 ms → leave range
@@ -543,78 +471,40 @@ Shows all patients with:
 ### Installation
 
 ```bash
-# Clone repo
-cd pro-310-ps
+bun install                 # also runs `prisma generate`
+cp .env.example .env        # then set NEXTAUTH_SECRET (openssl rand -base64 32)
 
-# Install dependencies
-bun install
-# or: npm install
-
-# Setup environment
-echo "DATABASE_URL=file:./db/custom.db" > .env
-
-# Initialize database
-bun run db:push
-bun run db:generate
+bun run db:up               # local PostgreSQL via docker compose (needs Docker Desktop running)
+bun run db:migrate:deploy   # apply migrations
+bun run db:seed             # demo data — WIPES the database
 ```
+
+Demo accounts (password = `SEED_DEMO_PASSWORD`, default `physio-demo-2026`):
+`admin@`, `doctor@`, `pt@`, `pt2@`, `patient1@`, `patient2@`, `patient3@` + `demo.aiphysio.local`
 
 ### Running Development Server
 
 ```bash
 bun run dev
-# or: npm run dev
 ```
-
-**Output:**
-```
-  ▲ Next.js 14.0.0
-  - Local:        http://localhost:3000
-```
-
-**First load:**
-- Page calls `POST /api/seed` automatically
-- Creates exercises, sample patients
-- Shows demo data
-
-### Access the App
-
-1. **Patient Mode** (default)
-   - View exercises, progress, badges
-   - Click "เริ่มฝึก" to open camera
-   - Position on camera, do exercise
-   - AI Coach gives feedback in real-time
-   - Session auto-saves
-
-2. **Doctor Mode**
-   - Click "หมอ" tab
-   - See all patients with stats
-   - Click patient to view detail report
-   - View clinical summaries
 
 ### Production Build
 
 ```bash
-# Build
+bun run db:migrate:deploy   # against the production DATABASE_URL
 bun run build
-
-# Run production server
 bun run start
 ```
 
 ### Database Commands
 
 ```bash
-# Push schema changes
-bun run db:push
-
-# Generate Prisma client
-bun run db:generate
-
-# Reset database (caution!)
-bun run db:reset
-
-# Run migrations
-bun run db:migrate
+bun run db:up              # start local Postgres (docker compose)
+bun run db:migrate         # create a new migration after editing schema.prisma (dev)
+bun run db:migrate:deploy  # apply pending migrations (CI / production)
+bun run db:seed            # reset + seed demo data (refuses when NODE_ENV=production)
+bun run db:reset           # drop, re-migrate and re-seed (caution!)
+bun run db:studio          # browse data
 ```
 
 ---
@@ -714,8 +604,8 @@ curl -X POST http://localhost:3000/api/seed
 # Terminal 1: Dev server logs
 bun run dev
 
-# Terminal 2: View database
-sqlite3 db/custom.db "SELECT * FROM Session LIMIT 5;"
+# Terminal 2: Browse the database
+bun run db:studio
 ```
 
 **Common issues:**
@@ -770,10 +660,10 @@ sqlite3 db/custom.db "SELECT * FROM Session LIMIT 5;"
 - Perfect for role/tab switching use case
 - No providers needed, direct hook usage
 
-### Why SQLite instead of PostgreSQL?
-- Single-file database, easy to deploy
-- Sufficient for demo/MVP
-- Can migrate to PostgreSQL later
+### Why PostgreSQL?
+- Production-ready, widely hosted (Neon, Supabase, Railway, RDS)
+- Native date, array and enum types used by the quest/prescription model
+- Same database in development (docker compose) and production, so migrations are identical
 
 ### Why Z-AI SDK instead of OpenAI API?
 - Local to development environment

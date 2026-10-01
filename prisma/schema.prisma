@@ -1,75 +1,538 @@
+// AI Physio — PostgreSQL schema
+// Hierarchy: Organization → Clinician (doctor/PT) ↔ Patient → Prescription → Quest → ExerciseSession
+// Migrations: `bun run db:migrate` (dev) / `bun run db:migrate:deploy` (production)
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model Exercise {
-  id             String   @id @default(cuid())
-  name           String
-  nameTh         String
-  category       String   // "knee", "shoulder", "hip", "back", "neck", "ankle"
-  description    String
-  instructions   String   // JSON array of step-by-step instructions
-  targetJoints   String   // JSON: [{name, idealAngle, minAngle, maxAngle}]
-  difficulty     String   @default("beginner") // "beginner", "intermediate", "advanced"
-  sets           Int      @default(3)
-  repsPerSet     Int      @default(10)
-  restSeconds    Int      @default(30)
-  icon           String   @default("Activity")
-  bodyPart       String   // "lower", "upper", "full"
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  sessions       Session[]
+// ─── Enums ──────────────────────────────────────────────────────────
+// Exercise category / body part / difficulty / joint names use lowercase
+// values so they match the keys the client already uses (e.g. "left_knee").
+
+enum OrgType {
+  HOSPITAL
+  CLINIC
+}
+
+enum UserRole {
+  ADMIN
+  CLINICIAN
+  PATIENT
+}
+
+enum ClinicianTitle {
+  DOCTOR
+  PHYSIOTHERAPIST
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNSPECIFIED
+}
+
+enum CareRole {
+  PRIMARY
+  SUPPORTING
+}
+
+enum ExerciseCategory {
+  knee
+  shoulder
+  hip
+  back
+  neck
+  ankle
+}
+
+enum BodyPart {
+  upper
+  lower
+  full
+}
+
+enum Difficulty {
+  beginner
+  intermediate
+  advanced
+}
+
+enum ExerciseStatus {
+  DRAFT // not assignable (e.g. unverified source or not measurable yet)
+  PUBLISHED
+  RETIRED
+}
+
+// Measurement keys produced by calculateAllAngles() (formulas in src/lib/joint-formulas.ts)
+enum JointName {
+  left_knee
+  right_knee
+  left_hip
+  right_hip
+  left_hip_flexion
+  right_hip_flexion
+  hip_opening
+  left_shoulder
+  right_shoulder
+  left_shoulder_extension
+  right_shoulder_extension
+  left_elbow
+  right_elbow
+  left_ankle
+  right_ankle
+  neck
+  spine_flexion
+}
+
+// Where a target angle came from — shown to clinicians for transparency
+enum AngleBasis {
+  DEVELOPER_ESTIMATE
+  SOURCE_STATED
+  GROUND_TRUTH_EXTRACTED
+  CLINICIAN_SET
+}
+
+enum SourceType {
+  PATIENT_EDUCATION
+  CLINICAL_GUIDELINE
+  JOURNAL_ARTICLE
+  TEXTBOOK
+  VIDEO
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum VerifierType {
+  CLINICIAN
+  DEVELOPER
+}
+
+// How closely the cited source matches the app's exercise
+enum ReferenceRelevance {
+  EXACT
+  CLOSE
+  PARTIAL
+}
+
+enum PrescriptionStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum QuestStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  MISSED
+}
+
+enum SessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ReviewStatus {
+  APPROVED
+  NEEDS_ATTENTION
+}
+
+// ─── Organization & people ──────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  type      OrgType
+  address   String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clinicians Clinician[]
+  patients   Patient[]
+
+  @@map("organizations")
+}
+
+// Login identity (Credentials auth). Clinician/Patient hold the profile.
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         UserRole
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  clinician Clinician?
+  patient   Patient?
+
+  @@map("users")
+}
+
+model Clinician {
+  id             String         @id @default(cuid())
+  userId         String         @unique
+  organizationId String
+  title          ClinicianTitle
+  licenseNumber  String?
+  specialty      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  careAssignments CareAssignment[]
+  prescriptions   Prescription[]
+  reviews         SessionReview[]
+  verifiedSources ExerciseSource[]
+
+  @@index([organizationId])
+  @@map("clinicians")
 }
 
 model Patient {
-  id                  String   @id @default(cuid())
-  name                String
-  age                 Int?
-  gender              String   @default("ไม่ระบุ") // "ชาย", "หญิง", "ไม่ระบุ"
-  condition           String   @default("") // อาการ/โรค เช่น "ปวดเข่าเรื้อรัง"
-  phone               String   @default("")
-  assignedExerciseIds String   @default("[]") // JSON array of exercise IDs
-  therapistNotes      String   @default("") // หมอบันทึก
-  streak              Int      @default(0)
-  totalMinutes        Int      @default(0)
-  lastActiveAt        DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  sessions            Session[]
+  id             String    @id @default(cuid())
+  userId         String?   @unique
+  organizationId String
+  name           String
+  dateOfBirth    DateTime? @db.Date
+  gender         Gender    @default(UNSPECIFIED)
+  condition      String?
+  phone          String?
+  consentVersion String? // PDPA consent record
+  consentAt      DateTime?
+  archivedAt     DateTime? // medical records are archived, never hard-deleted
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  careAssignments CareAssignment[]
+  prescriptions   Prescription[]
+  quests          Quest[]
+  sessions        ExerciseSession[]
+
+  @@index([organizationId])
+  @@map("patients")
 }
 
-model Session {
-  id           String   @id @default(cuid())
-  exerciseId   String
-  exercise     Exercise @relation(fields: [exerciseId], references: [id])
-  patientId    String
-  patient      Patient  @relation(fields: [patientId], references: [id])
-  startedAt    DateTime @default(now())
-  endedAt      DateTime?
-  totalReps    Int      @default(0)
-  avgAccuracy  Float    @default(0)
-  maxRom       Float    @default(0)
-  status       String   @default("in_progress") // "in_progress", "completed", "cancelled"
-  notes        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  logs         JointAngleLog[]
+model CareAssignment {
+  patientId   String
+  clinicianId String
+  role        CareRole @default(PRIMARY)
+  assignedAt  DateTime @default(now())
+
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  clinician Clinician @relation(fields: [clinicianId], references: [id], onDelete: Cascade)
+
+  @@id([patientId, clinicianId])
+  @@index([clinicianId])
+  @@map("care_assignments")
+}
+
+// ─── Exercise library & citations ───────────────────────────────────
+
+model Exercise {
+  id                 String           @id @default(cuid())
+  slug               String           @unique // stable key, e.g. "ex_knee_flexion"
+  name               String
+  nameTh             String
+  category           ExerciseCategory
+  bodyPart           BodyPart
+  difficulty         Difficulty       @default(beginner)
+  description        String
+  instructions       Json // string[]
+  defaultSets        Int              @default(3)
+  defaultReps        Int              @default(10)
+  defaultRestSeconds Int              @default(30)
+  icon               String           @default("Activity")
+  status             ExerciseStatus   @default(DRAFT)
+  statusNote         String? // why it is DRAFT/RETIRED
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  targets           ExerciseJointTarget[]
+  references        ExerciseReference[]
+  measurements      ReferenceMeasurement[]
+  prescriptionItems PrescriptionItem[]
+  sessions          ExerciseSession[]
+
+  @@index([status, category])
+  @@map("exercises")
+}
+
+model ExerciseJointTarget {
+  id         String     @id @default(cuid())
+  exerciseId String
+  joint      JointName
+  nameTh     String
+  idealAngle Float
+  minAngle   Float
+  maxAngle   Float
+  isPrimary  Boolean    @default(false) // drives rep counting (one per exercise, enforced in API)
+  formula    String? // e.g. "angle(hip, knee, ankle)"; null = not measurable by the angle engine
+  angleBasis AngleBasis @default(DEVELOPER_ESTIMATE)
+  rationale  String? // why this target was chosen (shown to clinicians)
+  sourceId   String? // citation for the angle itself, when one exists
+
+  exercise Exercise        @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  source   ExerciseSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@unique([exerciseId, joint])
+  @@map("exercise_joint_targets")
+}
+
+model ExerciseSource {
+  id                    String             @id @default(cuid())
+  sourceType            SourceType
+  title                 String
+  url                   String             @unique
+  institution           String
+  authors               String? // contributors / reviewers as printed on the source
+  language              String             @default("en")
+  publishedAt           DateTime?
+  accessedAt            DateTime
+  verificationStatus    VerificationStatus @default(PENDING)
+  verifiedByType        VerifierType?
+  verifiedByName        String?
+  verifiedByClinicianId String?
+  verifiedAt            DateTime?
+  notes                 String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  verifiedByClinician Clinician?             @relation(fields: [verifiedByClinicianId], references: [id], onDelete: SetNull)
+  references          ExerciseReference[]
+  measurements        ReferenceMeasurement[]
+  jointTargets        ExerciseJointTarget[]
+
+  @@index([verificationStatus])
+  @@map("exercise_sources")
+}
+
+model ExerciseReference {
+  exerciseId         String
+  sourceId           String
+  relevance          ReferenceRelevance
+  sourceExerciseName String // the exercise's name as written in the source
+  note               String?
+
+  exercise Exercise       @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  source   ExerciseSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([exerciseId, sourceId])
+  @@map("exercise_references")
+}
+
+// Angles extracted from a (verified) source video by the ground-truth pipeline
+model ReferenceMeasurement {
+  id               String    @id @default(cuid())
+  sourceId         String
+  exerciseId       String
+  joint            JointName
+  measuredAngle    Float
+  sampleCount      Int
+  videoStartSec    Float?
+  videoEndSec      Float?
+  extractorVersion String
+  extractedAt      DateTime  @default(now())
+
+  source   ExerciseSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  exercise Exercise       @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  @@index([exerciseId])
+  @@map("reference_measurements")
+}
+
+// ─── Prescriptions & daily quests ───────────────────────────────────
+
+model Prescription {
+  id          String             @id @default(cuid())
+  patientId   String
+  clinicianId String
+  title       String
+  notes       String?
+  startDate   DateTime           @db.Date
+  endDate     DateTime?          @db.Date
+  status      PrescriptionStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  patient   Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  clinician Clinician          @relation(fields: [clinicianId], references: [id], onDelete: Restrict)
+  items     PrescriptionItem[]
+
+  @@index([patientId, status])
+  @@index([clinicianId])
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id             String  @id @default(cuid())
+  prescriptionId String
+  exerciseId     String
+  sets           Int
+  repsPerSet     Int
+  restSeconds    Int
+  daysOfWeek     Int[] // 0 = Sunday … 6 = Saturday; empty = every day
+  sortOrder      Int     @default(0)
+  notes          String?
+
+  prescription    Prescription                 @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  exercise        Exercise                     @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  targetOverrides PrescriptionTargetOverride[]
+  quests          Quest[]
+
+  @@index([prescriptionId])
+  @@map("prescription_items")
+}
+
+// Per-patient angle targets; joints not overridden fall back to ExerciseJointTarget
+model PrescriptionTargetOverride {
+  itemId     String
+  joint      JointName
+  idealAngle Float
+  minAngle   Float
+  maxAngle   Float
+
+  item PrescriptionItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, joint])
+  @@map("prescription_target_overrides")
+}
+
+// One row per prescription item per due day (created lazily when the patient opens the app)
+model Quest {
+  id                 String      @id @default(cuid())
+  prescriptionItemId String
+  patientId          String
+  dueDate            DateTime    @db.Date
+  status             QuestStatus @default(PENDING)
+  completedAt        DateTime?
+  createdAt          DateTime    @default(now())
+
+  prescriptionItem PrescriptionItem  @relation(fields: [prescriptionItemId], references: [id], onDelete: Cascade)
+  patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  sessions         ExerciseSession[]
+
+  @@unique([prescriptionItemId, dueDate])
+  @@index([patientId, dueDate])
+  @@map("quests")
+}
+
+// ─── Session results & clinician verification ───────────────────────
+
+model ExerciseSession {
+  id               String        @id @default(cuid())
+  patientId        String
+  exerciseId       String
+  questId          String? // null = free practice
+  startedAt        DateTime      @default(now())
+  endedAt          DateTime?
+  status           SessionStatus @default(IN_PROGRESS)
+  totalReps        Int           @default(0)
+  avgAccuracy      Float         @default(0)
+  romMinAngle      Float?
+  romMaxAngle      Float?
+  romDegrees       Float? // romMaxAngle − romMinAngle of the primary joint
+  primaryJoint     JointName?
+  targetSnapshot   Json // exact targets (incl. overrides + formulas) used at runtime
+  algorithmVersion String // e.g. "angle-utils@2", for reproducibility
+  notes            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  patient  Patient          @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  exercise Exercise         @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  quest    Quest?           @relation(fields: [questId], references: [id], onDelete: SetNull)
+  reps     SessionRep[]
+  logs     JointAngleLog[]
+  review   SessionReview?
+  reports  ClinicalReport[]
+
+  @@index([patientId, startedAt])
+  @@index([questId])
+  @@map("exercise_sessions")
+}
+
+model SessionRep {
+  id         String   @id @default(cuid())
+  sessionId  String
+  setNumber  Int
+  repNumber  Int // 1…N across the whole session
+  enteredAt  DateTime
+  durationMs Int
+  bestAngle  Float
+  accuracy   Float
+
+  session ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  logs    JointAngleLog[]
+
+  @@unique([sessionId, repNumber])
+  @@map("session_reps")
 }
 
 model JointAngleLog {
-  id        String   @id @default(cuid())
-  sessionId String
-  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  repNumber Int      @default(0)
-  timestamp DateTime @default(now())
-  jointName String
-  angle     Float
+  id         String    @id @default(cuid())
+  sessionId  String
+  repId      String?
+  joint      JointName
+  angle      Float
   idealAngle Float
-  deviation Float
-  isCorrect Boolean  @default(false)
+  minAngle   Float
+  maxAngle   Float
+  deviation  Float
+  isCorrect  Boolean
+  timestamp  DateTime  @default(now())
+
+  session ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  rep     SessionRep?     @relation(fields: [repId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@map("joint_angle_logs")
+}
+
+model SessionReview {
+  id          String       @id @default(cuid())
+  sessionId   String       @unique
+  clinicianId String
+  status      ReviewStatus
+  comment     String?
+  reviewedAt  DateTime     @default(now())
+
+  session   ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  clinician Clinician       @relation(fields: [clinicianId], references: [id], onDelete: Restrict)
+
+  @@index([clinicianId])
+  @@map("session_reviews")
+}
+
+// Stored AI clinical summary (the Reporter agent's output)
+model ClinicalReport {
+  id          String   @id @default(cuid())
+  sessionId   String
+  content     String // markdown
+  model       String
+  generatedAt DateTime @default(now())
+
+  session ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("clinical_reports")
 }

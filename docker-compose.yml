@@ -1,0 +1,22 @@
+# Local PostgreSQL for development. Matches DATABASE_URL in .env.example.
+#   docker compose up -d db
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: physio
+      POSTGRES_PASSWORD: physio
+      POSTGRES_DB: ai_physio
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U physio -d ai_physio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
