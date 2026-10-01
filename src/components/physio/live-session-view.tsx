@@ -117,6 +117,17 @@ const JOINT_INDEX: Record<string, number> = {
   right_knee: LANDMARKS.RIGHT_KNEE,
   left_ankle: LANDMARKS.LEFT_ANKLE,
   right_ankle: LANDMARKS.RIGHT_ANKLE,
+  left_hip_flexion: LANDMARKS.LEFT_HIP,
+  right_hip_flexion: LANDMARKS.RIGHT_HIP,
+  left_shoulder_extension: LANDMARKS.LEFT_SHOULDER,
+  right_shoulder_extension: LANDMARKS.RIGHT_SHOULDER,
+  spine_flexion: LANDMARKS.LEFT_SHOULDER,
+};
+
+// Measurements with no single vertex landmark are colored on several joints
+const JOINT_INDEX_EXTRA: Record<string, number[]> = {
+  hip_opening: [LANDMARKS.LEFT_KNEE, LANDMARKS.RIGHT_KNEE],
+  spine_flexion: [LANDMARKS.RIGHT_SHOULDER],
 };
 
 const KEY_INDICES = [
@@ -829,7 +840,7 @@ export function LiveSessionView() {
   const handlePoseResults = useCallback(
     (results: unknown) => {
       if (stoppingRef.current) return;
-      const r = results as { poseLandmarks?: Landmark[] };
+      const r = results as { poseLandmarks?: Landmark[]; poseWorldLandmarks?: Landmark[] };
 
       const canvas = canvasRef.current;
       const video = videoRef.current;
@@ -861,10 +872,11 @@ export function LiveSessionView() {
         setDetectionActive(true);
       }
 
-      // Angles (aspect-corrected; low-visibility joints are omitted)
+      // Angles: 3D on world landmarks when available, else aspect-corrected 2D;
+      // low-visibility joints are omitted
       const aspect =
         video.videoWidth > 0 && video.videoHeight > 0 ? video.videoWidth / video.videoHeight : 1;
-      const angles = calculateAllAngles(landmarks, aspect);
+      const angles = calculateAllAngles(landmarks, { aspect, world: r.poseWorldLandmarks });
 
       // Throttled UI update: one store write per ~100 ms
       if (now - lastAngleUiRef.current >= ANGLE_UI_INTERVAL_MS) {
@@ -879,10 +891,12 @@ export function LiveSessionView() {
       const jointColorMap: Record<number, string> = {};
       targetJoints.forEach((tj) => {
         const angle = angles[tj.name];
-        const idx = JOINT_INDEX[tj.name];
-        if (angle !== undefined && idx !== undefined) {
-          jointColorMap[idx] = ANGLE_STATUS_HEX[getAngleStatus(angle, tj.minAngle, tj.maxAngle)];
-        }
+        if (angle === undefined) return;
+        const color = ANGLE_STATUS_HEX[getAngleStatus(angle, tj.minAngle, tj.maxAngle)];
+        const indices = [JOINT_INDEX[tj.name], ...(JOINT_INDEX_EXTRA[tj.name] ?? [])];
+        indices.forEach((idx) => {
+          if (idx !== undefined) jointColorMap[idx] = color;
+        });
       });
 
       // Draw skeleton connections

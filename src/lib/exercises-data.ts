@@ -5,6 +5,8 @@ export interface TargetJoint {
   minAngle: number;
   maxAngle: number;
   unit: string;
+  /** Why this target was chosen (stored on ExerciseJointTarget.rationale) */
+  rationale?: string;
 }
 
 export interface ExerciseData {
@@ -74,20 +76,24 @@ export const EXERCISES: ExerciseData[] = [
     ],
     targetJoints: [
       {
-        name: "left_hip",
-        nameTh: "สะโพกซ้าย",
-        idealAngle: 45,
-        minAngle: 40,
-        maxAngle: 55,
+        name: "left_hip_flexion",
+        nameTh: "งอสะโพกซ้าย (ยกขา)",
+        idealAngle: 35,
+        minAngle: 25,
+        maxAngle: 45,
         unit: "°",
+        rationale:
+          "Raise the straight leg to the height of the bent opposite thigh (app instructions; AAOS: 6–10 in off the floor). Developer estimate ≈25–45° hip flexion, well inside normal hip flexion of 100–140° (Physiopedia).",
       },
       {
-        name: "right_hip",
-        nameTh: "สะโพกขวา",
-        idealAngle: 45,
-        minAngle: 40,
-        maxAngle: 55,
+        name: "right_hip_flexion",
+        nameTh: "งอสะโพกขวา (ยกขา)",
+        idealAngle: 35,
+        minAngle: 25,
+        maxAngle: 45,
         unit: "°",
+        rationale:
+          "Same as left side.",
       },
     ],
     difficulty: "beginner",
@@ -186,19 +192,23 @@ export const EXERCISES: ExerciseData[] = [
     targetJoints: [
       {
         name: "left_hip",
-        nameTh: "สะโพกซ้าย",
-        idealAngle: 0,
-        minAngle: -10,
-        maxAngle: 10,
+        nameTh: "สะโพกซ้าย (ไหล่–สะโพก–เข่า)",
+        idealAngle: 175,
+        minAngle: 160,
+        maxAngle: 180,
         unit: "°",
+        rationale:
+          "Top of the bridge = shoulder, hip and knee in a straight line (app instructions), i.e. neutral hip extension ≈180°. Hyperextension is not targeted.",
       },
       {
         name: "right_hip",
-        nameTh: "สะโพกขวา",
-        idealAngle: 0,
-        minAngle: -10,
-        maxAngle: 10,
+        nameTh: "สะโพกขวา (ไหล่–สะโพก–เข่า)",
+        idealAngle: 175,
+        minAngle: 160,
+        maxAngle: 180,
         unit: "°",
+        rationale:
+          "Same as left side.",
       },
     ],
     difficulty: "beginner",
@@ -323,12 +333,14 @@ export const EXERCISES: ExerciseData[] = [
     ],
     targetJoints: [
       {
-        name: "spine",
-        nameTh: "กระดูกสันหลัง",
-        idealAngle: 30,
-        minAngle: 20,
-        maxAngle: 40,
+        name: "spine_flexion",
+        nameTh: "โค้งหลังขึ้น (ท่าแมว)",
+        idealAngle: 45,
+        minAngle: 30,
+        maxAngle: 60,
         unit: "°",
+        rationale:
+          "PROXY: head–trunk flexion in four-point kneeling (MediaPipe has no spine landmarks). Normal thoraco-lumbar flexion is 45–50° (Physiopedia); the proxy also includes neck flexion. A rep = round the back (cat), then return or arch (cow, negative values).",
       },
     ],
     difficulty: "beginner",
@@ -389,20 +401,14 @@ export const EXERCISES: ExerciseData[] = [
     ],
     targetJoints: [
       {
-        name: "left_hip",
-        nameTh: "สะโพกซ้าย",
-        idealAngle: 45,
-        minAngle: 35,
-        maxAngle: 55,
+        name: "hip_opening",
+        nameTh: "มุมเปิดเข่า",
+        idealAngle: 40,
+        minAngle: 30,
+        maxAngle: 50,
         unit: "°",
-      },
-      {
-        name: "right_hip",
-        nameTh: "สะโพกขวา",
-        idealAngle: 45,
-        minAngle: 35,
-        maxAngle: 55,
-        unit: "°",
+        rationale:
+          "Knee separation while feet stay together; combines hip abduction and external rotation. Developer estimate bounded by normal hip abduction ≈40° (Physiopedia).",
       },
     ],
     difficulty: "beginner",
@@ -426,12 +432,24 @@ export const EXERCISES: ExerciseData[] = [
     ],
     targetJoints: [
       {
-        name: "spine",
-        nameTh: "สะบัก",
+        name: "left_shoulder_extension",
+        nameTh: "ยกแขนซ้ายจากการบีบสะบัก",
         idealAngle: 15,
-        minAngle: 10,
-        maxAngle: 20,
+        minAngle: 8,
+        maxAngle: 30,
         unit: "°",
+        rationale:
+          "PROXY: arm lift above the trunk line while squeezing the shoulder blades lying face down; scapular retraction itself is not visible to MediaPipe. Kept well below normal shoulder hyperextension of 50° (Physiopedia).",
+      },
+      {
+        name: "right_shoulder_extension",
+        nameTh: "ยกแขนขวาจากการบีบสะบัก",
+        idealAngle: 15,
+        minAngle: 8,
+        maxAngle: 30,
+        unit: "°",
+        rationale:
+          "Same as left side.",
       },
     ],
     difficulty: "beginner",
