@@ -32,13 +32,10 @@ project-root/
 │   │       └── route.ts             # Root API health check
 │   │
 │   ├── components/
-│   │   ├── ui/                      # shadcn/ui components (pre-built)
-│   │   │   ├── button.tsx
-│   │   │   ├── card.tsx
-│   │   │   ├── dialog.tsx
-│   │   │   ├── chart.tsx
-│   │   │   ├── toast.tsx
-│   │   │   └── ... (40+ UI primitives)
+│   │   ├── ui/                      # shadcn/ui primitives actually in use (add more via `bunx shadcn add <name>`)
+│   │   │   ├── badge.tsx, button.tsx, card.tsx, progress.tsx, scroll-area.tsx
+│   │   │   ├── select.tsx, separator.tsx, skeleton.tsx, switch.tsx, textarea.tsx
+│   │   │   └── sonner.tsx           # Toaster for `toast()` from 'sonner' (mounted in layout.tsx)
 │   │   │
 │   │   └── physio/                  # Custom physio app components
 │   │       ├── patient-selector.tsx        # Screen: Select which patient identity to use
@@ -54,13 +51,9 @@ project-root/
 │   ├── lib/                         # Utility functions & shared logic
 │   │   ├── store.ts                # Zustand global state (role, activeTab, sessionData, etc.)
 │   │   ├── db.ts                   # Prisma client singleton
-│   │   ├── angle-utils.ts          # Core math: angle calculation, ROM check, accuracy scoring
-│   │   ├── exercises-data.ts       # Exercise library with target joints & ideal angles
-│   │   └── utils.ts                # General utilities (cn, toast helpers, etc.)
-│   │
-│   └── hooks/                       # React hooks
-│       ├── use-toast.ts
-│       └── use-mobile.ts
+│   │   ├── angle-utils.ts          # Core math: angle calculation, ROM check, accuracy scoring + accuracy color helpers
+│   │   ├── exercises-data.ts       # Exercise library, CATEGORIES/DIFFICULTY labels, exerciseIdFromName()
+│   │   └── utils.ts                # General utilities (cn)
 │
 ├── prisma/
 │   └── schema.prisma               # Database schema (SQLite)
@@ -69,7 +62,8 @@ project-root/
 │   └── custom.db                   # SQLite database file
 │
 ├── public/                          # Static assets
-│   └── logo.svg
+│   ├── logo.svg
+│   └── mediapipe/                   # (gitignored) local MediaPipe Pose assets; falls back to CDN if missing
 │
 ├── .env                             # Environment variables
 ├── package.json                    # Dependencies & scripts
@@ -243,6 +237,12 @@ interface AppState {
   // Patient context
   currentPatientId: string | null;
   setCurrentPatientId: (id) => void;
+
+  // Doctor: patient selected for detail/report/plan views
+  selectedPatientId: string | null;
+
+  // Exercise picked in Exercises tab → highlighted first in LiveSessionView
+  selectedExerciseId: string | null;
   
   // Live session data
   isSessionActive: boolean;

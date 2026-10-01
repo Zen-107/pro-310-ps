@@ -36,6 +36,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
+import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
 
 interface SessionRecord {
   id: string;
@@ -63,26 +64,26 @@ export function HistoryView() {
   const currentPatientId = useAppStore((s) => s.currentPatientId);
 
   useEffect(() => {
-    fetchSessions();
-  }, [currentPatientId]);
-
-  async function fetchSessions() {
-    if (!currentPatientId) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const res = await fetch(`/api/sessions?patientId=${currentPatientId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(data);
+    let cancelled = false;
+    async function fetchSessions() {
+      try {
+        if (!currentPatientId) return;
+        const res = await fetch(`/api/sessions?patientId=${currentPatientId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setSessions(data);
+        }
+      } catch {
+        // Silently fail
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch {
-      // Silently fail
-    } finally {
-      setLoading(false);
     }
-  }
+    fetchSessions();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPatientId]);
 
   const sortedSessions = [...sessions].sort((a, b) => {
     if (sortBy === 'accuracy') return b.avgAccuracy - a.avgAccuracy;
@@ -153,18 +154,6 @@ export function HistoryView() {
     return `${min}:${sec.toString().padStart(2, '0')}`;
   }
 
-  function getAccuracyColor(acc: number): string {
-    if (acc >= 80) return 'text-emerald-600';
-    if (acc >= 60) return 'text-amber-600';
-    return 'text-red-600';
-  }
-
-  function getAccuracyBg(acc: number): string {
-    if (acc >= 80) return 'bg-emerald-500';
-    if (acc >= 60) return 'bg-amber-500';
-    return 'bg-red-500';
-  }
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -232,7 +221,7 @@ export function HistoryView() {
                 <Target className="h-3.5 w-3.5" />
                 ความแม่นยำเฉลี่ย
               </div>
-              <p className={`text-2xl font-bold ${getAccuracyColor(avgAccuracy)}`}>
+              <p className={`text-2xl font-bold ${getAccuracyTextColor(avgAccuracy)}`}>
                 {avgAccuracy}%
               </p>
             </CardContent>
@@ -256,7 +245,7 @@ export function HistoryView() {
                 <TrendingUp className="h-3.5 w-3.5" />
                 แม่นยำสูงสุด
               </div>
-              <p className={`text-2xl font-bold ${getAccuracyColor(bestAccuracy)}`}>
+              <p className={`text-2xl font-bold ${getAccuracyTextColor(bestAccuracy)}`}>
                 {bestAccuracy}%
               </p>
             </CardContent>
@@ -402,7 +391,7 @@ export function HistoryView() {
                           </div>
                           <div className="flex items-center gap-3 ml-4">
                             <div className="text-right">
-                              <p className={`text-lg font-bold ${getAccuracyColor(session.avgAccuracy)}`}>
+                              <p className={`text-lg font-bold ${getAccuracyTextColor(session.avgAccuracy)}`}>
                                 {Math.round(session.avgAccuracy)}%
                               </p>
                               <p className="text-xs text-muted-foreground">ความแม่นยำ</p>
@@ -456,7 +445,7 @@ export function HistoryView() {
                                 </div>
                                 <div className="h-2 rounded-full bg-muted overflow-hidden">
                                   <motion.div
-                                    className={`h-full rounded-full ${getAccuracyBg(session.avgAccuracy)}`}
+                                    className={`h-full rounded-full ${getAccuracyBarColor(session.avgAccuracy)}`}
                                     initial={{ width: 0 }}
                                     animate={{
                                       width: `${session.avgAccuracy}%`,

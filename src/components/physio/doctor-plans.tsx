@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
-import { CATEGORIES } from '@/lib/exercises-data';
+import { CATEGORIES, DIFFICULTY_COLORS, DIFFICULTY_LABELS } from '@/lib/exercises-data';
 import {
   Dumbbell,
   Clock,
@@ -62,18 +62,6 @@ interface Exercise {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────
-
-const DIFF_COLORS: Record<string, string> = {
-  beginner: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  intermediate: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  advanced: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-};
-
-const DIFF_LABELS: Record<string, string> = {
-  beginner: 'เริ่มต้น',
-  intermediate: 'ปานกลาง',
-  advanced: 'ขั้นสูง',
-};
 
 // ── Component ──────────────────────────────────────────────────────────
 
@@ -128,21 +116,23 @@ export function DoctorPlans() {
       });
   }, []);
 
-  // ── Sync state when selected patient changes ───────────
-  useEffect(() => {
+  // ── Sync state when selected patient changes (adjusted during render) ──
+  const [syncedFor, setSyncedFor] = useState<{ id: string | null; patients: Patient[] } | null>(null);
+  if (!syncedFor || syncedFor.id !== selectedPatientId || syncedFor.patients !== patients) {
+    setSyncedFor({ id: selectedPatientId, patients });
     if (!selectedPatientId) {
       setEnabledIds(new Set());
       setNotes('');
-      return;
+    } else {
+      const patient = patients.find((p) => p.id === selectedPatientId);
+      if (patient) {
+        setEnabledIds(new Set(patient.assignedExerciseIds || []));
+        setNotes(patient.therapistNotes || '');
+        // Expand all categories by default
+        setExpandedCats(new Set(CATEGORIES.map((c) => c.id)));
+      }
     }
-    const patient = patients.find((p) => p.id === selectedPatientId);
-    if (patient) {
-      setEnabledIds(new Set(patient.assignedExerciseIds || []));
-      setNotes(patient.therapistNotes || '');
-      // Expand all categories by default
-      setExpandedCats(new Set(CATEGORIES.map((c) => c.id)));
-    }
-  }, [selectedPatientId, patients]);
+  }
 
   // ── Cleanup debounce timers on unmount ─────────────────
   useEffect(() => {
@@ -574,9 +564,9 @@ export function DoctorPlans() {
                               <div className="flex items-center gap-2.5 shrink-0">
                                 <Badge
                                   variant="secondary"
-                                  className={`text-[11px] px-2 py-0.5 ${DIFF_COLORS[ex.difficulty] || ''}`}
+                                  className={`text-[11px] px-2 py-0.5 ${DIFFICULTY_COLORS[ex.difficulty] || ''}`}
                                 >
-                                  {DIFF_LABELS[ex.difficulty] || ex.difficulty}
+                                  {DIFFICULTY_LABELS[ex.difficulty] || ex.difficulty}
                                 </Badge>
                                 <Switch
                                   checked={isEnabled}

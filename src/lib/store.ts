@@ -16,14 +16,6 @@ interface AppState {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
 
-  // Patient tab navigation
-  patientTab: PatientTab;
-  setPatientTab: (tab: PatientTab) => void;
-
-  // Doctor tab navigation
-  doctorTab: DoctorTab;
-  setDoctorTab: (tab: DoctorTab) => void;
-
   // Doctor: selected patient for detail view
   selectedPatientId: string | null;
   setSelectedPatientId: (id: string | null) => void;
@@ -73,12 +65,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   activeTab: 'dashboard',
   setActiveTab: (tab) => set({ activeTab: tab }),
-
-  patientTab: 'dashboard',
-  setPatientTab: (tab) => set({ patientTab: tab, activeTab: tab }),
-
-  doctorTab: 'overview',
-  setDoctorTab: (tab) => set({ doctorTab: tab, activeTab: tab }),
 
   selectedPatientId: null,
   setSelectedPatientId: (id) => set({ selectedPatientId: id }),

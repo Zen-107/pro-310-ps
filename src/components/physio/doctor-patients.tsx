@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
+import { categoryLabel } from '@/lib/exercises-data';
+import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
 
 /* ─────────── Types ─────────── */
 
@@ -99,15 +101,6 @@ interface FullData {
 
 /* ─────────── Constants ─────────── */
 
-const CATEGORY_NAMES: Record<string, string> = {
-  knee: 'เข่า',
-  shoulder: 'ไหล่',
-  hip: 'สะโพก',
-  back: 'หลัง',
-  neck: 'คอ',
-  ankle: 'ข้อเท้า',
-};
-
 const GENDER_LABELS: Record<string, string> = {
   ชาย: 'ชาย',
   หญิง: 'หญิง',
@@ -125,18 +118,6 @@ const STAGGER_CONTAINER = {
 };
 
 /* ─────────── Helpers ─────────── */
-
-function getAccColor(acc: number) {
-  if (acc >= 80) return 'text-emerald-600 dark:text-emerald-400';
-  if (acc >= 60) return 'text-amber-600 dark:text-amber-400';
-  return 'text-red-600 dark:text-red-400';
-}
-
-function getAccBarColor(acc: number) {
-  if (acc >= 80) return 'bg-emerald-500';
-  if (acc >= 60) return 'bg-amber-500';
-  return 'bg-red-500';
-}
 
 function getAccBgColor(acc: number) {
   if (acc >= 80) return 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800';
@@ -465,7 +446,7 @@ export function DoctorPatients() {
               icon={<Target className="h-5 w-5 text-emerald-600" />}
               label="ความแม่นยำเฉลี่ย"
               value={`${patient.avgAccuracy}%`}
-              valueClass={getAccColor(patient.avgAccuracy)}
+              valueClass={getAccuracyTextColor(patient.avgAccuracy)}
               sub={`${patient.totalReps} ครั้งทั้งหมด`}
               delay={0.05}
             />
@@ -543,13 +524,13 @@ export function DoctorPatients() {
                           className={`p-3 rounded-xl border ${getAccBgColor(avg)} transition-shadow hover:shadow-sm`}
                         >
                           <p className="text-xs text-muted-foreground font-medium">
-                            {CATEGORY_NAMES[cat] || cat}
+                            {categoryLabel(cat)}
                           </p>
                           <p className="text-xl font-bold mt-1">
                             {stats.count}
                             <span className="text-xs font-normal text-muted-foreground ml-1">เซสชัน</span>
                           </p>
-                          <p className={`text-xs mt-0.5 font-semibold ${getAccColor(avg)}`}>
+                          <p className={`text-xs mt-0.5 font-semibold ${getAccuracyTextColor(avg)}`}>
                             เฉลี่ย {avg}%
                           </p>
                         </motion.div>
@@ -746,7 +727,7 @@ export function DoctorPatients() {
                                     variant="outline"
                                     className="text-[10px] shrink-0"
                                   >
-                                    {CATEGORY_NAMES[s.exerciseCategory] || s.exerciseCategory}
+                                    {categoryLabel(s.exerciseCategory)}
                                   </Badge>
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -769,7 +750,7 @@ export function DoctorPatients() {
                                   <p className="text-sm font-bold">{s.maxRom}°</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className={`text-lg font-bold leading-tight ${getAccColor(s.avgAccuracy)}`}>
+                                  <p className={`text-lg font-bold leading-tight ${getAccuracyTextColor(s.avgAccuracy)}`}>
                                     {s.avgAccuracy}%
                                   </p>
                                   <p className="text-[10px] text-muted-foreground">แม่นยำ</p>
@@ -796,7 +777,7 @@ export function DoctorPatients() {
                                     <div className="grid grid-cols-3 gap-2">
                                       <div className={`p-3 rounded-lg border text-center ${getAccBgColor(s.avgAccuracy)}`}>
                                         <p className="text-[10px] text-muted-foreground uppercase tracking-wide">ความแม่นยำ</p>
-                                        <p className={`text-xl font-bold mt-0.5 ${getAccColor(s.avgAccuracy)}`}>
+                                        <p className={`text-xl font-bold mt-0.5 ${getAccuracyTextColor(s.avgAccuracy)}`}>
                                           {s.avgAccuracy}%
                                         </p>
                                       </div>
@@ -816,7 +797,7 @@ export function DoctorPatients() {
                                     <div className="space-y-1.5">
                                       <div className="flex items-center justify-between text-xs text-muted-foreground">
                                         <span>ระดับความแม่นยำ</span>
-                                        <span className={`font-semibold ${getAccColor(s.avgAccuracy)}`}>
+                                        <span className={`font-semibold ${getAccuracyTextColor(s.avgAccuracy)}`}>
                                           {s.avgAccuracy}%
                                         </span>
                                       </div>
@@ -825,7 +806,7 @@ export function DoctorPatients() {
                                           initial={{ width: 0 }}
                                           animate={{ width: `${s.avgAccuracy}%` }}
                                           transition={{ duration: 0.6, ease: 'easeOut' }}
-                                          className={`h-full rounded-full ${getAccBarColor(s.avgAccuracy)}`}
+                                          className={`h-full rounded-full ${getAccuracyBarColor(s.avgAccuracy)}`}
                                         />
                                       </div>
                                       <div className="flex justify-between text-[10px] text-muted-foreground">

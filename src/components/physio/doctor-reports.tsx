@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/select';
 import ReactMarkdown from 'react-markdown';
 import { useAppStore } from '@/lib/store';
+import { categoryLabel } from '@/lib/exercises-data';
+import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
 import {
   FileText,
   RefreshCw,
@@ -90,31 +92,6 @@ interface ReportData {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const CATEGORY_LABELS: Record<string, string> = {
-  knee: 'เข่า',
-  shoulder: 'ไหล่',
-  hip: 'สะโพก',
-  back: 'หลัง',
-  neck: 'คอ',
-  ankle: 'ข้อเท้า',
-};
-
-function categoryLabel(cat: string) {
-  return CATEGORY_LABELS[cat] || cat;
-}
-
-function accuracyColor(acc: number): string {
-  if (acc >= 80) return 'text-emerald-600 dark:text-emerald-400';
-  if (acc >= 60) return 'text-amber-600 dark:text-amber-400';
-  return 'text-red-500 dark:text-red-400';
-}
-
-function accuracyBarBg(acc: number): string {
-  if (acc >= 80) return 'bg-emerald-500';
-  if (acc >= 60) return 'bg-amber-500';
-  return 'bg-red-500';
-}
-
 function deviationColor(dev: number): string {
   if (dev <= 5) return 'text-emerald-600 dark:text-emerald-400';
   if (dev <= 15) return 'text-amber-600 dark:text-amber-400';
@@ -187,27 +164,39 @@ export function DoctorReports() {
   }, [selectedPatientId]);
 
   /* ---- Fetch sessions when patient changes ---- */
-  const fetchSessions = useCallback(async (patientId: string) => {
-    if (!patientId) return;
-    setSessionsLoading(true);
-    setReport(null);
-    setSelectedSessionId(null);
-    setError(null);
-    try {
-      const res = await fetch(`/api/sessions?patientId=${patientId}`);
-      if (!res.ok) throw new Error();
-      const data: Session[] = await res.json();
-      setSessions(data);
-    } catch {
-      setSessions([]);
-    } finally {
-      setSessionsLoading(false);
+  // Reset per-patient UI state during render when the patient changes
+  const [prevPatientId, setPrevPatientId] = useState(activePatientId);
+  if (prevPatientId !== activePatientId) {
+    setPrevPatientId(activePatientId);
+    if (activePatientId) {
+      setSessionsLoading(true);
+      setReport(null);
+      setSelectedSessionId(null);
+      setError(null);
     }
-  }, []);
+  }
 
   useEffect(() => {
-    fetchSessions(activePatientId);
-  }, [activePatientId, fetchSessions]);
+    if (!activePatientId) return;
+    let cancelled = false;
+    async function fetchSessions() {
+      let data: Session[] = [];
+      try {
+        const res = await fetch(`/api/sessions?patientId=${activePatientId}`);
+        if (!res.ok) throw new Error();
+        data = await res.json();
+      } catch {
+        data = [];
+      }
+      if (cancelled) return;
+      setSessions(data);
+      setSessionsLoading(false);
+    }
+    fetchSessions();
+    return () => {
+      cancelled = true;
+    };
+  }, [activePatientId]);
 
   /* ---- Patient selector change handler ---- */
   function handlePatientChange(value: string) {
@@ -302,7 +291,7 @@ export function DoctorReports() {
                   {activePatient.totalSessions ?? 0} เซสชัน
                 </span>
                 {activePatient.latestAccuracy != null && activePatient.latestAccuracy > 0 && (
-                  <span className={`font-semibold ${accuracyColor(activePatient.latestAccuracy)}`}>
+                  <span className={`font-semibold ${getAccuracyTextColor(activePatient.latestAccuracy)}`}>
                     ความแม่นยำล่าสุด {activePatient.latestAccuracy}%
                   </span>
                 )}
@@ -433,7 +422,7 @@ export function DoctorReports() {
                         className="text-center p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/50"
                       >
                         <Target className="h-4 w-4 text-amber-500 mx-auto mb-1" />
-                        <p className={`text-2xl font-bold ${accuracyColor(report.avgAccuracy)}`}>
+                        <p className={`text-2xl font-bold ${getAccuracyTextColor(report.avgAccuracy)}`}>
                           {report.avgAccuracy}%
                         </p>
                         <p className="text-xs text-muted-foreground mt-0.5">ความแม่นยำ</p>
@@ -530,14 +519,14 @@ export function DoctorReports() {
                                       <div className="flex items-center gap-2.5 justify-center">
                                         <div className="w-20 h-2 rounded-full bg-muted overflow-hidden">
                                           <motion.div
-                                            className={`h-full rounded-full ${accuracyBarBg(j.accuracy)}`}
+                                            className={`h-full rounded-full ${getAccuracyBarColor(j.accuracy)}`}
                                             initial={{ width: 0 }}
                                             animate={{ width: `${j.accuracy}%` }}
                                             transition={{ delay: 0.4 + i * 0.06, duration: 0.6 }}
                                           />
                                         </div>
                                         <span
-                                          className={`text-xs font-bold tabular-nums w-9 text-right ${accuracyColor(j.accuracy)}`}
+                                          className={`text-xs font-bold tabular-nums w-9 text-right ${getAccuracyTextColor(j.accuracy)}`}
                                         >
                                           {j.accuracy}%
                                         </span>
@@ -678,7 +667,7 @@ export function DoctorReports() {
                       <div className="flex items-center gap-3 ml-3 shrink-0">
                         <div className="text-right">
                           <p
-                            className={`text-sm font-bold tabular-nums ${accuracyColor(s.avgAccuracy)}`}
+                            className={`text-sm font-bold tabular-nums ${getAccuracyTextColor(s.avgAccuracy)}`}
                           >
                             {Math.round(s.avgAccuracy)}%
                           </p>

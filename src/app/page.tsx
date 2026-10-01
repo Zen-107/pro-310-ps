@@ -35,7 +35,7 @@ const doctorTabs: { id: DoctorTab; label: string; icon: React.ComponentType<{ cl
 export default function Home() {
   const {
     role, setRole, activeTab, setActiveTab, isSessionActive,
-    currentPatientId, setCurrentPatientId,
+    currentPatientId, setCurrentPatientId, setSelectedPatientId,
   } = useAppStore();
   const mounted = useSyncExternalStore(
     () => () => {},
@@ -219,7 +219,7 @@ export default function Home() {
 
                 {/* Doctor Views */}
                 {isDoctor && activeTab === 'overview' && (
-                  <DoctorOverview onSelectPatient={(id) => { useAppStore.getState().setSelectedPatientId(id); setActiveTab('patients'); }} />
+                  <DoctorOverview onSelectPatient={(id) => { setSelectedPatientId(id); setActiveTab('patients'); }} />
                 )}
                 {isDoctor && activeTab === 'patients' && <DoctorPatients />}
                 {isDoctor && activeTab === 'reports' && <DoctorReports />}
@@ -278,7 +278,7 @@ export default function Home() {
 
 // Small chip showing current patient name + logout
 function PatientIdentityChip() {
-  const { currentPatientId, setCurrentPatientId } = useAppStore();
+  const { currentPatientId, setCurrentPatientId, setActiveTab } = useAppStore();
   const [name, setName] = useState('');
 
   useEffect(() => {
@@ -295,7 +295,7 @@ function PatientIdentityChip() {
       <UserCircle className="h-3.5 w-3.5 text-emerald-600" />
       <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400 max-w-[120px] truncate">{name}</span>
       <button
-        onClick={() => { setCurrentPatientId(null); useAppStore.getState().setActiveTab('dashboard'); }}
+        onClick={() => { setCurrentPatientId(null); setActiveTab('dashboard'); }}
         className="text-emerald-600 hover:text-red-500 transition-colors"
         title="ออกจากระบบ"
       >

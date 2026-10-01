@@ -31,7 +31,15 @@ import {
   Clock,
   Zap,
 } from 'lucide-react';
-import { CATEGORIES, type ExerciseData, type TargetJoint } from '@/lib/exercises-data';
+import {
+  CATEGORIES,
+  EXERCISES,
+  DIFFICULTY_COLORS,
+  DIFFICULTY_LABELS,
+  exerciseIdFromName,
+  type ExerciseData,
+  type TargetJoint,
+} from '@/lib/exercises-data';
 import { useAppStore } from '@/lib/store';
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -51,18 +59,6 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   StretchHorizontal,
 };
 
-const difficultyColors: Record<string, string> = {
-  beginner: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  intermediate: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  advanced: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-};
-
-const difficultyLabels: Record<string, string> = {
-  beginner: 'เริ่มต้น',
-  intermediate: 'ปานกลาง',
-  advanced: 'ขั้นสูง',
-};
-
 interface ExerciseWithId extends ExerciseData {
   id: string;
 }
@@ -77,36 +73,28 @@ export function ExercisesView() {
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   useEffect(() => {
-    fetchExercises();
-  }, []);
+    let cancelled = false;
+    // Fallback to local data when the API is unavailable
+    const localExercises = () =>
+      EXERCISES.map((e) => ({ ...e, id: exerciseIdFromName(e.name) }));
 
-  async function fetchExercises() {
-    try {
-      const res = await fetch('/api/exercises');
-      if (res.ok) {
-        const data = await res.json();
-        setExercises(data);
-      } else {
-        // Fallback to local data
-        setExercises(
-          (await import('@/lib/exercises-data')).EXERCISES.map((e) => ({
-            ...e,
-            id: `ex_${e.name.toLowerCase().replace(/\s+/g, '_')}`,
-          }))
-        );
+    async function fetchExercises() {
+      let data: ExerciseWithId[];
+      try {
+        const res = await fetch('/api/exercises');
+        data = res.ok ? await res.json() : localExercises();
+      } catch {
+        data = localExercises();
       }
-    } catch {
-      const { EXERCISES } = await import('@/lib/exercises-data');
-      setExercises(
-        EXERCISES.map((e) => ({
-          ...e,
-          id: `ex_${e.name.toLowerCase().replace(/\s+/g, '_')}`,
-        }))
-      );
-    } finally {
+      if (cancelled) return;
+      setExercises(data);
       setLoading(false);
     }
-  }
+    fetchExercises();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredExercises = exercises.filter((ex) => {
     const matchesCategory = selectedCategory === 'all' || ex.category === selectedCategory;
@@ -263,8 +251,8 @@ export function ExercisesView() {
                         </div>
                         <p className="text-xs text-muted-foreground">{exercise.name}</p>
                       </div>
-                      <Badge variant="secondary" className={difficultyColors[exercise.difficulty]}>
-                        {difficultyLabels[exercise.difficulty]}
+                      <Badge variant="secondary" className={DIFFICULTY_COLORS[exercise.difficulty]}>
+                        {DIFFICULTY_LABELS[exercise.difficulty]}
                       </Badge>
                     </div>
                   </CardHeader>
@@ -344,7 +332,7 @@ function ExerciseDetail({
               {categoryInfo?.name || exercise.category}
             </Badge>
             <Badge className="bg-white/20 text-white border-0">
-              {difficultyLabels[exercise.difficulty]}
+              {DIFFICULTY_LABELS[exercise.difficulty]}
             </Badge>
           </div>
         </div>

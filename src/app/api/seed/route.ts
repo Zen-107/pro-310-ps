@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { EXERCISES } from '@/lib/exercises-data';
+import { EXERCISES, exerciseIdFromName } from '@/lib/exercises-data';
 import { NextResponse } from 'next/server';
 
 export async function POST() {
@@ -7,7 +7,7 @@ export async function POST() {
     // Upsert exercises
     for (const ex of EXERCISES) {
       await db.exercise.upsert({
-        where: { id: `ex_${ex.name.toLowerCase().replace(/\s+/g, '_')}` },
+        where: { id: exerciseIdFromName(ex.name) },
         update: {
           name: ex.name,
           nameTh: ex.nameTh,
@@ -23,7 +23,7 @@ export async function POST() {
           bodyPart: ex.bodyPart,
         },
         create: {
-          id: `ex_${ex.name.toLowerCase().replace(/\s+/g, '_')}`,
+          id: exerciseIdFromName(ex.name),
           name: ex.name,
           nameTh: ex.nameTh,
           category: ex.category,
@@ -53,7 +53,7 @@ export async function POST() {
         await db.patient.create({
           data: {
             ...sp,
-            assignedExerciseIds: JSON.stringify(EXERCISES.slice(0, 6).map(e => `ex_${e.name.toLowerCase().replace(/\s+/g, '_')}`)),
+            assignedExerciseIds: JSON.stringify(EXERCISES.slice(0, 6).map((e) => exerciseIdFromName(e.name))),
           },
         });
       }

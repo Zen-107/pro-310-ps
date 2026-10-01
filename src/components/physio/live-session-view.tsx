@@ -48,8 +48,12 @@ import {
   SKELETON_CONNECTIONS,
   type Landmark,
 } from '@/lib/angle-utils';
-import type { ExerciseData, TargetJoint } from '@/lib/exercises-data';
-import { CATEGORIES } from '@/lib/exercises-data';
+import {
+  CATEGORIES,
+  DIFFICULTY_LABELS,
+  type ExerciseData,
+  type TargetJoint,
+} from '@/lib/exercises-data';
 
 // ─── Icon map for exercises ────────────────────────────────────────────
 const exerciseIconMap: Record<string, React.ReactNode> = {
@@ -69,9 +73,9 @@ const exerciseIconMap: Record<string, React.ReactNode> = {
 
 // ─── Difficulty badge config ───────────────────────────────────────────
 const difficultyConfig: Record<string, { label: string; className: string }> = {
-  beginner: { label: 'เริ่มต้น', className: 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30' },
-  intermediate: { label: 'ปานกลาง', className: 'bg-amber-500/15 text-amber-600 border-amber-500/30' },
-  advanced: { label: 'ขั้นสูง', className: 'bg-red-500/15 text-red-600 border-red-500/30' },
+  beginner: { label: DIFFICULTY_LABELS.beginner, className: 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30' },
+  intermediate: { label: DIFFICULTY_LABELS.intermediate, className: 'bg-amber-500/15 text-amber-600 border-amber-500/30' },
+  advanced: { label: DIFFICULTY_LABELS.advanced, className: 'bg-red-500/15 text-red-600 border-red-500/30' },
 };
 
 const bodyPartLabels: Record<string, string> = {
@@ -670,7 +674,6 @@ export function LiveSessionView() {
       cancelled = true;
       cancelAnimationFrame(rafId);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
   // ─── Handle pose results ────────────────────────────────────────────
@@ -922,6 +925,15 @@ export function LiveSessionView() {
   // RENDER: Pre-Session Screen
   // =====================================================================
   if (phase === 'pre-session') {
+    // Exercise picked in the Exercises tab is shown first and highlighted
+    const preselectedId = store.selectedExerciseId;
+    const orderedExercises = preselectedId
+      ? [
+          ...exercises.filter((e) => e.id === preselectedId),
+          ...exercises.filter((e) => e.id !== preselectedId),
+        ]
+      : exercises;
+
     return (
       <div className="min-h-screen bg-background">
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
@@ -968,9 +980,10 @@ export function LiveSessionView() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {exercises.map((exercise, idx) => {
+              {orderedExercises.map((exercise, idx) => {
                 const catInfo = CATEGORIES.find((c) => c.id === exercise.category);
                 const diff = difficultyConfig[exercise.difficulty] || difficultyConfig.beginner;
+                const isPreselected = exercise.id === preselectedId;
                 return (
                   <motion.div
                     key={exercise.id}
@@ -978,7 +991,11 @@ export function LiveSessionView() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
                   >
-                    <Card className="group overflow-hidden transition-shadow hover:shadow-lg">
+                    <Card
+                      className={`group overflow-hidden transition-shadow hover:shadow-lg ${
+                        isPreselected ? 'ring-2 ring-emerald-500' : ''
+                      }`}
+                    >
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2">

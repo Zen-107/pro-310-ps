@@ -198,3 +198,21 @@ export function getAngleStatusColor(
   }
   return 'text-red-500';
 }
+
+/**
+ * Text color class for an accuracy percentage (0-100)
+ */
+export function getAccuracyTextColor(acc: number): string {
+  if (acc >= 80) return 'text-emerald-600 dark:text-emerald-400';
+  if (acc >= 60) return 'text-amber-600 dark:text-amber-400';
+  return 'text-red-600 dark:text-red-400';
+}
+
+/**
+ * Bar/background color class for an accuracy percentage (0-100)
+ */
+export function getAccuracyBarColor(acc: number): string {
+  if (acc >= 80) return 'bg-emerald-500';
+  if (acc >= 60) return 'bg-amber-500';
+  return 'bg-red-500';
+}

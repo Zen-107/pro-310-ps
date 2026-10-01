@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import {
   BarChart,
@@ -252,36 +252,36 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
 
   const currentPatientId = useAppStore((s) => s.currentPatientId);
 
-  const fetchData = useCallback(async () => {
-    if (!currentPatientId) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const [profileRes, statsRes] = await Promise.all([
-        fetch(`/api/profile?patientId=${currentPatientId}`),
-        fetch(`/api/stats?days=30&patientId=${currentPatientId}`),
-      ]);
-
-      if (profileRes.ok) {
-        const profileData = await profileRes.json();
-        setProfile(profileData);
-      }
-
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        setStats(statsData);
-      }
-    } catch {
-      // Silently handle — skeletons will remain shown
-    } finally {
-      setLoading(false);
-    }
-  }, [currentPatientId]);
-
   useEffect(() => {
+    let cancelled = false;
+    async function fetchData() {
+      try {
+        if (!currentPatientId) return;
+        const [profileRes, statsRes] = await Promise.all([
+          fetch(`/api/profile?patientId=${currentPatientId}`),
+          fetch(`/api/stats?days=30&patientId=${currentPatientId}`),
+        ]);
+
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          if (!cancelled) setProfile(profileData);
+        }
+
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          if (!cancelled) setStats(statsData);
+        }
+      } catch {
+        // Silently handle — skeletons will remain shown
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
     fetchData();
-  }, [fetchData]);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPatientId]);
 
   // Last 7 days for weekly chart
   const weeklyData = (() => {

@@ -452,6 +452,31 @@ export const CATEGORIES = [
   { id: "ankle", name: "ข้อเท้า", nameEn: "Ankle", icon: "Footprints", color: "#ec4899" },
 ];
 
+export const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  CATEGORIES.map((c) => [c.id, c.name])
+);
+
+export function categoryLabel(id: string): string {
+  return CATEGORY_LABELS[id] || id;
+}
+
+export const DIFFICULTY_LABELS: Record<string, string> = {
+  beginner: "เริ่มต้น",
+  intermediate: "ปานกลาง",
+  advanced: "ขั้นสูง",
+};
+
+export const DIFFICULTY_COLORS: Record<string, string> = {
+  beginner: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  intermediate: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  advanced: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+};
+
+/** Stable exercise ID used by the seed route, e.g. "Knee Flexion" → "ex_knee_flexion" */
+export function exerciseIdFromName(name: string): string {
+  return `ex_${name.toLowerCase().replace(/\s+/g, "_")}`;
+}
+
 export const BADGES = [
   { id: "first_session", name: "เซสชันแรก", description: "ทำกายภาพบำบัดครั้งแรก", icon: "Star", requirement: 1 },
   { id: "streak_3", name: "ติดต่อกัน 3 วัน", description: "ทำกายภาพติดต่อกัน 3 วัน", icon: "Flame", requirement: 3 },
