@@ -22,12 +22,30 @@ export function PatientSelector() {
   const { currentPatientId, setCurrentPatientId } = useAppStore();
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     fetch('/api/patients')
-      .then(r => r.json())
-      .then(d => { setPatients(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then(r => {
+        if (!r.ok) throw new Error(`Patients fetch failed: ${r.status}`);
+        return r.json();
+      })
+      .then(d => {
+        if (cancelled) return;
+        // The API returns an error object on failure — only accept an array
+        setPatients(Array.isArray(d) ? d : []);
+        setLoadError(!Array.isArray(d));
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (currentPatientId) return null;
@@ -60,6 +78,11 @@ export function PatientSelector() {
       </div>
 
       <div className="max-w-md mx-auto space-y-3">
+        {loadError && (
+          <p className="text-center text-sm text-red-600 dark:text-red-400">
+            ไม่สามารถโหลดรายชื่อผู้ป่วยได้ กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูลแล้วลองใหม่
+          </p>
+        )}
         {patients.map((p) => (
           <motion.button
             key={p.id}

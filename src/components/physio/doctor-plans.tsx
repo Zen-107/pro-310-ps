@@ -91,9 +91,12 @@ export function DoctorPlans() {
   // ── Fetch patients ──────────────────────────────────────
   useEffect(() => {
     fetch('/api/patients')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Patients fetch failed: ${r.status}`);
+        return r.json();
+      })
       .then((d: Patient[]) => {
-        setPatients(d);
+        setPatients(Array.isArray(d) ? d : []);
         setLoadingPatients(false);
       })
       .catch(() => {
@@ -105,9 +108,12 @@ export function DoctorPlans() {
   // ── Fetch exercises ────────────────────────────────────
   useEffect(() => {
     fetch('/api/exercises')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Exercises fetch failed: ${r.status}`);
+        return r.json();
+      })
       .then((d: Exercise[]) => {
-        setExercises(d);
+        setExercises(Array.isArray(d) ? d : []);
         setLoadingExercises(false);
       })
       .catch(() => {
