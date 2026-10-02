@@ -33,6 +33,7 @@ import {
 import {
   FileText,
   RefreshCw,
+  Printer,
   Loader2,
   ClipboardList,
   Eye,
@@ -90,6 +91,7 @@ interface JointReport {
 
 interface ReportData {
   sessionId: string;
+  patientName: string;
   exerciseName: string;
   exerciseNameEn: string;
   category: string;
@@ -118,6 +120,26 @@ interface ReportData {
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Print the report (or "Save as PDF" in the print dialog). Dark mode is
+ * switched off for the printout and restored afterwards; the print styles in
+ * globals.css keep only the element marked data-print-root.
+ */
+function printReport(title: string) {
+  const html = document.documentElement;
+  const wasDark = html.classList.contains('dark');
+  const prevTitle = document.title;
+  const restore = () => {
+    if (wasDark) html.classList.add('dark');
+    document.title = prevTitle;
+    window.removeEventListener('afterprint', restore);
+  };
+  if (wasDark) html.classList.remove('dark');
+  document.title = title; // default PDF file name
+  window.addEventListener('afterprint', restore);
+  window.print();
+}
 
 function deviationColor(dev: number): string {
   if (dev <= 5) return 'text-emerald-600 dark:text-emerald-400';
@@ -382,9 +404,50 @@ export function DoctorReports() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.3 }}
           >
-            <Card className="border-emerald-500/20 overflow-hidden">
+            <Card className="border-emerald-500/20 overflow-hidden" data-print-root>
+              {/* Print-only document header (EMR) */}
+              {report && (
+                <div data-print-only className="border-b-2 border-black px-1 pb-3 mb-2 text-black">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-lg font-bold">รายงานผลการฝึกกายภาพบำบัด (Clinical Session Report)</p>
+                      <p className="text-xs">AI Physio · ข้อมูลจากการตรวจจับท่าทางด้วยกล้อง ใช้ประกอบการตรวจร่างกายโดยแพทย์/นักกายภาพบำบัด</p>
+                    </div>
+                    <div className="text-right text-[10px] leading-tight">
+                      <p>Session ID: {report.sessionId}</p>
+                      <p>พิมพ์เมื่อ: {new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                    </div>
+                  </div>
+                  <table className="mt-2 w-full text-xs">
+                    <tbody>
+                      <tr>
+                        <td className="py-0.5 pr-2 font-semibold w-28">ผู้ป่วย</td>
+                        <td className="py-0.5">
+                          {report.patientName}
+                          {activePatient?.age != null && ` · อายุ ${activePatient.age} ปี`}
+                          {activePatient?.gender && ` · ${activePatient.gender}`}
+                        </td>
+                        <td className="py-0.5 pr-2 font-semibold w-28">ท่าฝึก</td>
+                        <td className="py-0.5">
+                          {report.exerciseName} ({categoryLabel(report.category)})
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-0.5 pr-2 font-semibold">ภาวะ/การวินิจฉัย</td>
+                        <td className="py-0.5">{activePatient?.condition || '—'}</td>
+                        <td className="py-0.5 pr-2 font-semibold">วันเวลาฝึก</td>
+                        <td className="py-0.5">
+                          {new Date(report.startedAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}
+                          {report.endedAt && ` – ${new Date(report.endedAt).toLocaleTimeString('th-TH', { timeStyle: 'short' })}`}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
               {/* Report header */}
-              <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-4 text-white">
+              <div data-print-hide className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-4 text-white">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="shrink-0 p-2 bg-emerald-500/20 rounded-xl">
@@ -404,15 +467,31 @@ export function DoctorReports() {
                     </div>
                   </div>
                   {report && selectedSessionId && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-slate-300 hover:text-white hover:bg-white/10 shrink-0"
-                      onClick={() => generateReport(selectedSessionId)}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                      {report.clinicalSummary ? 'สร้างสรุปใหม่' : 'สร้างสรุป AI'}
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-slate-300 hover:text-white hover:bg-white/10"
+                        disabled={generating || loadingReport}
+                        onClick={() =>
+                          printReport(
+                            `Session report - ${report.patientName} - ${report.exerciseName} - ${report.startedAt.slice(0, 10)}`
+                          )
+                        }
+                      >
+                        <Printer className="h-3.5 w-3.5 mr-1.5" />
+                        พิมพ์ / PDF
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-slate-300 hover:text-white hover:bg-white/10"
+                        onClick={() => generateReport(selectedSessionId)}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        {report.clinicalSummary ? 'สร้างสรุปใหม่' : 'สร้างสรุป AI'}
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -622,6 +701,10 @@ export function DoctorReports() {
 
                     <ReportFaultsPanel faults={report.faults} totalReps={report.totalReps} />
 
+                    <p data-print-only className="text-xs italic">
+                      Clinical Session Replay และวิดีโอการฝึก (ถ้ามี) ดูได้ในระบบอิเล็กทรอนิกส์ — Session ID {report.sessionId}
+                    </p>
+                    <div data-print-hide>
                     <ClinicalSessionReplay
                       key={`replay-${report.sessionId}`}
                       sessionId={report.sessionId}
@@ -630,6 +713,7 @@ export function DoctorReports() {
                       reps={report.reps}
                       primaryJoint={report.primaryJoint}
                     />
+                    </div>
 
                     <Separator />
 
@@ -649,7 +733,7 @@ export function DoctorReports() {
                         ) : (
                           <div className="not-prose flex flex-col items-center gap-2 py-4 text-center">
                             <p className="text-sm text-muted-foreground">ยังไม่มีสรุปคลินิกสำหรับเซสชันนี้</p>
-                            <Button size="sm" variant="outline" onClick={() => generateReport(report.sessionId)}>
+                            <Button data-print-hide size="sm" variant="outline" onClick={() => generateReport(report.sessionId)}>
                               <Sparkles className="h-3.5 w-3.5 mr-1.5" /> สร้างสรุปด้วย AI
                             </Button>
                           </div>
@@ -672,6 +756,21 @@ export function DoctorReports() {
                         />
                       </>
                     )}
+
+                    {/* Print-only sign-off for the medical record */}
+                    <div data-print-only className="print-avoid-break pt-6 text-xs text-black">
+                      <div className="grid grid-cols-2 gap-10">
+                        <div>
+                          <div className="mt-10 border-t border-black pt-1">ลงชื่อ แพทย์ / นักกายภาพบำบัดผู้ตรวจสอบ</div>
+                          <div className="mt-1">( ............................................................ )</div>
+                          <div className="mt-1">เลขที่ใบอนุญาต ......................... วันที่ ..........................</div>
+                        </div>
+                        <div className="text-[10px] leading-relaxed">
+                          ข้อมูลมุมข้อต่อคำนวณจาก MediaPipe Pose ({report.algorithmVersion}) เป้าหมายและวิธีคำนวณแสดงไว้ในรายงาน
+                          สรุปที่สร้างโดย AI ต้องได้รับการตรวจสอบโดยบุคลากรทางการแพทย์ก่อนใช้ในการตัดสินใจทางคลินิก
+                        </div>
+                      </div>
+                    </div>
                   </>
                 )}
               </CardContent>

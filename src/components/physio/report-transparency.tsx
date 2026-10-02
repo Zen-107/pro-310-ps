@@ -152,7 +152,7 @@ export function ReportReps({ reps }: { reps: ReportRep[] }) {
         <ListOrdered className="h-4 w-4 text-emerald-600" />
         ผลรายครั้ง ({reps.length} ครั้ง)
       </h4>
-      <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto">
+      <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto print-expand">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-muted">
             <tr className="text-left">
@@ -235,12 +235,13 @@ export function ReviewPanel({
         </div>
       )}
       <Textarea
+        data-print-hide
         placeholder="ความเห็นของแพทย์/นักกายภาพ (ไม่บังคับ)"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
         className="text-sm"
       />
-      <div className="flex flex-wrap gap-2">
+      <div data-print-hide className="flex flex-wrap gap-2">
         <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={!!saving} onClick={() => submit('APPROVED')}>
           {saving === 'APPROVED' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
           รับรองผล
@@ -328,7 +329,7 @@ export function ReportFaultsPanel({ faults, totalReps }: { faults: ReportFaults;
       {faults.items.length === 0 ? (
         <p className="text-xs text-muted-foreground">ไม่พบข้อผิดพลาดของท่าทางในเซสชันนี้</p>
       ) : (
-        <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto">
+        <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto print-expand">
           <table className="w-full text-xs min-w-[520px]">
             <thead className="sticky top-0 bg-muted">
               <tr className="text-left">
@@ -417,6 +418,64 @@ function arc(c: P2, radius: number, a0: number, sweep: number, wedge = false): s
   return wedge ? `M${r2(c.x)},${r2(c.y)} L${r2(p0.x)},${r2(p0.y)} ${a} Z` : `M${r2(p0.x)},${r2(p0.y)} ${a}`;
 }
 
+interface VideoMeta {
+  recordStartAt: number;
+  pauses: { at: number; resumedAt: number }[];
+  complete: boolean;
+}
+
+/** Wall-clock time → position in the recorded video (seconds), skipping paused spans */
+function videoSeconds(meta: VideoMeta, wallMs: number): number {
+  let paused = 0;
+  for (const p of meta.pauses) {
+    if (p.at >= wallMs) break;
+    paused += Math.min(p.resumedAt, wallMs) - p.at;
+  }
+  return (wallMs - meta.recordStartAt - paused) / 1000;
+}
+
+/**
+ * Session video recorded with the patient's consent. MediaRecorder WebM files
+ * have no duration header; seeking far past the end once makes the browser
+ * compute it, after which normal seeking works.
+ */
+function SessionVideoPlayer({
+  sessionId,
+  videoRef,
+  meta,
+}: {
+  sessionId: string;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  meta: VideoMeta;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border bg-black">
+      <video
+        ref={videoRef}
+        src={`/api/sessions/${sessionId}/video`}
+        className="h-72 w-full object-contain"
+        playsInline
+        muted
+        preload="metadata"
+        onLoadedMetadata={(e) => {
+          const v = e.currentTarget;
+          if (!Number.isFinite(v.duration)) {
+            const reset = () => {
+              v.removeEventListener('timeupdate', reset);
+              v.currentTime = 0;
+            };
+            v.addEventListener('timeupdate', reset);
+            v.currentTime = 1e101;
+          }
+        }}
+      />
+      <span className="absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+        วิดีโอ (ผู้ป่วยให้ความยินยอม){!meta.complete && ' · บันทึกไม่ครบ'}
+      </span>
+    </div>
+  );
+}
+
 interface ReplayFault {
   t: number;
   type: ReportFaults['items'][number]['type'];
@@ -448,6 +507,27 @@ export function ClinicalSessionReplay({
   const [focus, setFocus] = useState<string>(primaryJoint ?? targets.find((t) => t.isPrimary)?.name ?? targets[0]?.name ?? '');
   const timeRef = useRef(0);
   const chartRef = useRef<SVGSVGElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoMeta, setVideoMeta] = useState<VideoMeta | null>(null);
+
+  // Consented session video, if one was recorded
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/sessions/${sessionId}/video?meta=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setVideoMeta({
+          recordStartAt: new Date(d.recordStartAt).getTime(),
+          pauses: Array.isArray(d.pauses) ? d.pauses : [],
+          complete: !!d.complete,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -492,6 +572,22 @@ export function ClinicalSessionReplay({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [playing, speed, frames, duration, seek]);
+
+  // Keep the video on the replay clock (the replay is the master timeline)
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !videoMeta || !frames?.length) return;
+    const target = videoSeconds(videoMeta, t0 + time);
+    const known = Number.isFinite(v.duration);
+    if (target < 0 || (known && target > v.duration)) {
+      if (!v.paused) v.pause();
+      return;
+    }
+    if (Math.abs(v.currentTime - target) > (playing ? 0.4 : 0.05)) v.currentTime = target;
+    v.playbackRate = speed;
+    if (playing && v.paused) v.play().catch(() => {});
+    if (!playing && !v.paused) v.pause();
+  }, [time, playing, speed, videoMeta, frames, t0]);
 
   const replayFaults: ReplayFault[] = useMemo(
     () =>
@@ -649,6 +745,9 @@ export function ClinicalSessionReplay({
     return (
       <div className="space-y-3">
         {header}
+        {videoMeta && (
+          <video src={`/api/sessions/${sessionId}/video`} controls playsInline muted className="h-72 w-full rounded-xl border bg-black object-contain" />
+        )}
         <p className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground">
           ไม่มีข้อมูลเฟรมสำหรับเซสชันนี้ (เซสชันที่บันทึกก่อนเปิดใช้ระบบ replay จะไม่มีข้อมูลนี้)
         </p>
@@ -693,6 +792,8 @@ export function ClinicalSessionReplay({
       {header}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div className={videoMeta ? 'grid gap-3 md:grid-cols-2' : ''}>
+        {videoMeta && <SessionVideoPlayer sessionId={sessionId} videoRef={videoRef} meta={videoMeta} />}
         {/* Rig */}
         <div className="relative rounded-xl border bg-gradient-to-b from-muted/30 to-muted/60">
           <svg viewBox={`0 0 ${RIG_W} ${RIG_H}`} className="h-72 w-full" role="img" aria-label={`Replay frame at ${formatClock(now)}`}>
@@ -832,6 +933,8 @@ export function ClinicalSessionReplay({
           <div className="absolute bottom-2 left-2 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             {frame.s === 'w' ? '3D world' : '2D image'} · frame {idx + 1}/{frames.length}
           </div>
+        </div>
+
         </div>
 
         {/* Live angle panel */}

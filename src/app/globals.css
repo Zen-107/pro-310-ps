@@ -170,3 +170,85 @@
 video {
   image-rendering: auto;
 }
+/* ─── Print / PDF export (clinical report) ──────────────────────────
+   Only the element marked [data-print-root] is printed. Everything that is
+   neither inside it nor one of its ancestors is removed from the layout, and
+   ancestors drop their scroll/height constraints so long reports paginate. */
+[data-print-only] {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm 12mm 16mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    box-shadow: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  body *:not([data-print-root]):not([data-print-root] *):not(:has([data-print-root])) {
+    display: none !important;
+  }
+
+  *:has([data-print-root]) {
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    transform: none !important;
+    background: #fff !important;
+  }
+
+  [data-print-root] {
+    border: 0 !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  [data-print-root] [data-print-hide] {
+    display: none !important;
+  }
+
+  [data-print-root] [data-print-only] {
+    display: block !important;
+  }
+
+  /* Scrollable tables print in full */
+  [data-print-root] .print-expand {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [data-print-root] table {
+    min-width: 0 !important;
+  }
+
+  [data-print-root] tr,
+  [data-print-root] .print-avoid-break {
+    break-inside: avoid;
+  }
+
+  [data-print-root] h3,
+  [data-print-root] h4 {
+    break-after: avoid;
+  }
+
+  [data-print-root] thead {
+    display: table-header-group;
+  }
+}

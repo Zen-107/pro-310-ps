@@ -235,6 +235,10 @@ model Patient {
   clinicalNotes  String? // care-team notes, never shown to the patient
   consentVersion String? // PDPA consent record
   consentAt      DateTime?
+  // Separate, explicit consent to record session video (PDPA sensitive data).
+  // null = not given or withdrawn; recording is refused server-side without it.
+  videoConsentVersion String?
+  videoConsentAt      DateTime?
   archivedAt     DateTime? // medical records are archived, never hard-deleted
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -497,6 +501,7 @@ model ExerciseSession {
   review           SessionReview?
   reports          ClinicalReport[]
   frameChunks      SessionFrameChunk[]
+  video            SessionVideo?
 
   @@index([patientId, startedAt])
   @@index([questId])
@@ -578,6 +583,26 @@ model SessionFrameChunk {
 
   @@unique([sessionId, seq])
   @@map("session_frame_chunks")
+}
+
+// Session video recorded with the patient's video consent, uploaded in
+// sequential chunks and stored outside the web root (VIDEO_STORAGE_DIR).
+model SessionVideo {
+  id             String    @id @default(cuid())
+  sessionId      String    @unique
+  storageKey     String // file name inside VIDEO_STORAGE_DIR
+  mimeType       String
+  sizeBytes      Int       @default(0)
+  chunkCount     Int       @default(0)
+  recordStartAt  DateTime // wall-clock time of the first video frame (replay sync)
+  consentVersion String // patient's video consent version at recording time
+  completedAt    DateTime? // null while uploading or if the upload was cut off
+  pauses         Json      @default("[]") // [{ at, resumedAt }] epoch ms: recording paused with the session
+  createdAt      DateTime  @default(now())
+
+  session ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("session_videos")
 }
 
 model SessionReview {

@@ -9,3 +9,6 @@ tsconfig.tsbuildinfo
 # Local database
 /db/*.db
 /db/*.db-journal
+
+# Session videos (patient health data — never commit)
+/storage/

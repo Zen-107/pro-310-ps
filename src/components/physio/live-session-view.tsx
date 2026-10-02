@@ -29,6 +29,10 @@ import {
   PersonStanding,
   StretchHorizontal,
   Loader2,
+  ChevronDown,
+  ChevronUp,
+  Video,
+  ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,7 +40,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAppStore } from '@/lib/store';
@@ -45,6 +48,8 @@ import { LandmarkSmoother } from '@/lib/landmark-smoother';
 import { evaluateFormChecks, type FormCheck } from '@/lib/form-checks';
 import { ExerciseDemo } from '@/components/physio/exercise-demo';
 import { encodeFrame, REPLAY_CHUNK_FRAMES, REPLAY_FRAME_MS, type ReplayFrame } from '@/lib/replay';
+import { SessionVideoRecorder, pickRecorderMime } from '@/lib/session-video-recorder';
+import { VIDEO_CONSENT_POINTS, VIDEO_CONSENT_TITLE } from '@/lib/consent';
 import {
   calculateAllAngles,
   isAngleCorrect,
@@ -203,6 +208,14 @@ async function loadScriptWithRetry(src: string, attempts = 2): Promise<void> {
 }
 
 // ─── Helper: format time MM:SS ────────────────────────────────────────
+function readPref(key: string): boolean {
+  try {
+    return typeof window !== 'undefined' && localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -321,7 +334,18 @@ export function LiveSessionView() {
   const [formCue, setFormCue] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState<ExerciseFromAPI | null>(null);
-  const [ttsEnabled, setTtsEnabled] = useState(false);
+  // Remembered per-device preferences. Only the active-session screen reads
+  // them (never server-rendered), so the lazy localStorage read is hydration-safe.
+  const [ttsEnabled, setTtsEnabled] = useState(() => readPref('physio.ttsEnabled'));
+  const [panelCollapsed, setPanelCollapsed] = useState(() => readPref('physio.panelCollapsed'));
+  const [demoOpen, setDemoOpen] = useState(true);
+  // Video recording (PDPA): consent is per patient, recording can be turned off per session
+  const [videoConsent, setVideoConsent] = useState<{ consented: boolean; consentedAt: string | null } | null>(null);
+  const [recordVideo, setRecordVideo] = useState(true);
+  const [isRecording, setIsRecording] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [savingConsent, setSavingConsent] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
@@ -366,6 +390,10 @@ export function LiveSessionView() {
   const selectedExerciseRef = useRef<ExerciseFromAPI | null>(null);
   const isPausedRef = useRef<boolean>(false);
   const ttsEnabledRef = useRef<boolean>(false);
+  const thaiVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const formCueRef = useRef<string | null>(null); // latest compensation cue, for the coach
+  const videoRecorderRef = useRef<SessionVideoRecorder | null>(null);
+  const recordVideoRef = useRef<boolean>(false); // consent && per-session toggle, read at camera start
   const elapsedRef = useRef<number>(0);
   const detectionActiveRef = useRef<boolean>(false); // one-shot guard for setDetectionActive
   const personVisibleRef = useRef<boolean>(false);
@@ -381,6 +409,36 @@ export function LiveSessionView() {
   useEffect(() => {
     ttsEnabledRef.current = ttsEnabled;
   }, [ttsEnabled]);
+
+  // Thai voice for speech feedback (voices load asynchronously)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const pick = () => {
+      thaiVoiceRef.current = window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith('th')) ?? null;
+    };
+    pick();
+    window.speechSynthesis.addEventListener('voiceschanged', pick);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', pick);
+  }, []);
+
+  useEffect(() => {
+    recordVideoRef.current = !!videoConsent?.consented && recordVideo;
+  }, [videoConsent, recordVideo]);
+
+  // Patient's video-recording consent
+  useEffect(() => {
+    fetch('/api/me/video-consent')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setVideoConsent({ consented: d.consented, consentedAt: d.consentedAt }))
+      .catch(() => {});
+  }, []);
+
+  // Pause/resume the video together with the session; silence speech on pause
+  useEffect(() => {
+    if (isPaused) videoRecorderRef.current?.pause();
+    else videoRecorderRef.current?.resume();
+    if (isPaused && typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+  }, [isPaused]);
 
   useEffect(() => {
     elapsedRef.current = elapsedSeconds;
@@ -553,6 +611,8 @@ export function LiveSessionView() {
       if (!sessionId || stoppingRef.current) return;
       stoppingRef.current = true;
       flushLogs(true);
+      void videoRecorderRef.current?.stop(); // partial video stays incomplete
+      videoRecorderRef.current = null;
       fetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -575,22 +635,85 @@ export function LiveSessionView() {
   }, [flushLogs, getSessionMetrics, releaseMedia]);
 
   // ─── TTS helper ─────────────────────────────────────────────────────
-  // Speech uses the browser's built-in Web Speech API (free, offline-capable
-  // Thai voices on most systems) — no server TTS service.
-  const speakText = useCallback((text: string) => {
-    if (!ttsEnabledRef.current || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    // Don't start talking after the session has ended
-    if (!useAppStore.getState().isSessionActive) return;
+  // Speech uses the browser's built-in Web Speech API (free, Thai voices on
+  // most systems) — no server TTS service.
+  const say = useCallback((text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
       const synth = window.speechSynthesis;
-      const utterance = new SpeechSynthesisUtterance(text.slice(0, 1024));
+      const utterance = new SpeechSynthesisUtterance(text.slice(0, 300));
       utterance.lang = 'th-TH';
-      const thaiVoice = synth.getVoices().find((v) => v.lang.toLowerCase().startsWith('th'));
-      if (thaiVoice) utterance.voice = thaiVoice;
+      utterance.rate = 0.95;
+      if (thaiVoiceRef.current) utterance.voice = thaiVoiceRef.current;
       synth.cancel(); // newest feedback replaces any queued line
       synth.speak(utterance);
     } catch {
       // Silently fail TTS
+    }
+  }, []);
+
+  const speakText = useCallback(
+    (text: string) => {
+      if (!ttsEnabledRef.current) return;
+      // Don't start talking after the session has ended
+      if (!useAppStore.getState().isSessionActive) return;
+      say(text);
+    },
+    [say]
+  );
+
+  // Mute / unmute. Turning sound on speaks immediately, inside the click,
+  // which also unlocks speech in browsers that require a user gesture.
+  const toggleTts = useCallback(() => {
+    const next = !ttsEnabledRef.current;
+    ttsEnabledRef.current = next;
+    setTtsEnabled(next);
+    try {
+      localStorage.setItem('physio.ttsEnabled', next ? '1' : '0');
+    } catch {
+      // ignore
+    }
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      if (next) toast.error('เบราว์เซอร์นี้ไม่รองรับเสียงพูด');
+      return;
+    }
+    if (next) {
+      say('เปิดเสียงโค้ชแล้วครับ');
+      if (!thaiVoiceRef.current) toast.message('อุปกรณ์นี้อาจไม่มีเสียงภาษาไทย — ติดตั้งเสียงภาษาไทยในระบบปฏิบัติการเพื่อเสียงที่ชัดขึ้น');
+    } else {
+      window.speechSynthesis.cancel();
+    }
+  }, [say]);
+
+  const togglePanel = useCallback(() => {
+    setPanelCollapsed((c) => {
+      try {
+        localStorage.setItem('physio.panelCollapsed', c ? '0' : '1');
+      } catch {
+        // ignore
+      }
+      return !c;
+    });
+  }, []);
+
+  const saveVideoConsent = useCallback(async (consent: boolean) => {
+    setSavingConsent(true);
+    try {
+      const res = await fetch('/api/me/video-consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consent }),
+      });
+      if (!res.ok) throw new Error();
+      const d = await res.json();
+      setVideoConsent({ consented: d.consented, consentedAt: d.consentedAt });
+      setConsentOpen(false);
+      setConsentChecked(false);
+      toast.success(consent ? 'บันทึกความยินยอมแล้ว' : 'ถอนความยินยอมแล้ว — จะไม่บันทึกวิดีโออีก');
+    } catch {
+      toast.error('บันทึกความยินยอมไม่สำเร็จ');
+    } finally {
+      setSavingConsent(false);
     }
   }, []);
 
@@ -619,9 +742,13 @@ export function LiveSessionView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           exerciseName: exercise.name,
+          exerciseNameTh: exercise.nameTh,
+          exerciseSlug: exercise.slug,
           currentAngles,
           targetJoints: exercise.targetJoints,
+          formCue: formCueRef.current,
           repCount,
+          repsPerSet: exercise.repsPerSet,
           setCount,
         }),
         signal: controller.signal,
@@ -632,13 +759,13 @@ export function LiveSessionView() {
         })
         .then((data) => {
           if (controller.signal.aborted) return;
-          const fb = data.feedback || 'ทำดีมากครับ! ทำต่อไปเลย';
+          const fb = data.feedback || 'ทำได้ดีครับ ค่อยๆ ทำต่อไปนะครับ';
           useAppStore.getState().setAiFeedback(fb);
           speakText(fb);
         })
         .catch(() => {
           if (controller.signal.aborted) return;
-          useAppStore.getState().setAiFeedback('ทำดีมากครับ! ทำต่อไปเลย');
+          useAppStore.getState().setAiFeedback('ทำได้ดีครับ ค่อยๆ ทำต่อไปนะครับ');
         })
         .finally(() => {
           if (coachAbortRef.current === controller) coachAbortRef.current = null;
@@ -712,6 +839,11 @@ export function LiveSessionView() {
     stoppingRef.current = true;
 
     coachAbortRef.current?.abort();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    // Stop recording before the camera tracks end; the last chunk keeps uploading
+    void videoRecorderRef.current?.stop();
+    videoRecorderRef.current = null;
+    setIsRecording(false);
     releaseMedia();
     setMediaPipeLoaded(false);
     setDetectionActive(false);
@@ -808,6 +940,21 @@ export function LiveSessionView() {
           return;
         }
         streamRef.current = stream;
+
+        // Video recording: only with the patient's consent and the session toggle on
+        const sessionId = useAppStore.getState().currentSessionId;
+        if (recordVideoRef.current && sessionId) {
+          const recorder = new SessionVideoRecorder(stream, sessionId, (message) => {
+            setIsRecording(false);
+            toast.error(message);
+          });
+          if (recorder.start()) {
+            videoRecorderRef.current = recorder;
+            setIsRecording(true);
+          } else {
+            toast.message('เบราว์เซอร์นี้บันทึกวิดีโอไม่ได้ — ฝึกต่อได้ตามปกติ');
+          }
+        }
 
         // Wait until React has attached the <video> element to the DOM
         const video = await waitForVideoElement();
@@ -1061,8 +1208,12 @@ export function LiveSessionView() {
       // ─── Rep detection (see lib/rep-counter.ts) ────────────────────
       const showFormCue = (message: string) => {
         setFormCue(message);
+        formCueRef.current = message;
         if (formCueTimerRef.current) clearTimeout(formCueTimerRef.current);
-        formCueTimerRef.current = setTimeout(() => setFormCue(null), FORM_CUE_MS);
+        formCueTimerRef.current = setTimeout(() => {
+          setFormCue(null);
+          formCueRef.current = null;
+        }, FORM_CUE_MS);
       };
 
       const completeRep = (rep: RepCompletion): boolean => {
@@ -1186,6 +1337,84 @@ export function LiveSessionView() {
             </p>
           </motion.div>
 
+          {/* Video recording consent (PDPA) */}
+          {videoConsent && pickRecorderMime() !== null && (
+            <Card className="mb-6">
+              <CardContent className="space-y-3 p-4">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className={`rounded-full p-2 ${videoConsent.consented ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-muted text-muted-foreground'}`}>
+                    {videoConsent.consented ? <ShieldCheck className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">บันทึกวิดีโอการฝึกให้ทีมผู้ดูแลตรวจสอบ</p>
+                    <p className="text-xs text-muted-foreground">
+                      {videoConsent.consented
+                        ? `ให้ความยินยอมแล้ว${videoConsent.consentedAt ? ` เมื่อ ${new Date(videoConsent.consentedAt).toLocaleDateString('th-TH', { dateStyle: 'medium' })}` : ''} — วิดีโอจะถูกบันทึกเมื่อเปิดสวิตช์ด้านขวา`
+                        : 'ยังไม่ได้ให้ความยินยอม — ไม่มีการบันทึกวิดีโอ (ระบบยังบันทึกเฉพาะข้อมูลมุมข้อต่อ)'}
+                    </p>
+                  </div>
+                  {videoConsent.consented ? (
+                    <label className="flex items-center gap-2 text-xs">
+                      <Switch checked={recordVideo} onCheckedChange={setRecordVideo} aria-label="บันทึกวิดีโอในการฝึกครั้งนี้" />
+                      {recordVideo ? 'บันทึกครั้งนี้' : 'ไม่บันทึกครั้งนี้'}
+                    </label>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setConsentOpen((o) => !o)}>
+                      อ่านและให้ความยินยอม
+                    </Button>
+                  )}
+                </div>
+
+                {!videoConsent.consented && consentOpen && (
+                  <div className="space-y-3 rounded-lg border bg-muted/40 p-3">
+                    <p className="text-sm font-semibold">{VIDEO_CONSENT_TITLE}</p>
+                    <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-muted-foreground">
+                      {VIDEO_CONSENT_POINTS.map((point, i) => (
+                        <li key={i}>{point}</li>
+                      ))}
+                    </ul>
+                    <label className="flex items-start gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 accent-emerald-600"
+                        checked={consentChecked}
+                        onChange={(e) => setConsentChecked(e.target.checked)}
+                      />
+                      ข้าพเจ้าได้อ่านและเข้าใจข้อความข้างต้น และยินยอมให้บันทึกวิดีโอการฝึกเพื่อการรักษา
+                    </label>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 text-white hover:bg-emerald-700"
+                        disabled={!consentChecked || savingConsent}
+                        onClick={() => saveVideoConsent(true)}
+                      >
+                        {savingConsent && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                        ยินยอม
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConsentOpen(false)}>
+                        ไม่ใช่ตอนนี้
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {videoConsent.consented && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                    disabled={savingConsent}
+                    onClick={() => {
+                      if (window.confirm('ถอนความยินยอมการบันทึกวิดีโอ? การฝึกครั้งต่อไปจะไม่บันทึกวิดีโอ')) saveVideoConsent(false);
+                    }}
+                  >
+                    ถอนความยินยอม
+                  </button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Today's quests (prescribed by the care team) */}
           {!loadingExercises && !loadError && (
             <section className="mb-8">
@@ -1275,337 +1504,297 @@ export function LiveSessionView() {
   // RENDER: Active Session Screen
   // =====================================================================
   if (phase === 'active') {
+    const targets = selectedExercise?.targetJoints || [];
+    const hiddenTargets = targets.filter((tj) => liveAngles[tj.name] === undefined);
+    const repsPerSet = selectedExercise?.repsPerSet || 10;
+    const avgAccuracy = sessionAccuracy.length
+      ? Math.round(sessionAccuracy.reduce((a, b) => a + b, 0) / sessionAccuracy.length)
+      : null;
+    const soundLabel = ttsEnabled ? 'ปิดเสียงโค้ช' : 'เปิดเสียงโค้ช';
+
     return (
-      <div className="relative min-h-screen overflow-hidden bg-black">
-        {/* Video + Canvas Container */}
-        <div className="relative mx-auto aspect-[4/3] w-full max-w-6xl lg:aspect-video lg:h-screen lg:max-w-none">
-          {/* Video Element */}
+      <div className="relative h-[100dvh] overflow-hidden bg-black">
+        {/* Video + Canvas fill the screen */}
+        <div className="absolute inset-0">
           <video
             ref={videoRef}
-            className="absolute inset-0 h-full w-full -scale-x-100 object-cover"
+            className="absolute inset-0 h-full w-full -scale-x-100 object-contain lg:object-cover"
             playsInline
             muted
           />
-
-          {/* Canvas Overlay */}
           <canvas
             ref={canvasRef}
-            className="absolute inset-0 h-full w-full -scale-x-100"
+            className="absolute inset-0 h-full w-full -scale-x-100 object-contain lg:object-cover"
           />
+        </div>
 
-          {/* Loading overlay while MediaPipe initializes */}
-          {!mediaPipeLoaded && !cameraError && !mediaPipeError && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70">
-              <Loader2 className="mb-3 h-10 w-10 animate-spin text-emerald-400" />
-              <p className="text-sm font-medium text-white">กำลังเริ่มต้น AI...</p>
-              <p className="mt-1 text-xs text-white/60">
-                กำลังโหลดโมเดลตรวจจับท่าทาง (MediaPipe Pose) — ครั้งแรกอาจใช้เวลา 5-15 วินาที
-              </p>
-            </div>
-          )}
+        {/* Loading overlay while MediaPipe initializes */}
+        {!mediaPipeLoaded && !cameraError && !mediaPipeError && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70">
+            <Loader2 className="mb-3 h-10 w-10 animate-spin text-emerald-400" />
+            <p className="text-sm font-medium text-white">กำลังเริ่มต้น AI...</p>
+            <p className="mt-1 text-xs text-white/60">
+              กำลังโหลดโมเดลตรวจจับท่าทาง (MediaPipe Pose) — ครั้งแรกอาจใช้เวลา 5-15 วินาที
+            </p>
+          </div>
+        )}
 
-          {/* Watchdog: loaded but frames stopped flowing */}
-          {mediaPipeLoaded && !detectionActive && !cameraError && !mediaPipeError && (
-            <div className="absolute inset-x-0 bottom-24 z-20 mx-auto flex max-w-md items-center gap-2 rounded-full bg-amber-500/90 px-4 py-2 text-sm font-medium text-black shadow-lg lg:bottom-8">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              ยังไม่ได้รับผลตรวจจับจาก AI — ตรวจสอบว่าอยู่ในที่แสงเพียงพอและเห็นร่างกายชัดเจน
-            </div>
-          )}
+        {/* Watchdog: loaded but frames stopped flowing */}
+        {mediaPipeLoaded && !detectionActive && !cameraError && !mediaPipeError && (
+          <div className="absolute inset-x-4 top-20 z-20 mx-auto flex max-w-md items-center gap-2 rounded-full bg-amber-500/90 px-4 py-2 text-sm font-medium text-black shadow-lg lg:right-[22rem]">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            ยังไม่ได้รับผลตรวจจับจาก AI — ตรวจสอบว่าอยู่ในที่แสงเพียงพอและเห็นร่างกายชัดเจน
+          </div>
+        )}
 
-          {/* No-person hint once detection is running */}
-          {detectionActive && !personVisible && (
-            <div className="absolute inset-x-0 top-20 z-20 mx-auto flex max-w-md items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm text-white backdrop-blur-sm">
-              <PersonStanding className="h-4 w-4 text-emerald-400" />
-              ถอยหลังให้เห็นลำตัว/ขาทั้งข้างในกรอบกล้อง
-            </div>
-          )}
+        {/* No-person hint once detection is running */}
+        {detectionActive && !personVisible && (
+          <div className="absolute inset-x-4 top-20 z-20 mx-auto flex max-w-md items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm text-white backdrop-blur-sm lg:right-[22rem]">
+            <PersonStanding className="h-4 w-4 text-emerald-400" />
+            ถอยหลังให้เห็นลำตัว/ขาทั้งข้างในกรอบกล้อง
+          </div>
+        )}
 
-          {/* Error overlay */}
-          {(cameraError || mediaPipeError) && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/80">
-              <AlertTriangle className="mb-3 h-10 w-10 text-amber-400" />
-              <p className="text-sm font-medium text-white">
-                {cameraError || mediaPipeError}
-              </p>
-              <Button
-                variant="outline"
-                className="mt-4 border-white/30 text-white hover:bg-white/10"
-                onClick={handleStopSession}
-              >
-                <ChevronLeft className="mr-2 h-4 w-4" />
-                กลับ
-              </Button>
-            </div>
-          )}
-
-          {/* ─── Top bar ──────────────────────────────────────────────── */}
-          <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4 py-3">
-            <button
+        {/* Error overlay */}
+        {(cameraError || mediaPipeError) && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80">
+            <AlertTriangle className="mb-3 h-10 w-10 text-amber-400" />
+            <p className="text-sm font-medium text-white">{cameraError || mediaPipeError}</p>
+            <Button
+              variant="outline"
+              className="mt-4 border-white/30 text-white hover:bg-white/10"
               onClick={handleStopSession}
-              className="rounded-full bg-white/10 p-2 text-white backdrop-blur-sm transition-colors hover:bg-white/20"
-              aria-label="หยุดเซสชัน"
             >
-              <ChevronLeft className="h-5 w-5" />
+              <ChevronLeft className="mr-2 h-4 w-4" />
+              กลับ
+            </Button>
+          </div>
+        )}
+
+        {/* ─── Top bar ──────────────────────────────────────────────── */}
+        <div className="absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent px-3 py-3 sm:px-4">
+          <button
+            onClick={handleStopSession}
+            className="rounded-full bg-white/10 p-2 text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+            aria-label="หยุดเซสชัน"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <div className="min-w-0 text-center">
+            <p className="truncate text-sm font-semibold text-white">{selectedExercise?.nameTh || selectedExercise?.name || 'Exercise'}</p>
+            <p className="text-xs text-white/70">
+              เซ็ต {currentSet}/{selectedExercise?.sets || 3} • ครั้งที่ {currentRep}/{repsPerSet}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isRecording && (
+              <span className="flex items-center gap-1.5 rounded-full bg-red-600/90 px-2.5 py-1 text-[11px] font-bold text-white" title="กำลังบันทึกวิดีโอ (ได้รับความยินยอมแล้ว)">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
+                REC
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={toggleTts}
+              aria-pressed={ttsEnabled}
+              aria-label={soundLabel}
+              title={soundLabel}
+              className={`rounded-full p-2 backdrop-blur-sm transition-colors ${
+                ttsEnabled ? 'bg-emerald-500/90 text-white hover:bg-emerald-500' : 'bg-white/10 text-white/80 hover:bg-white/20'
+              }`}
+            >
+              {ttsEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
             </button>
-            <div className="text-center">
-              <p className="text-sm font-semibold text-white">
-                {selectedExercise?.name || 'Exercise'}
-              </p>
-              <p className="text-xs text-white/60">
-                เซ็ต {currentSet}/{selectedExercise?.sets || 3} • ซ้ำ{' '}
-                {currentRep}/{selectedExercise?.repsPerSet || 10}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm">
-                <Clock className="h-4 w-4 text-emerald-400" />
-                <span className="font-mono text-sm font-semibold text-white">
-                  {formatTime(elapsedSeconds)}
-                </span>
-              </div>
+            <div className="flex items-center gap-1.5 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm">
+              <Clock className="h-4 w-4 text-emerald-400" />
+              <span className="font-mono text-sm font-semibold text-white">{formatTime(elapsedSeconds)}</span>
             </div>
           </div>
+        </div>
 
-          {/* ─── Pause overlay ────────────────────────────────────────── */}
-          {isPaused && (
-            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
-              <Pause className="mb-3 h-12 w-12 text-amber-400" />
-              <p className="text-lg font-semibold text-white">หยุดชั่วคราว</p>
-              <Button
-                className="mt-4 bg-emerald-600 text-white hover:bg-emerald-700"
-                onClick={handleTogglePause}
+        {/* ─── Pause overlay ────────────────────────────────────────── */}
+        {isPaused && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+            <Pause className="mb-3 h-12 w-12 text-amber-400" />
+            <p className="text-lg font-semibold text-white">หยุดชั่วคราว</p>
+            <Button className="mt-4 bg-emerald-600 text-white hover:bg-emerald-700" onClick={handleTogglePause}>
+              <Play className="mr-2 h-4 w-4" />
+              ดำเนินการต่อ
+            </Button>
+          </div>
+        )}
+
+        {/* ─── Side panel (desktop) / bottom sheet (mobile) ─────────── */}
+        {/* Flex column capped to the viewport: header and controls always
+            visible, only the middle section scrolls. */}
+        {mediaPipeLoaded && (
+          <aside
+            className="absolute inset-x-3 bottom-3 z-20 flex max-h-[55dvh] flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/60 text-white shadow-2xl backdrop-blur-xl lg:inset-x-auto lg:top-16 lg:right-4 lg:bottom-auto lg:max-h-[calc(100dvh-5rem)] lg:w-80"
+            aria-label="แผงข้อมูลการฝึก"
+          >
+            {/* Header: always visible */}
+            <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{selectedExercise?.nameTh || selectedExercise?.name}</p>
+                <p className="text-[11px] text-white/60 tabular-nums">
+                  เซ็ต {currentSet}/{selectedExercise?.sets || 3} · ครั้งที่ {currentRep}/{repsPerSet}
+                  {avgAccuracy !== null && <> · แม่นยำ {avgAccuracy}%</>}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={togglePanel}
+                className="rounded-full p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+                aria-expanded={!panelCollapsed}
+                aria-label={panelCollapsed ? 'ขยายแผงข้อมูล' : 'ย่อแผงข้อมูล'}
               >
-                <Play className="mr-2 h-4 w-4" />
-                ดำเนินการต่อ
-              </Button>
+                {panelCollapsed ? <ChevronUp className="h-4 w-4 lg:rotate-180" /> : <ChevronDown className="h-4 w-4 lg:rotate-180" />}
+              </button>
             </div>
-          )}
 
-          {/* ─── Right panel (desktop) / Bottom panel (mobile) ────────── */}
-          {mediaPipeLoaded && (
-            <div className="absolute right-0 bottom-0 left-0 z-20 lg:right-4 lg:bottom-4 lg:left-auto lg:w-80">
-              <div className="mx-4 mb-4 max-h-[50vh] overflow-hidden rounded-2xl border border-white/10 bg-black/50 backdrop-blur-xl lg:mx-0 lg:mb-0 lg:max-h-[85vh]">
-                <ScrollArea className="max-h-[50vh] lg:max-h-[85vh]">
-                  <div className="p-4 space-y-4">
-                    {/* ─── Exercise info ──────────────────────────────── */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-white">
-                        {selectedExercise?.name}
-                      </h3>
-                      {selectedExercise && (
-                        <ExerciseDemo
-                          slug={selectedExercise.slug}
-                          target={selectedExercise.targetJoints.find((t) => t.isPrimary)}
-                          className="mt-2 bg-white/90 dark:bg-slate-900/80"
-                        />
-                      )}
-                      {selectedExercise?.instructions && selectedExercise.instructions.length > 0 && (
+            {/* Scrollable body */}
+            {!panelCollapsed && (
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
+                {formCue && (
+                  <div role="status" className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-500/20 p-2.5 text-xs font-medium text-amber-100">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+                    {formCue}
+                  </div>
+                )}
+
+                {/* AI Coach first: it is what the patient acts on */}
+                <section>
+                  <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
+                    <Activity className="h-3.5 w-3.5 text-amber-400" />
+                    โค้ช
+                    {coachLoading && <Loader2 className="h-3 w-3 animate-spin text-amber-400" />}
+                  </h4>
+                  <p className="rounded-lg bg-white/5 p-3 text-sm leading-relaxed text-white/90">
+                    {aiFeedback || 'โค้ชจะแนะนำเมื่อเริ่มตรวจจับท่าทาง'}
+                  </p>
+                </section>
+
+                {/* Joint angles */}
+                <section>
+                  <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
+                    <Target className="h-3.5 w-3.5 text-emerald-400" />
+                    มุมข้อต่อปัจจุบัน
+                  </h4>
+                  <div className="space-y-2">
+                    {targets.map((tj) => {
+                      const current = liveAngles[tj.name];
+                      if (current === undefined) return null;
+                      const colorHex = ANGLE_STATUS_HEX[getAngleStatus(current, tj.minAngle, tj.maxAngle)];
+                      return (
+                        <div key={tj.name} className="rounded-lg bg-white/5 p-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-white/60">{tj.nameTh}</span>
+                            <span className={`text-lg font-bold ${getAngleStatusColor(current, tj.minAngle, tj.maxAngle)}`}>
+                              {formatAngle(current)}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between text-[10px] text-white/40">
+                            <span>เป้าหมาย {tj.idealAngle}°</span>
+                            <span>
+                              {tj.minAngle}°–{tj.maxAngle}°
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full transition-all duration-200"
+                              style={{ width: `${Math.min(100, (current / (tj.maxAngle + 20)) * 100)}%`, backgroundColor: colorHex }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {hiddenTargets.length > 0 && (
+                      <p className="text-xs text-white/50">
+                        {hiddenTargets.length === targets.length ? 'ยังมองไม่เห็น' : 'มองไม่เห็น'}{' '}
+                        {hiddenTargets.map((t) => t.nameTh).join(', ')} — ถอยห่างจากกล้องให้เห็นไหล่ สะโพก และแขนขาทั้งหมด
+                      </p>
+                    )}
+                  </div>
+                </section>
+
+                {/* Set / rep progress */}
+                <section>
+                  <div className="mb-1.5 flex items-center justify-between text-xs text-white/60">
+                    <span className="flex items-center gap-1.5 font-semibold text-white/80">
+                      <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                      ความคืบหน้า (เซ็ต {currentSet})
+                    </span>
+                    <span className="font-mono font-bold text-white">
+                      {currentRep} / {repsPerSet}
+                    </span>
+                  </div>
+                  <Progress value={(currentRep / repsPerSet) * 100} className="h-2 bg-white/10" />
+                </section>
+
+                {/* Demonstration (collapsible) */}
+                <section>
+                  <button
+                    type="button"
+                    onClick={() => setDemoOpen((o) => !o)}
+                    className="flex w-full items-center justify-between text-xs font-semibold text-white/80"
+                    aria-expanded={demoOpen}
+                  >
+                    ท่าตัวอย่างและวิธีทำ
+                    {demoOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                  {demoOpen && selectedExercise && (
+                    <>
+                      <ExerciseDemo
+                        slug={selectedExercise.slug}
+                        target={selectedExercise.targetJoints.find((t) => t.isPrimary)}
+                        compact
+                        className="mt-2 bg-white/90 dark:bg-slate-900/80"
+                      />
+                      {selectedExercise.instructions.length > 0 && (
                         <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-xs leading-relaxed text-white/60">
                           {selectedExercise.instructions.map((step, i) => (
                             <li key={i}>{step}</li>
                           ))}
                         </ol>
                       )}
-                    </div>
+                    </>
+                  )}
+                </section>
+              </div>
+            )}
 
-                    {formCue && (
-                      <div role="status" className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-500/20 p-2.5 text-xs font-medium text-amber-100">
-                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-                        {formCue}
-                      </div>
-                    )}
-
-                    <Separator className="bg-white/10" />
-
-                    {/* ─── Joint Angles ───────────────────────────────── */}
-                    <div>
-                      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
-                        <Target className="h-3.5 w-3.5 text-emerald-400" />
-                        มุมข้อต่อปัจจุบัน
-                      </h4>
-                      <div className="space-y-2">
-                        {(selectedExercise?.targetJoints || []).map((tj) => {
-                          const current = liveAngles[tj.name];
-                          if (current === undefined) return null;
-                          const colorClass = getAngleStatusColor(
-                            current,
-                            tj.minAngle,
-                            tj.maxAngle
-                          );
-                          const colorHex =
-                            ANGLE_STATUS_HEX[getAngleStatus(current, tj.minAngle, tj.maxAngle)];
-
-                          return (
-                            <div
-                              key={tj.name}
-                              className="rounded-lg bg-white/5 p-2.5"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs text-white/60">
-                                  {tj.nameTh}
-                                </span>
-                                <span
-                                  className={`text-lg font-bold ${colorClass}`}
-                                >
-                                  {formatAngle(current)}
-                                </span>
-                              </div>
-                              <div className="mt-1.5">
-                                <div className="flex items-center justify-between text-[10px] text-white/40">
-                                  <span>
-                                    เป้าหมาย {tj.idealAngle}°
-                                  </span>
-                                  <span>
-                                    {tj.minAngle}°–{tj.maxAngle}°
-                                  </span>
-                                </div>
-                                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                                  <div
-                                    className="h-full rounded-full transition-all duration-200"
-                                    style={{
-                                      width: `${Math.min(100, (current / (tj.maxAngle + 20)) * 100)}%`,
-                                      backgroundColor: colorHex,
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {Object.keys(liveAngles).length === 0 && (
-                          <p className="text-xs text-white/40">
-                            รอข้อมูลจากกล้อง...
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <Separator className="bg-white/10" />
-
-                    {/* ─── AI Coach Feedback ──────────────────────────── */}
-                    <div>
-                      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
-                        <Activity className="h-3.5 w-3.5 text-amber-400" />
-                        AI Coach
-                      </h4>
-                      <div className="rounded-lg bg-white/5 p-3">
-                        {coachLoading ? (
-                          <div className="flex items-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
-                            <span className="text-xs text-white/60">
-                              กำลังเริ่มต้น AI...
-                            </span>
-                          </div>
-                        ) : aiFeedback ? (
-                          <p className="text-xs leading-relaxed text-white/80">
-                            {aiFeedback}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-white/40">
-                            AI Coach จะให้คำแนะนำเมื่อเริ่มตรวจจับท่าทาง
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <Separator className="bg-white/10" />
-
-                    {/* ─── Rep/Set progress ───────────────────────────── */}
-                    <div>
-                      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
-                        <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
-                        ความคืบหน้า
-                      </h4>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between rounded-lg bg-white/5 p-2.5">
-                          <span className="text-xs text-white/60">เซ็ต</span>
-                          <span className="font-mono text-sm font-bold text-white">
-                            {currentSet} / {selectedExercise?.sets || 3}
-                          </span>
-                        </div>
-                        <div className="rounded-lg bg-white/5 p-2.5">
-                          <div className="mb-1.5 flex items-center justify-between">
-                            <span className="text-xs text-white/60">
-                              ซ้ำ (เซ็ต {currentSet})
-                            </span>
-                            <span className="font-mono text-sm font-bold text-white">
-                              {currentRep} / {selectedExercise?.repsPerSet || 10}
-                            </span>
-                          </div>
-                          <Progress
-                            value={
-                              selectedExercise?.repsPerSet
-                                ? (currentRep / selectedExercise.repsPerSet) * 100
-                                : 0
-                            }
-                            className="h-2 bg-white/10"
-                          />
-                        </div>
-                        {sessionAccuracy.length > 0 && (
-                          <div className="flex items-center justify-between rounded-lg bg-white/5 p-2.5">
-                            <span className="text-xs text-white/60">
-                              ความแม่นยำเฉลี่ย
-                            </span>
-                            <span className="text-sm font-bold text-emerald-400">
-                              {Math.round(
-                                sessionAccuracy.reduce((a, b) => a + b, 0) /
-                                  sessionAccuracy.length
-                              )}
-                              %
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </ScrollArea>
-
-                {/* ─── Controls ──────────────────────────────────────── */}
-                <div className="flex items-center justify-between border-t border-white/10 px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <Switch
-                      checked={ttsEnabled}
-                      onCheckedChange={setTtsEnabled}
-                      id="tts-toggle"
-                    />
-                    <label
-                      htmlFor="tts-toggle"
-                      className="flex cursor-pointer items-center gap-1 text-xs text-white/60"
-                    >
-                      {ttsEnabled ? (
-                        <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
-                      ) : (
-                        <VolumeX className="h-3.5 w-3.5" />
-                      )}
-                      เสียงพูด
-                    </label>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleTogglePause}
-                      className="rounded-full bg-white/10 p-2.5 text-white backdrop-blur-sm transition-colors hover:bg-white/20"
-                      aria-label={isPaused ? 'ดำเนินการต่อ' : 'หยุดชั่วคราว'}
-                    >
-                      {isPaused ? (
-                        <Play className="h-4 w-4" />
-                      ) : (
-                        <Pause className="h-4 w-4" />
-                      )}
-                    </button>
-                    <button
-                      onClick={handleStopSession}
-                      className="rounded-full bg-red-500/80 p-2.5 text-white backdrop-blur-sm transition-colors hover:bg-red-500"
-                      aria-label="หยุดเซสชัน"
-                    >
-                      <Square className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
+            {/* Controls: always visible */}
+            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-white/10 px-4 py-2.5">
+              <button
+                type="button"
+                onClick={toggleTts}
+                aria-pressed={ttsEnabled}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                  ttsEnabled ? 'bg-emerald-500/90 text-white hover:bg-emerald-500' : 'bg-white/10 text-white/80 hover:bg-white/20'
+                }`}
+              >
+                {ttsEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                {ttsEnabled ? 'เสียงเปิด' : 'เสียงปิด'}
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleTogglePause}
+                  className="rounded-full bg-white/10 p-2.5 text-white transition-colors hover:bg-white/20"
+                  aria-label={isPaused ? 'ดำเนินการต่อ' : 'หยุดชั่วคราว'}
+                >
+                  {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                </button>
+                <button
+                  onClick={handleStopSession}
+                  className="rounded-full bg-red-500/80 p-2.5 text-white transition-colors hover:bg-red-500"
+                  aria-label="จบเซสชัน"
+                >
+                  <Square className="h-4 w-4" />
+                </button>
               </div>
             </div>
-          )}
-        </div>
+          </aside>
+        )}
       </div>
     );
   }

@@ -96,6 +96,7 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 
 ### Account
 - **GET /api/me** — signed-in user + clinician/patient profile
+- **GET / POST /api/me/video-consent** (PATIENT) — video-recording consent status; `{ consent: true|false }` gives (current `VIDEO_CONSENT_VERSION`, text in `src/lib/consent.ts`) or withdraws it
 - **/api/auth/*** — next-auth (sign-in, sign-out, session, csrf)
 
 ### Exercises (any role)
@@ -128,6 +129,8 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 - **POST /api/sessions/[id]/review** (CLINICIAN) — `{ status: APPROVED|NEEDS_ATTENTION, comment? }`
 - **POST /api/sessions/[id]/frames** (owning PATIENT) — `{ seq, frames: ReplayFrame[] }` (≤ 100 frames, ~5 s per chunk, idempotent per `seq`); pose frames at 10 fps for clinical replay, format in `src/lib/replay.ts`; locked after review
 - **GET /api/sessions/[id]/frames** — all recorded frames in time order (used by *Clinical Session Replay* in the report)
+- **POST /api/sessions/[id]/video?seq=&final=&startedAt=** (owning PATIENT) — session video chunk (raw `video/webm|mp4`, sequential `seq`, retries idempotent, ≤ 20 MB/chunk, 500 MB/session). **Refused (403) unless the patient has current video consent**; `X-Video-Pauses` on the final chunk syncs pauses with the replay. Files live in `VIDEO_STORAGE_DIR` (git-ignored), never under `public/`
+- **GET /api/sessions/[id]/video** — stream with HTTP Range (seeking); `?meta=1` → `{ recordStartAt, pauses, complete, consentVersion }`. Care team or owning patient only
 
 ### Reports
 - **GET /api/reports/[sessionId]** — metrics with explicit formulas (`angleDefinition`, `scoring`), targets (basis + rationale), per-joint and per-rep results, stored AI summary, review (AI summary and review comment are clinician-only)
@@ -147,7 +150,7 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 - **GET /api/messages/threads** — threads in scope with last message and unread count
 
 ### AI Coach (PATIENT)
-- **POST /api/coach** — feedback from current visible target angles
+- **POST /api/coach** — one natural Thai coaching cue (spoken by the browser). The model sees only qualitative joint states from `src/lib/coach-cues.ts`, never angle numbers; replies containing degrees/percentages are replaced by a deterministic cue
 
 ---
 
