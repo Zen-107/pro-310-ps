@@ -317,6 +317,13 @@ This is the heart of the app. Pipeline per session:
 
 6. **AI Coach** — `POST /api/coach` at most every 8 s with only the visible target-joint angles; one
    request in flight, aborted on stop/unmount.
+   **Spoken cues are gated by movement phase** (`RepCounter.motion()`: rest / moving / hold / returning)
+   through `src/lib/cue-gate.ts`: posture corrections are checked live and spoken only while the rep is
+   performed (fault must persist 400 ms), never while returning or for 2.5 s after a rep; ≥ 2.5 s between
+   cues, 6 s before the same cue repeats; coach replies arriving during the return are not spoken; a
+   "range not reached" cue waits until the return is over. Speech (`speakThai`) never queues: a new cue
+   flushes the old one (coach cues never cut a correction short), cues that can't start within 1.5 s are
+   dropped, and playback runs at 1.15× with pitch preserved.
 
 7. **Session Logging** — each completed rep buffers one `JointAngleLog` row per visible target joint.
    The buffer is flushed to `POST /api/sessions/[id]/logs` as `{ logs: [...] }` every 5 s or at 20 rows,

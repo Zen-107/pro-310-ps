@@ -43,13 +43,14 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAppStore } from '@/lib/store';
-import { RepCounter, REP_DEFAULTS, type IncompleteAttempt, type RepCompletion } from '@/lib/rep-counter';
+import { RepCounter, REP_DEFAULTS, type IncompleteAttempt, type MotionState, type RepCompletion } from '@/lib/rep-counter';
+import { CueGate, FaultPersistence, type CueKind } from '@/lib/cue-gate';
 import { LandmarkSmoother } from '@/lib/landmark-smoother';
 import { evaluateFormChecks, type FormCheck } from '@/lib/form-checks';
 import { ExerciseDemo } from '@/components/physio/exercise-demo';
 import { encodeFrame, REPLAY_CHUNK_FRAMES, REPLAY_FRAME_MS, type ReplayFrame } from '@/lib/replay';
 import { SessionVideoRecorder, pickRecorderMime } from '@/lib/session-video-recorder';
-import { pickThaiVoice, speakThai, stopSpeech, unlockAudio } from '@/lib/speech';
+import { pickThaiVoice, speakThai, stopSpeech, unlockAudio, type SpeechPriority } from '@/lib/speech';
 import { compensationCue, cueState, localCue, phraseForState } from '@/lib/coach-cues';
 import { VIDEO_CONSENT_POINTS, VIDEO_CONSENT_TITLE } from '@/lib/consent';
 import {
@@ -108,6 +109,8 @@ const POSE_SCRIPT = `${POSE_BASE_URL}pose.js`;
 // ─── Pipeline tuning ───────────────────────────────────────────────────
 const ANGLE_UI_INTERVAL_MS = 100; // push live angles to the UI at ~10 Hz
 const COACH_INTERVAL_MS = 8000; // min gap between AI coach calls
+const IDLE_PROMPT_MS = 15000; // at rest, the coach only speaks after this much silence
+const DEFERRED_CUE_MS = 3000; // a cue waiting for the return phase to end expires after this
 const LOG_FLUSH_SIZE = 20; // flush buffered joint logs at this many rows
 const LOG_FLUSH_INTERVAL_MS = 5000; // ...or this often
 const LOG_BATCH_MAX = 200; // rows per request (matches the API cap)
@@ -445,6 +448,11 @@ export function LiveSessionView() {
   const overlayRef = useRef<{ landmarks: Landmark[]; colors: Record<number, string> } | null>(null);
   const overlayVersionRef = useRef(0);
   const formCueRef = useRef<string | null>(null); // latest compensation cue, for the coach
+  // Spoken-cue gating: movement phase, cooldowns, persistent posture faults
+  const motionRef = useRef<MotionState>({ phase: 'rest', target: null, since: 0 });
+  const cueGateRef = useRef(new CueGate());
+  const faultPersistRef = useRef(new FaultPersistence());
+  const deferredCueRef = useRef<{ text: string; key: string; kind: CueKind; expires: number } | null>(null);
   const videoRecorderRef = useRef<SessionVideoRecorder | null>(null);
   const recordVideoRef = useRef<boolean>(false); // consent && per-session toggle, read at camera start
   const elapsedRef = useRef<number>(0);
@@ -710,9 +718,9 @@ export function LiveSessionView() {
   }, []);
 
   const say = useCallback(
-    (text: string) => {
+    (text: string, priority: SpeechPriority = 'normal') => {
       if (typeof window === 'undefined') return;
-      void speakThai(text, thaiVoiceRef.current).then((out) => {
+      void speakThai(text, thaiVoiceRef.current, priority).then((out) => {
         if (out === 'chime') notifyNoVoice();
       });
     },
@@ -720,13 +728,26 @@ export function LiveSessionView() {
   );
 
   const speakText = useCallback(
-    (text: string) => {
+    (text: string, priority: SpeechPriority = 'normal') => {
       if (!ttsEnabledRef.current) return;
       // Don't start talking after the session has ended
       if (!useAppStore.getState().isSessionActive) return;
-      say(text);
+      say(text, priority);
     },
     [say]
+  );
+
+  // Every spoken cue during exercise goes through the gate (lib/cue-gate.ts):
+  // posture corrections only while the rep is performed, nothing while the
+  // patient returns to the start position, minimum spacing and per-cue
+  // cooldown. Corrections are high priority (they flush anything playing).
+  const cue = useCallback(
+    (text: string, kind: CueKind, key: string = text): boolean => {
+      if (!cueGateRef.current.allow(key, kind, motionRef.current.phase, Date.now())) return false;
+      speakText(text, kind === 'posture' || kind === 'rom' ? 'high' : 'normal');
+      return true;
+    },
+    [speakText]
   );
 
   // Mute / unmute. Turning sound on speaks immediately, inside the click,
@@ -787,6 +808,11 @@ export function LiveSessionView() {
       if (!exercise || coachAbortRef.current) return;
       const now = Date.now();
       if (now - lastCoachCallRef.current < COACH_INTERVAL_MS) return;
+      // Coach only during the movement, or at rest after a long silence (prompt
+      // to continue) - never while returning, so no stale corrections
+      const { phase } = motionRef.current;
+      if (!cueGateRef.current.phaseAllows('coach', phase, now)) return;
+      if (phase === 'rest' && cueGateRef.current.msSinceLastCue(now) < IDLE_PROMPT_MS) return;
 
       // Only send angles for visible target joints
       const currentAngles: Record<string, number> = {};
@@ -824,21 +850,21 @@ export function LiveSessionView() {
           if (controller.signal.aborted) return;
           const fb = data.feedback || 'ทำได้ดีครับ ค่อยๆ ทำต่อไปนะครับ';
           useAppStore.getState().setAiFeedback(fb);
-          speakText(fb);
+          cue(fb, 'coach'); // re-checked now: dropped if the patient is already returning
         })
         .catch(() => {
           if (controller.signal.aborted) return;
           // Coach unreachable: deterministic Thai cue, still spoken
           const fb = localCue(exercise.slug, exercise.targetJoints, currentAngles);
           useAppStore.getState().setAiFeedback(fb);
-          speakText(fb);
+          cue(fb, 'coach');
         })
         .finally(() => {
           if (coachAbortRef.current === controller) coachAbortRef.current = null;
           setCoachLoading(false);
         });
     },
-    [speakText]
+    [cue]
   );
 
   // ─── Start exercise ─────────────────────────────────────────────────
@@ -880,6 +906,10 @@ export function LiveSessionView() {
       frameSeqRef.current = 0;
       lastFrameRecRef.current = 0;
       smootherRef.current.reset();
+      motionRef.current = { phase: 'rest', target: null, since: 0 };
+      cueGateRef.current.reset();
+      faultPersistRef.current.reset();
+      deferredCueRef.current = null;
       setFormCue(null);
       lastCoachCallRef.current = 0;
       lastAngleUiRef.current = 0;
@@ -895,6 +925,7 @@ export function LiveSessionView() {
       setElapsedSeconds(0);
       setPhase('active');
       lastCoachCallRef.current = Date.now(); // first coach cue after the greeting
+      cueGateRef.current.allow('greeting', 'info', 'rest', Date.now());
       speakText(`เริ่มท่า${exercise.nameTh}กันเลยครับ จัดตัวให้กล้องเห็นทั้งตัวนะครับ`);
     } catch {
       toast.error('ไม่สามารถเริ่มเซสชันได้ กรุณาตรวจสอบการเชื่อมต่อ');
@@ -1269,12 +1300,10 @@ export function LiveSessionView() {
           const t = rep.target;
           pendingFaultsRef.current.push({ repNumber, type: 'LOW_ACCURACY', joint: t.name, measuredAngle: rep.bestAngles[t.name], expectedMin: t.minAngle, expectedMax: t.maxAngle, deficit: Math.round(Math.abs(rep.bestAngles[t.name] - t.idealAngle) * 10) / 10, message: `Rep accuracy ${Math.round(rep.bestAccuracy)}% (below ${LOW_ACCURACY_THRESHOLD}%)`, occurredAt: now });
         }
-        if (compensations.length) {
-          showFormCue(compensations[0].message);
-          // Posture fault: spoken right away in Thai, coach waits so it doesn't talk over it
-          speakText(compensationCue(compensations[0].checkId));
-          lastCoachCallRef.current = now;
-        }
+        // Recorded for the report only: posture is coached live during the
+        // movement; the patient is now returning, so nothing is spoken here
+        cueGateRef.current.noteRepEnd(now);
+        faultPersistRef.current.reset();
 
         pendingRepsRef.current.push({
           setNumber: st.currentSet,
@@ -1327,8 +1356,15 @@ export function LiveSessionView() {
         showFormCue(`Go a little further — ${Math.round(attempt.deficit)}° short of the target range`);
         const cueTarget = exercise?.targetJoints.find((tj) => tj.name === t.name);
         // Direction comes from the peak angle (a shallow squat is above its range, a low arm below)
-        if (cueTarget) speakText(phraseForState(exercise?.slug, cueTarget, cueState(cueTarget, attempt.peakAngle)));
-        lastCoachCallRef.current = Date.now(); // don't talk over this cue
+        if (cueTarget) {
+          // Spoken once the patient has finished returning (see below)
+          deferredCueRef.current = {
+            text: phraseForState(exercise?.slug, cueTarget, cueState(cueTarget, attempt.peakAngle)),
+            key: `rom:${t.name}`,
+            kind: 'rom',
+            expires: now + DEFERRED_CUE_MS,
+          };
+        }
       };
 
       for (const event of repCounterRef.current?.update(angles, now) ?? []) {
@@ -1339,10 +1375,37 @@ export function LiveSessionView() {
         }
       }
 
-      // Coach feedback (self-throttled to COACH_INTERVAL_MS)
+      // ─── Live posture cues (only while performing the rep) ─────────
+      const motion = repCounterRef.current?.motion(now) ?? { phase: 'rest' as const, target: null, since: now };
+      motionRef.current = motion;
+      const checks = exercise?.formChecks ?? [];
+      if (checks.length && motion.target && (motion.phase === 'moving' || motion.phase === 'hold')) {
+        const faults = evaluateFormChecks(checks, angles, motion.target.name);
+        // A fault must persist briefly (no single-frame triggers) before it is spoken
+        const stable = new Set(faultPersistRef.current.update(faults.map((f) => f.checkId), now));
+        const fault = faults.find((f) => stable.has(f.checkId));
+        if (fault && cue(compensationCue(fault.checkId), 'posture', `posture:${fault.checkId}`)) {
+          showFormCue(fault.message);
+          lastCoachCallRef.current = now; // the coach doesn't talk over a correction
+        }
+      } else {
+        faultPersistRef.current.reset();
+      }
+
+      // Deferred cue (range not reached): once the return phase is over
+      const deferred = deferredCueRef.current;
+      if (deferred) {
+        if (now > deferred.expires) deferredCueRef.current = null;
+        else if (cueGateRef.current.phaseAllows(deferred.kind, motion.phase, now)) {
+          deferredCueRef.current = null;
+          if (cue(deferred.text, deferred.kind, deferred.key)) lastCoachCallRef.current = now;
+        }
+      }
+
+      // Coach feedback (self-throttled to COACH_INTERVAL_MS, phase-gated)
       callCoach(angles);
     },
-    [callCoach, flushLogs, handleStopSession]
+    [callCoach, cue, flushLogs, handleStopSession]
   );
 
   // ─── Skeleton render loop ───────────────────────────────────────────

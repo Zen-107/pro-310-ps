@@ -11,6 +11,11 @@ import { isAngleCorrect } from '@/lib/angle-utils';
 // An incomplete attempt (ROM shortfall) = the measurement moves ≥ attemptMinDeg
 // from its rest position toward the range, never enters it, and returns to rest.
 // Reported with the closest angle reached and the degrees still missing.
+//
+// Movement phase (motion()): 'hold' while in range, 'moving' while heading
+// toward the range from rest, 'returning' while moving away from it (after a
+// rep or a short attempt), 'rest' otherwise. Live feedback uses it so that
+// posture cues are only given during the movement, never on the way back.
 
 export interface RepTarget {
   name: string;
@@ -43,6 +48,16 @@ export interface IncompleteAttempt {
 
 export type RepEvent = RepCompletion | IncompleteAttempt;
 
+export type MovementPhase = 'rest' | 'moving' | 'hold' | 'returning';
+
+export interface MotionState {
+  phase: MovementPhase;
+  /** Target whose state set the phase (gives the side for form checks) */
+  target: RepTarget | null;
+  /** When the current phase started (ms) */
+  since: number;
+}
+
 interface TargetState {
   // rep
   inRange: boolean;
@@ -56,6 +71,10 @@ interface TargetState {
   attemptStart: number;
   attemptBestDistance: number;
   attemptPeakAngle: number;
+  // movement direction
+  exitedAt: number; // left the range (rep end)
+  awayRef: number | null; // ratchet: closest distance since the last move away
+  lastAwayAt: number; // last time the distance to the range grew by ≥ awayStepDeg
 }
 
 export const REP_DEFAULTS = {
@@ -66,6 +85,9 @@ export const REP_DEFAULTS = {
   attemptReturnDeg: 5, // back within this of rest = attempt over
   attemptMinMs: 300, // shorter excursions are noise
   warmupMs: 2000, // ignore attempts while the patient gets into position
+  awayStepDeg: 2, // growth of the distance to the range that counts as moving away
+  returnSettleMs: 500, // no movement away for this long = back at rest
+  returnMinMs: 1000, // after leaving the range, 'returning' lasts at least this long
 };
 
 export type RepOptions = typeof REP_DEFAULTS;
@@ -110,6 +132,9 @@ export class RepCounter {
       attemptStart: 0,
       attemptBestDistance: Infinity,
       attemptPeakAngle: 0,
+      exitedAt: -Infinity,
+      awayRef: null,
+      lastAwayAt: -Infinity,
     });
   }
 
@@ -130,6 +155,13 @@ export class RepCounter {
 
       const inRange = angle >= target.minAngle && angle <= target.maxAngle;
       const distance = distanceToRange(angle, target);
+
+      // Direction: moving away from the range = returning toward rest
+      if (st.awayRef === null || distance < st.awayRef) st.awayRef = distance;
+      else if (distance - st.awayRef >= o.awayStepDeg) {
+        st.lastAwayAt = now;
+        st.awayRef = distance;
+      }
 
       // ── Rep state machine ──────────────────────────────────────
       if (!st.inRange && inRange) {
@@ -153,6 +185,9 @@ export class RepCounter {
         // Out of range but still within the hysteresis band → wait
         if (distance < o.hysteresisDeg) continue;
         st.inRange = false;
+        st.exitedAt = now;
+        st.lastAwayAt = now;
+        st.awayRef = distance;
         st.restDistance = distance; // re-baseline rest as the limb returns
         if (now - st.enteredAt >= o.minHoldMs && now - this.lastRepAt >= o.pairWindowMs) {
           this.lastRepAt = now;
@@ -208,6 +243,33 @@ export class RepCounter {
     }
     return events;
   }
+
+  /**
+   * Current movement phase across the tracked sides (hold > moving >
+   * returning > rest, so the side being exercised wins).
+   */
+  motion(now: number): MotionState {
+    const o = this.opts;
+    let best: { phase: MovementPhase; target: RepTarget | null } = { phase: 'rest', target: null };
+    const rank: Record<MovementPhase, number> = { rest: 0, returning: 1, moving: 2, hold: 3 };
+    for (const target of this.repTargets) {
+      const st = this.states[target.name];
+      if (!st) continue;
+      let phase: MovementPhase = 'rest';
+      if (st.inRange) phase = 'hold';
+      else if (now - st.exitedAt < o.returnMinMs || now - st.lastAwayAt < o.returnSettleMs) phase = 'returning';
+      else if (st.attempting) phase = 'moving';
+      if (rank[phase] > rank[best.phase]) best = { phase, target };
+    }
+    if (best.phase !== this.lastPhase) {
+      this.lastPhase = best.phase;
+      this.phaseSince = now;
+    }
+    return { ...best, since: this.phaseSince };
+  }
+
+  private lastPhase: MovementPhase = 'rest';
+  private phaseSince = 0;
 
   /** ROM of the side that moved the most */
   romSummary(): { primaryJoint: string | null; romMinAngle: number | null; romMaxAngle: number | null } {

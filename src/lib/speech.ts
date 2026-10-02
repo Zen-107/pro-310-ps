@@ -49,8 +49,10 @@ export function loadVoices(timeoutMs = 1500): Promise<SpeechSynthesisVoice[]> {
   });
 }
 
-// Natural Thai pacing: neutral pitch, slightly slower than default
-export const SPEECH_RATE = 0.95;
+// Coaching pace: a little faster than default sounds clear and energetic
+// (default-speed Thai TTS comes across as slow); pitch stays neutral.
+export const SPEECH_RATE = 1.15; // Web Speech fallback
+export const PLAYBACK_RATE = 1.15; // server TTS clips (pitch preserved)
 export const SPEECH_PITCH = 1.0;
 
 // Chrome garbage-collects an utterance that is only referenced by the speech
@@ -73,7 +75,10 @@ export function speak(text: string, voice: SpeechSynthesisVoice | null): void {
   u.pitch = SPEECH_PITCH;
   u.volume = 1;
   u.onend = u.onerror = () => {
-    if (currentUtterance === u) currentUtterance = null;
+    if (currentUtterance === u) {
+      currentUtterance = null;
+      activePriority = null;
+    }
   };
   if (pendingTimer) clearTimeout(pendingTimer);
   const start = () => {
@@ -95,6 +100,7 @@ export function stopSpeech(): void {
   speakToken++; // drops any cue still being fetched
   fetchAbort?.abort();
   fetchAbort = null;
+  activePriority = null;
   if (audioEl) audioEl.pause();
   if (!('speechSynthesis' in window)) return;
   if (pendingTimer) clearTimeout(pendingTimer);
@@ -105,8 +111,25 @@ export function stopSpeech(): void {
 
 // ─── Coach voice: server TTS → browser Thai voice → chime ────────────
 
-/** 'superseded' = a newer cue replaced this one before it played */
+/**
+ * 'superseded' = not played: replaced by a newer cue, dropped because a
+ * higher-priority cue is playing, or ready too late to still be relevant.
+ */
 export type SpeechOutput = 'server' | 'browser' | 'chime' | 'superseded';
+
+/** 'high' = corrections: always interrupt. 'normal' = coach/encouragement: never cut a correction short */
+export type SpeechPriority = 'high' | 'normal';
+
+/** A cue not playing within this time after it was requested is dropped (no late, stacked speech) */
+export const MAX_CUE_LATENCY_MS = 1500;
+
+let activePriority: SpeechPriority | null = null;
+
+function somethingPlaying(): boolean {
+  if (fetchAbort) return true;
+  if (audioEl && !audioEl.paused && !audioEl.ended) return true;
+  return typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis.speaking;
+}
 
 let audioEl: HTMLAudioElement | null = null;
 let fetchAbort: AbortController | null = null;
@@ -115,13 +138,18 @@ let speakToken = 0;
 let serverRetryAt = 0;
 let serverFailures = 0;
 const SERVER_BACKOFF_MS = 60_000;
-const SERVER_TIMEOUT_MS = 5000;
+const SERVER_TIMEOUT_MS = 2500;
 const clipCache = new Map<string, string>(); // text → object URL (recent cues replay instantly)
 const CLIP_CACHE_MAX = 60;
 
 function getAudioEl(): HTMLAudioElement {
-  audioEl ??= new Audio();
-  audioEl.preload = 'auto';
+  if (!audioEl) {
+    audioEl = new Audio();
+    audioEl.preload = 'auto';
+    audioEl.preservesPitch = true; // faster playback without a higher pitch
+    audioEl.defaultPlaybackRate = PLAYBACK_RATE;
+    audioEl.addEventListener('ended', () => (activePriority = null));
+  }
   return audioEl;
 }
 
@@ -168,27 +196,38 @@ async function serverClip(text: string, signal: AbortSignal): Promise<string> {
 }
 
 /**
- * Speak a Thai coaching cue, replacing whatever is playing:
+ * Speak a Thai coaching cue. Nothing is queued: a new cue flushes whatever
+ * is playing or still loading (a 'normal' cue never cuts a 'high' one short;
+ * it is dropped instead), and a cue that can't start within
+ * MAX_CUE_LATENCY_MS is dropped rather than played late. Output order:
  *  1. server TTS (/api/tts) — works without any Thai voice installed;
  *  2. the browser's Thai voice (Web Speech), when the server is unavailable;
  *  3. a chime, when neither can speak.
- * Resolves with the output used.
  */
-export async function speakThai(text: string, browserVoice: SpeechSynthesisVoice | null): Promise<SpeechOutput> {
+export async function speakThai(
+  text: string,
+  browserVoice: SpeechSynthesisVoice | null,
+  priority: SpeechPriority = 'normal'
+): Promise<SpeechOutput> {
   if (typeof window === 'undefined') return 'superseded';
-  stopSpeech();
-  const token = ++speakToken;
   const clean = text.trim().slice(0, 300);
   if (!clean) return 'superseded';
+  if (priority === 'normal' && activePriority === 'high' && somethingPlaying()) return 'superseded';
+  stopSpeech(); // flush: no stacked cues
+  const token = ++speakToken;
+  activePriority = priority;
+  const requestedAt = Date.now();
+  const stale = () => Date.now() - requestedAt > MAX_CUE_LATENCY_MS;
 
   if (Date.now() >= serverRetryAt) {
     const ctrl = new AbortController();
     fetchAbort = ctrl;
     try {
       const url = await serverClip(clean, ctrl.signal);
-      if (token !== speakToken) return 'superseded';
+      if (token !== speakToken || stale()) return 'superseded';
       const el = getAudioEl();
       el.src = url;
+      el.playbackRate = PLAYBACK_RATE; // a new src resets the rate
       await el.play();
       serverFailures = 0;
       return 'server';
@@ -203,6 +242,7 @@ export async function speakThai(text: string, browserVoice: SpeechSynthesisVoice
     }
   }
 
+  if (token !== speakToken || stale()) return 'superseded';
   const canSpeak = 'speechSynthesis' in window && (!!browserVoice || !voicesReady());
   if (canSpeak) {
     try {
