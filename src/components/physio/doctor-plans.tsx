@@ -321,7 +321,7 @@ export function DoctorPlans() {
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
               />
-              <Button className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={createPlan}>
+              <Button className="bg-teal-600 hover:bg-teal-700" disabled={busy} onClick={createPlan}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                 สร้างแผน
               </Button>
@@ -336,7 +336,7 @@ export function DoctorPlans() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <ClipboardList className="h-5 w-5 text-emerald-600" />
+                    <ClipboardList className="h-5 w-5 text-teal-600" />
                     <h3 className="text-lg font-semibold">{plan.title}</h3>
                     <Badge variant={plan.status === 'ACTIVE' ? 'default' : 'secondary'}>{STATUS_LABEL[plan.status]}</Badge>
                   </div>
@@ -376,7 +376,7 @@ export function DoctorPlans() {
           {/* Prescribed exercises */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold flex items-center gap-2">
-              <Target className="h-4 w-4 text-emerald-600" /> ท่าในแผน (ภารกิจรายวัน)
+              <Target className="h-4 w-4 text-teal-600" /> ท่าในแผน (ภารกิจรายวัน)
             </h3>
             {plan.items.length === 0 ? (
               <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -532,7 +532,7 @@ function PrescriptionItemEditor({
                     type="button"
                     onClick={() => setDays((list) => (on ? list.filter((x) => x !== d) : [...list, d].sort()))}
                     className={`h-8 w-9 rounded-md border text-xs font-medium transition-colors ${
-                      on ? 'bg-emerald-600 text-white border-emerald-600' : 'hover:bg-muted'
+                      on ? 'bg-teal-600 text-white border-teal-600' : 'hover:bg-muted'
                     }`}
                   >
                     {label}
@@ -566,7 +566,7 @@ function PrescriptionItemEditor({
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={handleSave}>
+            <Button size="sm" className="bg-teal-600 hover:bg-teal-700" disabled={busy} onClick={handleSave}>
               <Save className="h-3.5 w-3.5" /> บันทึก
             </Button>
             <Button size="sm" variant="outline" disabled={busy} onClick={resetTargets}>

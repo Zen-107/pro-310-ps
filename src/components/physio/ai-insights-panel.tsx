@@ -100,7 +100,7 @@ export function AiInsightsPanel({ patientId }: { patientId: string }) {
                     <span className="text-muted-foreground">{t.sessions} เซสชัน</span>
                   </div>
                   <p className="flex items-center gap-1 tabular-nums">
-                    {up ? <TrendingUp className="h-3.5 w-3.5 text-emerald-600" /> : <TrendingDown className="h-3.5 w-3.5 text-red-500" />}
+                    {up ? <TrendingUp className="h-3.5 w-3.5 text-teal-600" /> : <TrendingDown className="h-3.5 w-3.5 text-red-500" />}
                     ความแม่นยำ {t.accuracy.first}% → {t.accuracy.last}%
                     {t.rom.first !== null && (
                       <span className="ml-2 text-muted-foreground">

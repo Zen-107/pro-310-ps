@@ -55,7 +55,7 @@ export function ReviewQueue() {
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-base">
           <span className="flex items-center gap-2">
-            <ClipboardCheck className="h-4 w-4 text-emerald-600" />
+            <ClipboardCheck className="h-4 w-4 text-teal-600" />
             เซสชันรอตรวจสอบ
           </span>
           {items && items.length > 0 && <Badge className="bg-amber-500 text-white">{items.length}</Badge>}

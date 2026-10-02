@@ -20,6 +20,23 @@ const mdComponents = (print: boolean): Components => ({
   th: ({ children }) => <th className={print ? '' : 'border-b p-2 text-left font-medium'}>{children}</th>,
   td: ({ children }) => <td className={print ? '' : 'border-t p-2 tabular-nums'}>{children}</td>,
   hr: () => null,
+  // Screen styles (print styles come from .report-print in globals.css)
+  ...(print
+    ? {}
+    : ({
+        h1: ({ children }) => <h3 className="mt-4 mb-1.5 text-base font-semibold text-teal-800 first:mt-0 dark:text-teal-300">{children}</h3>,
+        h2: ({ children }) => <h3 className="mt-4 mb-1.5 text-base font-semibold text-teal-800 first:mt-0 dark:text-teal-300">{children}</h3>,
+        h3: ({ children }) => <h4 className="mt-3 mb-1 text-sm font-semibold text-foreground first:mt-0">{children}</h4>,
+        p: ({ children }) => <p className="my-1.5 leading-relaxed">{children}</p>,
+        ul: ({ children }) => <ul className="my-1.5 list-disc space-y-1 pl-5 marker:text-teal-600">{children}</ul>,
+        ol: ({ children }) => (
+          <ol className="mt-4 list-decimal space-y-1 pl-5 font-semibold marker:text-teal-700 first:mt-0 [&_ol]:font-normal [&_p]:font-normal [&_ul]:font-normal dark:marker:text-teal-300">
+            {children}
+          </ol>
+        ),
+        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+        strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+      } satisfies Components)),
 });
 
 export function ClinicalSummaryMarkdown({

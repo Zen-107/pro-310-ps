@@ -344,10 +344,10 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
     >
       {/* ── Welcome Section ── */}
       <motion.div variants={itemVariants}>
-        <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/30 dark:to-background">
+        <Card className="border-teal-200 bg-gradient-to-br from-teal-50 to-white dark:from-teal-950/30 dark:to-background">
           <CardContent className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <p className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
+              <p className="text-sm text-teal-600 dark:text-teal-400 font-medium">
                 {getGreeting()} 🎉
               </p>
               <h1 className="text-2xl font-bold text-foreground mt-1">
@@ -361,7 +361,7 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
             </div>
             <Button
               size="lg"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/25 text-base px-6"
+              className="bg-teal-600 hover:bg-teal-700 text-white shadow-lg shadow-teal-600/25 text-base px-6"
               onClick={onStartSession}
             >
               <Play className="size-5" />
@@ -377,7 +377,7 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-base">
               <span className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-emerald-600" />
+                <Target className="h-4 w-4 text-teal-600" />
                 ภารกิจวันนี้
               </span>
               {quests && quests.total > 0 && (
@@ -402,13 +402,13 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
                     </p>
                   </div>
                   {q.status === 'COMPLETED' ? (
-                    <Badge className="shrink-0 bg-emerald-600 text-white">
+                    <Badge className="shrink-0 bg-teal-600 text-white">
                       <CheckCircle className="mr-1 h-3 w-3" /> สำเร็จ
                     </Badge>
                   ) : (
                     <Button
                       size="sm"
-                      className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700"
+                      className="shrink-0 bg-teal-600 text-white hover:bg-teal-700"
                       onClick={() => {
                         setSelectedQuestId(q.id);
                         onStartSession();
@@ -433,7 +433,7 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
             {/* Total Sessions */}
             <Card className="group hover:shadow-md transition-shadow">
               <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <div className="flex items-center gap-2 text-teal-600 dark:text-teal-400">
                   <Activity className="size-5" />
                   <span className="text-xs font-medium text-muted-foreground">เซสชันทั้งหมด</span>
                 </div>
@@ -460,7 +460,7 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
             {/* Total Minutes */}
             <Card className="group hover:shadow-md transition-shadow">
               <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <div className="flex items-center gap-2 text-teal-600 dark:text-teal-400">
                   <Clock className="size-5" />
                   <span className="text-xs font-medium text-muted-foreground">เวลาฝึกทั้งหมด</span>
                 </div>
@@ -499,7 +499,7 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
             <Card className="hover:shadow-md transition-shadow">
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-2">
-                  <Calendar className="size-5 text-emerald-600 dark:text-emerald-400" />
+                  <Calendar className="size-5 text-teal-600 dark:text-teal-400" />
                   <CardTitle className="text-base">กิจกรรมรายสัปดาห์</CardTitle>
                 </div>
               </CardHeader>

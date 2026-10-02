@@ -134,7 +134,7 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
               <div
                 className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${
                   m.mine
-                    ? 'rounded-br-sm bg-emerald-600 text-white'
+                    ? 'rounded-br-sm bg-teal-600 text-white'
                     : ai
                       ? 'rounded-bl-sm border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-950/40'
                       : 'rounded-bl-sm bg-muted'
@@ -155,7 +155,7 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
                   )
                 )}
                 {m.kind === 'ASSISTANT_QUESTION' && (
-                  <p className={`mb-0.5 flex items-center gap-1 text-[10px] ${m.mine ? 'text-emerald-100' : 'text-violet-700 dark:text-violet-300'}`}>
+                  <p className={`mb-0.5 flex items-center gap-1 text-[10px] ${m.mine ? 'text-teal-100' : 'text-violet-700 dark:text-violet-300'}`}>
                     <Bot className="h-3 w-3" /> ถามผู้ช่วย AI
                   </p>
                 )}
@@ -165,7 +165,7 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
                   </p>
                 )}
                 <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                <p className={`mt-0.5 text-right text-[10px] ${m.mine ? 'text-emerald-100' : 'text-muted-foreground'}`}>
+                <p className={`mt-0.5 text-right text-[10px] ${m.mine ? 'text-teal-100' : 'text-muted-foreground'}`}>
                   {new Date(m.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
                 </p>
               </div>
@@ -223,7 +223,7 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
           className="max-h-32 min-h-10 resize-none"
           aria-label="Message"
         />
-        <Button type="submit" size="icon" className="shrink-0 bg-emerald-600 hover:bg-emerald-700" disabled={sending || !draft.trim()} aria-label="Send">
+        <Button type="submit" size="icon" className="shrink-0 bg-teal-600 hover:bg-teal-700" disabled={sending || !draft.trim()} aria-label="Send">
           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
       </form>

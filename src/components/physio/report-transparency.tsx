@@ -14,6 +14,7 @@ import {
   SkipForward,
   StepBack,
   StepForward,
+  LineChart as LineChartIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -91,7 +92,7 @@ export function ReportFormulas({
   return (
     <div className="space-y-3">
       <h4 className="text-sm font-semibold flex items-center gap-2">
-        <Calculator className="h-4 w-4 text-emerald-600" />
+        <Calculator className="h-4 w-4 text-teal-600" />
         วิธีคำนวณ (Kinematics)
         <Badge variant="outline" className="font-mono text-[10px]">{algorithmVersion}</Badge>
       </h4>
@@ -149,7 +150,7 @@ export function ReportReps({ reps }: { reps: ReportRep[] }) {
   return (
     <div className="space-y-3">
       <h4 className="text-sm font-semibold flex items-center gap-2">
-        <ListOrdered className="h-4 w-4 text-emerald-600" />
+        <ListOrdered className="h-4 w-4 text-teal-600" />
         ผลรายครั้ง ({reps.length} ครั้ง)
       </h4>
       <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto">
@@ -223,7 +224,7 @@ export function ReviewPanel({
         <div
           className={`rounded-lg border p-3 text-xs ${
             review.status === 'APPROVED'
-              ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+              ? 'bg-teal-50 dark:bg-teal-950/30 border-teal-200 dark:border-teal-800'
               : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
           }`}
         >
@@ -491,12 +492,18 @@ export function ClinicalSessionReplay({
   faults,
   reps,
   primaryJoint,
+  view = 'replay',
 }: {
   sessionId: string;
   targets: ReportTarget[];
   faults: ReportFaults['items'];
   reps: ReportRep[];
   primaryJoint: string | null;
+  /**
+   * 'replay' = video + 3D rig + timeline (default); 'chart' = large
+   * angle-over-time chart with joint picker and the same playback controls.
+   */
+  view?: 'replay' | 'chart';
 }) {
   const [frames, setFrames] = useState<ReplayFrame[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -715,13 +722,20 @@ export function ClinicalSessionReplay({
   };
 
   // ─── Render ───────────────────────────────────────────────────────
-  const header = (
-    <h4 className="text-sm font-semibold flex items-center gap-2">
-      <Film className="h-4 w-4 text-emerald-600" />
-      Clinical Session Replay
-      <span className="font-normal text-muted-foreground">· ภาพซ้ำการเคลื่อนไหวจากข้อมูลที่บันทึก</span>
-    </h4>
-  );
+  const header =
+    view === 'chart' ? (
+      <h4 className="text-sm font-semibold flex items-center gap-2">
+        <LineChartIcon className="h-4 w-4 text-teal-600" />
+        กราฟมุมข้อต่อตลอดเซสชัน
+        <span className="font-normal text-muted-foreground">· แตะกราฟเพื่อเลื่อนไปยังช่วงเวลา</span>
+      </h4>
+    ) : (
+      <h4 className="text-sm font-semibold flex items-center gap-2">
+        <Film className="h-4 w-4 text-teal-600" />
+        Clinical Session Replay
+        <span className="font-normal text-muted-foreground">· ภาพซ้ำการเคลื่อนไหวจากข้อมูลที่บันทึก</span>
+      </h4>
+    );
 
   if (loadError) {
     return (
@@ -791,6 +805,41 @@ export function ClinicalSessionReplay({
     >
       {header}
 
+      {view === 'chart' && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Measurement">
+          {targets.map((t) => {
+            const v = frame.a[t.name];
+            const status = v === undefined ? null : getAngleStatus(v, t.minAngle, t.maxAngle);
+            return (
+              <button
+                type="button"
+                key={t.name}
+                onClick={() => setFocus(t.name)}
+                aria-pressed={t.name === focus}
+                className={`flex min-h-11 items-center gap-3 rounded-xl border px-3 py-2 text-left text-xs transition-colors ${
+                  t.name === focus ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/40' : 'hover:bg-muted/60'
+                }`}
+              >
+                <span>
+                  <span className="block font-medium">{t.nameTh}</span>
+                  <span className="block text-[10px] text-muted-foreground tabular-nums">
+                    เป้าหมาย {t.minAngle}°–{t.maxAngle}°
+                  </span>
+                </span>
+                <span
+                  className={`text-base font-bold tabular-nums ${
+                    status === 'good' ? 'text-emerald-600' : status === 'warn' ? 'text-amber-600' : status === 'bad' ? 'text-red-600' : 'text-muted-foreground'
+                  }`}
+                >
+                  {v === undefined ? '—' : `${Math.round(v)}°`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {view === 'replay' && (
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div className={videoMeta ? 'grid gap-3 md:grid-cols-2' : ''}>
         {videoMeta && <SessionVideoPlayer sessionId={sessionId} videoRef={videoRef} meta={videoMeta} />}
@@ -815,7 +864,7 @@ export function ClinicalSessionReplay({
               <g>
                 <path
                   d={arc(focusArc.vertex, 46, focusArc.g.startDeg + focusArc.g.sign * focusArc.t.minAngle, focusArc.g.sign * (focusArc.t.maxAngle - focusArc.t.minAngle), true)}
-                  className="fill-emerald-500/15 stroke-none"
+                  className="fill-teal-500/15 stroke-none"
                 />
                 {[focusArc.t.minAngle, focusArc.t.maxAngle].map((deg, i) => {
                   const d = dirOf(focusArc.g.startDeg + focusArc.g.sign * deg);
@@ -826,7 +875,7 @@ export function ClinicalSessionReplay({
                         y1={focusArc.vertex.y}
                         x2={r2(focusArc.vertex.x + d.x * 58)}
                         y2={r2(focusArc.vertex.y + d.y * 58)}
-                        className="stroke-emerald-600/70 dark:stroke-emerald-400/70"
+                        className="stroke-teal-600/70 dark:stroke-teal-400/70"
                         strokeDasharray="4 3"
                         strokeWidth={1.2}
                       />
@@ -835,7 +884,7 @@ export function ClinicalSessionReplay({
                         y={r2(focusArc.vertex.y + d.y * 66)}
                         textAnchor="middle"
                         dominantBaseline="middle"
-                        className="fill-emerald-700 dark:fill-emerald-300 text-[8px]"
+                        className="fill-teal-700 dark:fill-teal-300 text-[8px]"
                       >
                         {i === 0 ? 'min' : 'max'} {deg}°
                       </text>
@@ -995,7 +1044,7 @@ export function ClinicalSessionReplay({
             step={5}
             value={yaw}
             onChange={(e) => setYaw(Number(e.target.value))}
-            className="w-full accent-emerald-600"
+            className="w-full accent-teal-600"
             aria-label="Rotate view"
           />
           <p className="text-[10px] leading-snug text-muted-foreground">
@@ -1003,13 +1052,14 @@ export function ClinicalSessionReplay({
           </p>
         </div>
       </div>
+      )}
 
       {/* Timeline */}
       <div className="rounded-xl border p-2">
         <svg
           ref={chartRef}
           viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-          className="h-32 w-full cursor-pointer touch-none select-none"
+          className={`${view === 'chart' ? 'h-60 sm:h-72' : 'h-32'} w-full cursor-pointer touch-none select-none`}
           onPointerDown={(e) => {
             e.currentTarget.setPointerCapture(e.pointerId);
             setPlaying(false);
@@ -1028,12 +1078,12 @@ export function ClinicalSessionReplay({
                 y={chart.yOf(focusTarget.maxAngle)}
                 width={CHART_W - CHART_PAD.l - CHART_PAD.r}
                 height={Math.max(0, chart.yOf(focusTarget.minAngle) - chart.yOf(focusTarget.maxAngle))}
-                className="fill-emerald-500/10"
+                className="fill-teal-500/10"
               />
               {[focusTarget.minAngle, focusTarget.maxAngle].map((v) => (
                 <g key={v}>
-                  <line x1={CHART_PAD.l} x2={CHART_W - CHART_PAD.r} y1={chart.yOf(v)} y2={chart.yOf(v)} className="stroke-emerald-600/60" strokeDasharray="4 3" />
-                  <text x={CHART_PAD.l - 4} y={chart.yOf(v)} textAnchor="end" dominantBaseline="middle" className="fill-emerald-700 dark:fill-emerald-300 text-[9px]">
+                  <line x1={CHART_PAD.l} x2={CHART_W - CHART_PAD.r} y1={chart.yOf(v)} y2={chart.yOf(v)} className="stroke-teal-600/60" strokeDasharray="4 3" />
+                  <text x={CHART_PAD.l - 4} y={chart.yOf(v)} textAnchor="end" dominantBaseline="middle" className="fill-teal-700 dark:fill-teal-300 text-[9px]">
                     {v}°
                   </text>
                 </g>
@@ -1082,7 +1132,7 @@ export function ClinicalSessionReplay({
           <line x1={xOfTime(now)} x2={xOfTime(now)} y1={CHART_PAD.t - 8} y2={CHART_H - CHART_PAD.b} className="stroke-foreground" strokeWidth={1.5} />
         </svg>
         <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 text-[10px] text-muted-foreground">
-          <span><span className="inline-block h-2 w-3 bg-emerald-500/20 align-middle" /> ช่วงเป้าหมาย</span>
+          <span><span className="inline-block h-2 w-3 bg-teal-500/20 align-middle" /> ช่วงเป้าหมาย</span>
           <span><span className="text-red-500">▲</span> ท่าชดเชย</span>
           <span><span className="text-amber-500">▲</span> ทำไม่สุดระยะ</span>
           <span><span className="text-orange-400">▲</span> ความแม่นยำต่ำ</span>
@@ -1092,7 +1142,7 @@ export function ClinicalSessionReplay({
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
+        <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={() => {
           if (!playing && now >= duration) seek(0);
           setPlaying((p) => !p);
         }} aria-label={playing ? 'Pause' : 'Play'}>
@@ -1138,7 +1188,7 @@ export function ClinicalSessionReplay({
           setPlaying(false);
           seek(Number(e.target.value));
         }}
-        className="w-full accent-emerald-600"
+        className="w-full accent-teal-600"
         aria-label="Scrub timeline"
       />
 

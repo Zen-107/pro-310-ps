@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,9 @@ import {
   RefreshCw,
   Printer,
   Download,
+  Film,
+  Table2,
+  LineChart as LineChartIcon,
   Loader2,
   ClipboardList,
   Eye,
@@ -144,7 +148,7 @@ function printReport(title: string) {
 }
 
 function deviationColor(dev: number): string {
-  if (dev <= 5) return 'text-emerald-600 dark:text-emerald-400';
+  if (dev <= 5) return 'text-teal-600 dark:text-teal-400';
   if (dev <= 15) return 'text-amber-600 dark:text-amber-400';
   return 'text-red-500 dark:text-red-400';
 }
@@ -187,6 +191,7 @@ export function DoctorReports() {
   const [report, setReport] = useState<ReportData | null>(null);
   const [generating, setGenerating] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [reportTab, setReportTab] = useState('summary');
   const printDocRef = useRef<HTMLDivElement>(null);
 
   // One-click PDF of the official print layout (lib/report-pdf.ts)
@@ -354,7 +359,7 @@ export function DoctorReports() {
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <FileText className="h-6 w-6 text-emerald-600" />
+            <FileText className="h-6 w-6 text-teal-600" />
             รายงานคลินิก
           </h2>
           <p className="text-muted-foreground mt-1">
@@ -364,11 +369,11 @@ export function DoctorReports() {
       </div>
 
       {/* ---- Patient Selector ---- */}
-      <Card className="border-emerald-500/20">
+      <Card className="border-teal-500/20">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground shrink-0">
-              <UserSearch className="h-4 w-4 text-emerald-600" />
+              <UserSearch className="h-4 w-4 text-teal-600" />
               <span>ผู้ป่วย:</span>
             </div>
             <Select value={activePatientId} onValueChange={handlePatientChange}>
@@ -424,7 +429,7 @@ export function DoctorReports() {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.3 }}
           >
-            <Card className="border-emerald-500/20 overflow-hidden" data-print-root>
+            <Card className="border-teal-500/20 overflow-hidden" data-print-root>
               {/* Official printed document (only visible when printing) */}
               {report && (
                 <div ref={printDocRef} className="contents">
@@ -433,11 +438,11 @@ export function DoctorReports() {
               )}
 
               {/* Report header */}
-              <div data-print-hide className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-4 text-white">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="shrink-0 p-2 bg-emerald-500/20 rounded-xl">
-                      <FileText className="h-5 w-5 text-emerald-400" />
+              <div data-print-hide className="bg-gradient-to-r from-slate-900 to-slate-800 px-5 py-4 text-white">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="shrink-0 p-2 bg-teal-400/15 rounded-xl">
+                      <FileText className="h-5 w-5 text-teal-300" />
                     </div>
                     <div className="min-w-0">
                       <h3 className="font-semibold truncate">
@@ -453,39 +458,34 @@ export function DoctorReports() {
                     </div>
                   </div>
                   {report && selectedSessionId && (
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="text-slate-300 hover:text-white hover:bg-white/10"
-                        disabled={generating || loadingReport}
-                        onClick={() => printReport(printFileName(report))}
+                        className="min-h-10 text-slate-200 hover:bg-white/10 hover:text-white"
+                        onClick={() => generateReport(selectedSessionId)}
+                        title={report.clinicalSummary ? 'สร้างสรุปใหม่' : 'สร้างสรุป AI'}
                       >
-                        <Printer className="h-3.5 w-3.5 mr-1.5" />
-                        พิมพ์
+                        <RefreshCw className="h-4 w-4" />
+                        <span className="hidden md:inline">{report.clinicalSummary ? 'สร้างสรุปใหม่' : 'สร้างสรุป AI'}</span>
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="text-slate-300 hover:text-white hover:bg-white/10"
+                        className="min-h-10 text-slate-200 hover:bg-white/10 hover:text-white"
+                        disabled={generating || loadingReport}
+                        onClick={() => printReport(printFileName(report))}
+                        title="พิมพ์"
+                      >
+                        <Printer className="h-4 w-4" />
+                        <span className="hidden md:inline">พิมพ์</span>
+                      </Button>
+                      {/* Primary call to action */}
+                      <Button
+                        className="min-h-10 bg-teal-400 px-4 font-semibold text-slate-950 shadow-lg shadow-teal-500/20 hover:bg-teal-300"
                         disabled={generating || loadingReport || downloadingPdf}
                         onClick={() => downloadPdf(report)}
                       >
-                        {downloadingPdf ? (
-                          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                        ) : (
-                          <Download className="h-3.5 w-3.5 mr-1.5" />
-                        )}
+                        {downloadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                         ดาวน์โหลด PDF
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-slate-300 hover:text-white hover:bg-white/10"
-                        onClick={() => generateReport(selectedSessionId)}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                        {report.clinicalSummary ? 'สร้างสรุปใหม่' : 'สร้างสรุป AI'}
                       </Button>
                     </div>
                   )}
@@ -497,7 +497,7 @@ export function DoctorReports() {
                 {(generating || loadingReport) && !report && (
                   <div className="py-16 flex flex-col items-center">
                     <div className="relative mb-4">
-                      <Loader2 className="h-12 w-12 animate-spin text-emerald-500" />
+                      <Loader2 className="h-12 w-12 animate-spin text-teal-500" />
                       <Sparkles className="h-5 w-5 text-amber-400 absolute -top-1 -right-1 animate-pulse" />
                     </div>
                     <p className="text-sm font-medium text-foreground">
@@ -530,7 +530,7 @@ export function DoctorReports() {
                   </div>
                 )}
 
-                {/* Report content */}
+                {/* Report content: key numbers, then tabbed detail */}
                 {report && !generating && !loadingReport && (
                   <>
                     {/* ---- Stats Row ---- */}
@@ -539,10 +539,10 @@ export function DoctorReports() {
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: 0.05 }}
-                        className="text-center p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50"
+                        className="text-center p-4 rounded-xl bg-teal-50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/50"
                       >
-                        <Activity className="h-4 w-4 text-emerald-500 mx-auto mb-1" />
-                        <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                        <Activity className="h-4 w-4 text-teal-500 mx-auto mb-1" />
+                        <p className="text-2xl font-bold text-teal-600 dark:text-teal-400">
                           {report.totalReps}
                         </p>
                         <p className="text-xs text-muted-foreground mt-0.5">ครั้งที่ทำ</p>
@@ -598,161 +598,186 @@ export function DoctorReports() {
                       )}
                     </div>
 
-                    <Separator />
+                    <Tabs value={reportTab} onValueChange={setReportTab}>
+                      <TabsList aria-label="ส่วนของรายงาน">
+                        <TabsTrigger value="summary">
+                          <Sparkles /> สรุปและรับรองผล
+                        </TabsTrigger>
+                        <TabsTrigger value="data">
+                          <Table2 /> ข้อมูลเซสชัน
+                        </TabsTrigger>
+                        <TabsTrigger value="chart">
+                          <LineChartIcon /> กราฟมุมข้อต่อ
+                        </TabsTrigger>
+                        <TabsTrigger value="replay">
+                          <Film /> วิดีโอและรีเพลย์
+                        </TabsTrigger>
+                      </TabsList>
 
-                    {/* ---- Joint Analysis Table ---- */}
-                    {report.jointReport.length > 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.25 }}
-                      >
-                        <h4 className="text-sm font-semibold flex items-center gap-2 mb-3">
-                          <Stethoscope className="h-4 w-4 text-emerald-600" />
-                          การวิเคราะห์ข้อต่อแต่ละจุด
-                        </h4>
-                        <div className="rounded-xl border overflow-hidden">
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm min-w-[520px]">
-                              <thead>
-                                <tr className="bg-muted/60 border-b">
-                                  <th className="text-left p-3 font-medium">ข้อต่อ</th>
-                                  <th className="text-center p-3 font-medium">เฉลี่ย</th>
-                                  <th className="text-center p-3 font-medium">ต่ำสุด–สูงสุด</th>
-                                  <th className="text-center p-3 font-medium">เบี่ยงเบน</th>
-                                  <th className="text-center p-3 font-medium w-40">
-                                    ความแม่นยำ
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {report.jointReport.map((j, i) => (
-                                  <motion.tr
-                                    key={j.joint}
-                                    initial={{ opacity: 0, x: -10 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: 0.3 + i * 0.06 }}
-                                    className="border-t last:border-b-0 hover:bg-muted/30 transition-colors"
-                                  >
-                                    <td className="p-3">
-                                      <span className="font-medium">{j.nameTh}</span>
-                                      {j.target && (
-                                        <div className="text-[11px] text-muted-foreground tabular-nums">
-                                          เป้าหมาย {j.target.minAngle}°–{j.target.maxAngle}° · {j.samples} ครั้ง
-                                        </div>
-                                      )}
-                                    </td>
-                                    <td className="p-3 text-center font-bold tabular-nums">
-                                      {j.avgAngle}°
-                                    </td>
-                                    <td className="p-3 text-center text-muted-foreground tabular-nums">
-                                      {j.minAngle}° – {j.maxAngle}°
-                                    </td>
-                                    <td className="p-3 text-center">
-                                      <span
-                                        className={`font-medium tabular-nums ${deviationColor(j.avgDeviation)}`}
-                                      >
-                                        {j.avgDeviation}°
-                                      </span>
-                                    </td>
-                                    <td className="p-3">
-                                      <div className="flex items-center gap-2.5 justify-center">
-                                        <div className="w-20 h-2 rounded-full bg-muted overflow-hidden">
-                                          <motion.div
-                                            className={`h-full rounded-full ${getAccuracyBarColor(j.accuracy)}`}
-                                            initial={{ width: 0 }}
-                                            animate={{ width: `${j.accuracy}%` }}
-                                            transition={{ delay: 0.4 + i * 0.06, duration: 0.6 }}
-                                          />
-                                        </div>
-                                        <span
-                                          className={`text-xs font-bold tabular-nums w-9 text-right ${getAccuracyTextColor(j.accuracy)}`}
-                                        >
-                                          {j.accuracy}%
-                                        </span>
-                                      </div>
-                                    </td>
-                                  </motion.tr>
-                                ))}
-                              </tbody>
-                            </table>
+                      {/* Clinical summary + sign-off: what the clinician acts on */}
+                      <TabsContent value="summary" className="space-y-6">
+                        {/* ---- Clinical Summary (Markdown) ---- */}
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.5 }}
+                        >
+                          <h4 className="text-sm font-semibold flex items-center gap-2 mb-3">
+                            <Sparkles className="h-4 w-4 text-amber-500" />
+                            สรุปคลินิก (AI)
+                          </h4>
+                          <div className="rounded-xl border bg-muted/30 p-5 text-sm text-foreground/90">
+                            {report.clinicalSummary ? (
+                              <ClinicalSummaryMarkdown
+                                content={report.clinicalSummary}
+                                jointNames={Object.fromEntries(report.jointReport.map((j) => [j.joint, j.nameTh]))}
+                              />
+                            ) : (
+                              <div className="not-prose flex flex-col items-center gap-2 py-4 text-center">
+                                <p className="text-sm text-muted-foreground">ยังไม่มีสรุปคลินิกสำหรับเซสชันนี้</p>
+                                <Button data-print-hide size="sm" variant="outline" onClick={() => generateReport(report.sessionId)}>
+                                  <Sparkles className="h-3.5 w-3.5 mr-1.5" /> สร้างสรุปด้วย AI
+                                </Button>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    <Separator />
-
-                    <ReportFormulas
-                      angleDefinition={report.angleDefinition}
-                      scoring={report.scoring}
-                      targets={report.targets}
-                      algorithmVersion={report.algorithmVersion}
-                      romMinAngle={report.romMinAngle}
-                      romMaxAngle={report.romMaxAngle}
-                      primaryJoint={report.primaryJoint}
-                    />
-
-                    <ReportReps reps={report.reps} />
-
-                    <ReportFaultsPanel faults={report.faults} totalReps={report.totalReps} />
-
-                    <div data-print-hide>
-                    <ClinicalSessionReplay
-                      key={`replay-${report.sessionId}`}
-                      sessionId={report.sessionId}
-                      targets={report.targets}
-                      faults={report.faults.items}
-                      reps={report.reps}
-                      primaryJoint={report.primaryJoint}
-                    />
-                    </div>
-
-                    <Separator />
-
-                    {/* ---- Clinical Summary (Markdown) ---- */}
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.5 }}
-                    >
-                      <h4 className="text-sm font-semibold flex items-center gap-2 mb-3">
-                        <Sparkles className="h-4 w-4 text-amber-500" />
-                        สรุปคลินิก (AI)
-                      </h4>
-                      <div className="prose prose-sm max-w-none dark:prose-invert p-5 rounded-xl bg-muted/40 border border-dashed border-muted-foreground/20 prose-headings:text-emerald-700 dark:prose-headings:text-emerald-400 prose-strong:text-foreground prose-li:marker:text-amber-500">
-                        {report.clinicalSummary ? (
-                          <ClinicalSummaryMarkdown
-                            content={report.clinicalSummary}
-                            jointNames={Object.fromEntries(report.jointReport.map((j) => [j.joint, j.nameTh]))}
+                          <p className="text-[10px] text-muted-foreground/60 mt-2 px-1 italic">
+                            หมายเหตุ: รายงานนี้สร้างโดย AI จากข้อมูลการตรวจจับท่าทาง
+                            แพทย์ควรพิจารณาร่วมกับการตรวจแบบตัวต่อตัว
+                          </p>
+                        </motion.div>
+                        {report.status === 'COMPLETED' && (
+                          <ReviewPanel
+                            key={report.sessionId}
+                            sessionId={report.sessionId}
+                            review={report.review}
+                            onReviewed={(review) => setReport((r) => (r ? { ...r, review } : r))}
                           />
-                        ) : (
-                          <div className="not-prose flex flex-col items-center gap-2 py-4 text-center">
-                            <p className="text-sm text-muted-foreground">ยังไม่มีสรุปคลินิกสำหรับเซสชันนี้</p>
-                            <Button data-print-hide size="sm" variant="outline" onClick={() => generateReport(report.sessionId)}>
-                              <Sparkles className="h-3.5 w-3.5 mr-1.5" /> สร้างสรุปด้วย AI
-                            </Button>
-                          </div>
                         )}
-                      </div>
-                      <p className="text-[10px] text-muted-foreground/60 mt-2 px-1 italic">
-                        หมายเหตุ: รายงานนี้สร้างโดย AI จากข้อมูลการตรวจจับท่าทาง
-                        แพทย์ควรพิจารณาร่วมกับการตรวจแบบตัวต่อตัว
-                      </p>
-                    </motion.div>
+                      </TabsContent>
 
-                    {report.status === 'COMPLETED' && (
-                      <>
-                        <Separator />
-                        <ReviewPanel
-                          key={report.sessionId}
-                          sessionId={report.sessionId}
-                          review={report.review}
-                          onReviewed={(review) => setReport((r) => (r ? { ...r, review } : r))}
+                      {/* Raw session data */}
+                      <TabsContent value="data" className="space-y-6">
+                        {/* ---- Joint Analysis Table ---- */}
+                        {report.jointReport.length > 0 && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.25 }}
+                          >
+                            <h4 className="text-sm font-semibold flex items-center gap-2 mb-3">
+                              <Stethoscope className="h-4 w-4 text-teal-600" />
+                              การวิเคราะห์ข้อต่อแต่ละจุด
+                            </h4>
+                            <div className="rounded-xl border overflow-hidden">
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-sm min-w-[520px]">
+                                  <thead>
+                                    <tr className="bg-muted/60 border-b">
+                                      <th className="text-left p-3 font-medium">ข้อต่อ</th>
+                                      <th className="text-center p-3 font-medium">เฉลี่ย</th>
+                                      <th className="text-center p-3 font-medium">ต่ำสุด–สูงสุด</th>
+                                      <th className="text-center p-3 font-medium">เบี่ยงเบน</th>
+                                      <th className="text-center p-3 font-medium w-40">
+                                        ความแม่นยำ
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {report.jointReport.map((j, i) => (
+                                      <motion.tr
+                                        key={j.joint}
+                                        initial={{ opacity: 0, x: -10 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: 0.3 + i * 0.06 }}
+                                        className="border-t last:border-b-0 hover:bg-muted/30 transition-colors"
+                                      >
+                                        <td className="p-3">
+                                          <span className="font-medium">{j.nameTh}</span>
+                                          {j.target && (
+                                            <div className="text-[11px] text-muted-foreground tabular-nums">
+                                              เป้าหมาย {j.target.minAngle}°–{j.target.maxAngle}° · {j.samples} ครั้ง
+                                            </div>
+                                          )}
+                                        </td>
+                                        <td className="p-3 text-center font-bold tabular-nums">
+                                          {j.avgAngle}°
+                                        </td>
+                                        <td className="p-3 text-center text-muted-foreground tabular-nums">
+                                          {j.minAngle}° – {j.maxAngle}°
+                                        </td>
+                                        <td className="p-3 text-center">
+                                          <span
+                                            className={`font-medium tabular-nums ${deviationColor(j.avgDeviation)}`}
+                                          >
+                                            {j.avgDeviation}°
+                                          </span>
+                                        </td>
+                                        <td className="p-3">
+                                          <div className="flex items-center gap-2.5 justify-center">
+                                            <div className="w-20 h-2 rounded-full bg-muted overflow-hidden">
+                                              <motion.div
+                                                className={`h-full rounded-full ${getAccuracyBarColor(j.accuracy)}`}
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${j.accuracy}%` }}
+                                                transition={{ delay: 0.4 + i * 0.06, duration: 0.6 }}
+                                              />
+                                            </div>
+                                            <span
+                                              className={`text-xs font-bold tabular-nums w-9 text-right ${getAccuracyTextColor(j.accuracy)}`}
+                                            >
+                                              {j.accuracy}%
+                                            </span>
+                                          </div>
+                                        </td>
+                                      </motion.tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                        <ReportFormulas
+                          angleDefinition={report.angleDefinition}
+                          scoring={report.scoring}
+                          targets={report.targets}
+                          algorithmVersion={report.algorithmVersion}
+                          romMinAngle={report.romMinAngle}
+                          romMaxAngle={report.romMaxAngle}
+                          primaryJoint={report.primaryJoint}
                         />
-                      </>
-                    )}
 
+                        <ReportReps reps={report.reps} />
+
+                        <ReportFaultsPanel faults={report.faults} totalReps={report.totalReps} />
+                      </TabsContent>
+
+                      {/* Angle tracking over time */}
+                      <TabsContent value="chart">
+                        <ClinicalSessionReplay
+                          key={`chart-${report.sessionId}`}
+                          view="chart"
+                          sessionId={report.sessionId}
+                          targets={report.targets}
+                          faults={report.faults.items}
+                          reps={report.reps}
+                          primaryJoint={report.primaryJoint}
+                        />
+                      </TabsContent>
+
+                      {/* Consented video + reconstructed movement */}
+                      <TabsContent value="replay">
+                        <ClinicalSessionReplay
+                          key={`replay-${report.sessionId}`}
+                          sessionId={report.sessionId}
+                          targets={report.targets}
+                          faults={report.faults.items}
+                          reps={report.reps}
+                          primaryJoint={report.primaryJoint}
+                        />
+                      </TabsContent>
+                    </Tabs>
                   </>
                 )}
               </CardContent>
@@ -770,8 +795,8 @@ export function DoctorReports() {
         >
           <Card className="border-dashed border-2 border-muted">
             <CardContent className="py-14 flex flex-col items-center text-center">
-              <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 mb-3">
-                <ClipboardList className="h-10 w-10 text-emerald-500/60" />
+              <div className="p-3 rounded-2xl bg-teal-50 dark:bg-teal-950/20 mb-3">
+                <ClipboardList className="h-10 w-10 text-teal-500/60" />
               </div>
               <p className="text-sm font-medium text-muted-foreground">
                 เลือกเซสชันจากรายการด้านล่างเพื่อดูรายงานคลินิก
@@ -789,7 +814,7 @@ export function DoctorReports() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <ClipboardList className="h-4 w-4 text-emerald-600" />
+              <ClipboardList className="h-4 w-4 text-teal-600" />
               เซสชันที่สำเร็จ
               {!sessionsLoading && (
                 <Badge variant="secondary" className="font-normal tabular-nums">
@@ -824,7 +849,7 @@ export function DoctorReports() {
                         transition-all duration-150 group
                         ${
                           selectedSessionId === s.id
-                            ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 shadow-sm'
+                            ? 'bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 shadow-sm'
                             : 'bg-muted/40 hover:bg-muted border border-transparent hover:border-border'
                         }
                       `}
@@ -866,8 +891,8 @@ export function DoctorReports() {
                           </p>
                           <p className="text-[10px] text-muted-foreground">ความแม่นยำ</p>
                         </div>
-                        <div className="p-1.5 rounded-lg bg-muted group-hover:bg-emerald-100 dark:group-hover:bg-emerald-950/40 transition-colors">
-                          <Eye className="h-4 w-4 text-muted-foreground group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" />
+                        <div className="p-1.5 rounded-lg bg-muted group-hover:bg-teal-100 dark:group-hover:bg-teal-950/40 transition-colors">
+                          <Eye className="h-4 w-4 text-muted-foreground group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors" />
                         </div>
                       </div>
                     </motion.div>

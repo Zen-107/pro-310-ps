@@ -44,7 +44,7 @@ export function LoginForm({ callbackUrl, showDemoAccounts }: { callbackUrl: stri
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-600 flex items-center justify-center mx-auto mb-4">
+          <div className="w-14 h-14 rounded-2xl bg-teal-600 flex items-center justify-center mx-auto mb-4">
             <Activity className="h-7 w-7 text-white" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">AI Physio</h1>
@@ -83,7 +83,7 @@ export function LoginForm({ callbackUrl, showDemoAccounts }: { callbackUrl: stri
                   {error}
                 </p>
               )}
-              <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={submitting}>
+              <Button type="submit" className="w-full bg-teal-600 hover:bg-teal-700" disabled={submitting}>
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
                 เข้าสู่ระบบ
               </Button>

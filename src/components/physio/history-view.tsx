@@ -204,7 +204,7 @@ export function HistoryView() {
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}>
-          <Card className="border-emerald-500/20">
+          <Card className="border-teal-500/20">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
                 <History className="h-3.5 w-3.5" />
@@ -260,7 +260,7 @@ export function HistoryView() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4 text-emerald-600" />
+                  <BarChart3 className="h-4 w-4 text-teal-600" />
                   กิจกรรม 7 วันล่าสุด
                 </CardTitle>
               </CardHeader>
@@ -371,7 +371,7 @@ export function HistoryView() {
                                 variant="secondary"
                                 className={
                                   session.status === 'COMPLETED'
-                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                    ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
                                     : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                                 }
                               >

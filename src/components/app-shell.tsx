@@ -48,6 +48,8 @@ export function AppShell({ user }: { user: SessionUser }) {
   );
 
   const isDoctor = user.role === 'CLINICIAN';
+  // Clinicians work with tables and charts: wider content on large screens
+  const width = isDoctor ? 'max-w-7xl' : 'max-w-5xl';
   const currentTabs = isDoctor ? doctorTabs : patientTabs;
   // Fall back to the role's first tab if the store holds a tab from the other role
   const tab: ActiveTab = currentTabs.some((t) => t.id === activeTab) ? activeTab : currentTabs[0].id;
@@ -86,9 +88,9 @@ export function AppShell({ user }: { user: SessionUser }) {
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
           <div className="relative w-16 h-16 mx-auto mb-4">
-            <div className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping" />
-            <div className="relative w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
-              <Activity className="h-8 w-8 text-emerald-600" />
+            <div className="absolute inset-0 rounded-full bg-teal-500/20 animate-ping" />
+            <div className="relative w-16 h-16 rounded-full bg-teal-500/10 flex items-center justify-center">
+              <Activity className="h-8 w-8 text-teal-600" />
             </div>
           </div>
           <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
@@ -123,9 +125,9 @@ export function AppShell({ user }: { user: SessionUser }) {
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-lg">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+        <div className={`${width} mx-auto px-4 sm:px-6 h-14 flex items-center justify-between`}>
           <div className="flex items-center gap-2.5">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDoctor ? 'bg-slate-700' : 'bg-emerald-600'}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDoctor ? 'bg-slate-800' : 'bg-teal-600'}`}>
               {isDoctor ? <Stethoscope className="h-4.5 w-4.5 text-white" /> : <Activity className="h-4.5 w-4.5 text-white" />}
             </div>
             <div>
@@ -143,8 +145,8 @@ export function AppShell({ user }: { user: SessionUser }) {
 
       {/* Desktop Tab Navigation */}
       <nav className="hidden md:block border-b bg-background/60 backdrop-blur-sm sticky top-14 z-40">
-        <div className="max-w-5xl mx-auto px-4">
-          <div className="flex gap-1">
+        <div className={`${width} mx-auto px-4 sm:px-6`}>
+          <div className="flex gap-1 overflow-x-auto">
             {currentTabs.map((t) => {
               const Icon = t.icon;
               const isActive = tab === t.id;
@@ -152,23 +154,19 @@ export function AppShell({ user }: { user: SessionUser }) {
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
-                  className={`relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
-                    isActive
-                      ? isDoctor
-                        ? 'text-slate-700 dark:text-slate-300'
-                        : 'text-emerald-700 dark:text-emerald-400'
-                      : 'text-muted-foreground hover:text-foreground'
+                  className={`relative flex min-h-12 shrink-0 items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                    isActive ? 'text-teal-700 dark:text-teal-400' : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
                   {t.label}
                   {(t.id === 'chat' || t.id === 'messages') && unread > 0 && t.id !== tab && (
-                    <span className="ml-1 rounded-full bg-emerald-600 px-1.5 text-[10px] font-semibold text-white">{unread}</span>
+                    <span className="ml-1 rounded-full bg-teal-600 px-1.5 text-[10px] font-semibold text-white">{unread}</span>
                   )}
                   {isActive && (
                     <motion.div
                       layoutId="desktop-tab-indicator"
-                      className={`absolute bottom-0 left-0 right-0 h-0.5 rounded-full ${isDoctor ? 'bg-slate-600' : 'bg-emerald-600'}`}
+                      className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-teal-600"
                       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     />
                   )}
@@ -181,7 +179,7 @@ export function AppShell({ user }: { user: SessionUser }) {
 
       {/* Main Content */}
       <main className="flex-1">
-        <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className={`${width} mx-auto px-4 sm:px-6 py-6`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={`${user.role}-${tab}`}
@@ -232,11 +230,11 @@ export function AppShell({ user }: { user: SessionUser }) {
                 key={t.id}
                 onClick={() => setActiveTab(t.id)}
                 className={`relative flex flex-col items-center justify-center gap-0.5 w-16 h-full transition-colors ${
-                  isActive ? (isCamera ? 'text-white' : isDoctor ? 'text-slate-700 dark:text-slate-300' : 'text-emerald-700 dark:text-emerald-400') : 'text-muted-foreground'
+                  isActive ? (isCamera ? 'text-white' : 'text-teal-700 dark:text-teal-400') : 'text-muted-foreground'
                 }`}
               >
                 {isCamera ? (
-                  <div className={`w-12 h-12 -mt-5 rounded-full flex items-center justify-center shadow-lg transition-all ${isActive ? 'bg-emerald-600 shadow-emerald-600/30 scale-110' : 'bg-emerald-500/80 shadow-emerald-500/20'}`}>
+                  <div className={`w-12 h-12 -mt-5 rounded-full flex items-center justify-center shadow-lg transition-all ${isActive ? 'bg-teal-600 shadow-teal-600/30 scale-110' : 'bg-teal-500/80 shadow-teal-500/20'}`}>
                     <Icon className="h-5 w-5 text-white" />
                   </div>
                 ) : (
@@ -244,14 +242,14 @@ export function AppShell({ user }: { user: SessionUser }) {
                     <span className="relative">
                       <Icon className="h-5 w-5" />
                       {(t.id === 'chat' || t.id === 'messages') && unread > 0 && t.id !== tab && (
-                        <span className="absolute -right-2 -top-1 rounded-full bg-emerald-600 px-1 text-[9px] font-semibold text-white">{unread}</span>
+                        <span className="absolute -right-2 -top-1 rounded-full bg-teal-600 px-1 text-[9px] font-semibold text-white">{unread}</span>
                       )}
                     </span>
                     <span className="text-[10px] font-medium">{t.label}</span>
                     {isActive && (
                       <motion.div
                         layoutId="mobile-tab-indicator"
-                        className={`absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full ${isDoctor ? 'bg-slate-600' : 'bg-emerald-600'}`}
+                        className={`absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full ${isDoctor ? 'bg-slate-600' : 'bg-teal-600'}`}
                         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                       />
                     )}
@@ -272,7 +270,7 @@ export function AppShell({ user }: { user: SessionUser }) {
 function UserChip({ name, isDoctor }: { name: string; isDoctor: boolean }) {
   const tone = isDoctor
     ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-    : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400';
+    : 'bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-400';
   return (
     <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${tone}`}>
       <UserCircle className="h-3.5 w-3.5" />

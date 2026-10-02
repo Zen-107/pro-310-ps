@@ -62,12 +62,12 @@ export function DoctorMessages() {
                   setThreads((list) => list?.map((x) => (x.patientId === t.patientId ? { ...x, unread: 0 } : x)) ?? list);
                 }}
                 className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                  t.patientId === active ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30' : 'hover:bg-muted'
+                  t.patientId === active ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/30' : 'hover:bg-muted'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-medium">{t.patientName}</span>
-                  {t.unread > 0 && <Badge className="bg-emerald-600 text-white">{t.unread}</Badge>}
+                  {t.unread > 0 && <Badge className="bg-teal-600 text-white">{t.unread}</Badge>}
                 </div>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
                   {t.lastMessage ? `${t.lastMessage.mine ? 'คุณ: ' : ''}${t.lastMessage.body}` : 'ยังไม่มีข้อความ'}

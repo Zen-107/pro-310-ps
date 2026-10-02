@@ -61,6 +61,7 @@ import {
   getAngleStatus,
   getAngleStatusColor,
   ANGLE_STATUS_HEX,
+  type AngleStatus,
   LANDMARKS,
   SKELETON_CONNECTIONS,
   type Landmark,
@@ -89,7 +90,7 @@ const exerciseIconMap: Record<string, React.ReactNode> = {
 
 // ─── Difficulty badge config ───────────────────────────────────────────
 const difficultyConfig: Record<string, { label: string; className: string }> = {
-  beginner: { label: DIFFICULTY_LABELS.beginner, className: 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30' },
+  beginner: { label: DIFFICULTY_LABELS.beginner, className: 'bg-teal-500/15 text-teal-600 border-teal-500/30' },
   intermediate: { label: DIFFICULTY_LABELS.intermediate, className: 'bg-amber-500/15 text-amber-600 border-amber-500/30' },
   advanced: { label: DIFFICULTY_LABELS.advanced, className: 'bg-red-500/15 text-red-600 border-red-500/30' },
 };
@@ -213,10 +214,24 @@ async function loadScriptWithRetry(src: string, attempts = 2): Promise<void> {
 }
 
 // ─── Helper: format time MM:SS ────────────────────────────────────────
+// Brighter variants of the status colours for the overlay on live video
+const OVERLAY_COLOR: Record<string, string> = {
+  [ANGLE_STATUS_HEX.good]: '#34d399',
+  [ANGLE_STATUS_HEX.warn]: '#fbbf24',
+  [ANGLE_STATUS_HEX.bad]: '#f87171',
+};
+const OVERLAY_NEUTRAL = 'rgba(226, 242, 245, 0.85)';
+const OVERLAY_HALO = 'rgba(2, 6, 23, 0.55)';
+
 /**
  * Skeleton overlay. NOTE: selfieMode is OFF, so landmark x are raw
  * (unmirrored); <video> and <canvas> are flipped by the same CSS, so raw
  * coordinates line up with the mirrored preview.
+ *
+ * Measured joints are status-coloured (green in range, amber near, red out
+ * of range) with a gradient along each bone and a soft glow; the rest of the
+ * body is drawn in a neutral light tone. A dark halo under every line keeps
+ * it readable on bright or busy backgrounds.
  */
 function drawSkeleton(
   ctx: CanvasRenderingContext2D,
@@ -226,37 +241,153 @@ function drawSkeleton(
   colors: Record<number, string>
 ) {
   const scale = Math.max(1, width / 640);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.lineWidth = 3 * scale;
+  const colorOf = (idx: number) => (colors[idx] ? OVERLAY_COLOR[colors[idx]] ?? colors[idx] : null);
+  const segments: { ax: number; ay: number; bx: number; by: number; ca: string | null; cb: string | null }[] = [];
   for (const [i, j] of SKELETON_CONNECTIONS) {
     const a = landmarks[i];
     const b = landmarks[j];
     if (!isVisible(a) || !isVisible(b)) continue;
-    const ca = colors[i];
-    const cb = colors[j];
-    ctx.strokeStyle =
-      ca === ANGLE_STATUS_HEX.bad || cb === ANGLE_STATUS_HEX.bad
-        ? ANGLE_STATUS_HEX.bad
-        : ca === ANGLE_STATUS_HEX.warn || cb === ANGLE_STATUS_HEX.warn
-          ? ANGLE_STATUS_HEX.warn
-          : ANGLE_STATUS_HEX.good;
+    segments.push({ ax: a.x * width, ay: a.y * height, bx: b.x * width, by: b.y * height, ca: colorOf(i), cb: colorOf(j) });
+  }
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowBlur = 0;
+
+  // 1. Halo
+  ctx.strokeStyle = OVERLAY_HALO;
+  ctx.lineWidth = 9 * scale;
+  ctx.beginPath();
+  for (const s of segments) {
+    ctx.moveTo(s.ax, s.ay);
+    ctx.lineTo(s.bx, s.by);
+  }
+  ctx.stroke();
+
+  // 2. Neutral bones
+  ctx.strokeStyle = OVERLAY_NEUTRAL;
+  ctx.lineWidth = 4 * scale;
+  ctx.beginPath();
+  for (const s of segments) {
+    if (s.ca || s.cb) continue;
+    ctx.moveTo(s.ax, s.ay);
+    ctx.lineTo(s.bx, s.by);
+  }
+  ctx.stroke();
+
+  // 3. Measured bones: status gradient + glow
+  ctx.lineWidth = 5.5 * scale;
+  for (const s of segments) {
+    if (!s.ca && !s.cb) continue;
+    const ca = s.ca ?? s.cb!;
+    const cb = s.cb ?? s.ca!;
+    const grad = ctx.createLinearGradient(s.ax, s.ay, s.bx, s.by);
+    grad.addColorStop(0, ca);
+    grad.addColorStop(1, cb);
+    ctx.strokeStyle = grad;
+    ctx.shadowColor = ca;
+    ctx.shadowBlur = 14 * scale;
     ctx.beginPath();
-    ctx.moveTo(a.x * width, a.y * height);
-    ctx.lineTo(b.x * width, b.y * height);
+    ctx.moveTo(s.ax, s.ay);
+    ctx.lineTo(s.bx, s.by);
     ctx.stroke();
   }
-  ctx.lineWidth = 2 * scale;
-  ctx.strokeStyle = '#ffffff';
+  ctx.shadowBlur = 0;
+
+  // 4. Joints: measured ones larger, coloured, ringed and glowing
   for (const idx of KEY_INDICES) {
     const lm = landmarks[idx];
     if (!isVisible(lm)) continue;
+    const c = colorOf(idx);
+    const x = lm.x * width;
+    const y = lm.y * height;
     ctx.beginPath();
-    ctx.arc(lm.x * width, lm.y * height, 6 * scale, 0, 2 * Math.PI);
-    ctx.fillStyle = colors[idx] || ANGLE_STATUS_HEX.good;
+    ctx.arc(x, y, (c ? 9 : 5) * scale, 0, 2 * Math.PI);
+    ctx.fillStyle = c ?? OVERLAY_NEUTRAL;
+    if (c) {
+      ctx.shadowColor = c;
+      ctx.shadowBlur = 18 * scale;
+    }
     ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = (c ? 3 : 2) * scale;
+    ctx.strokeStyle = c ? '#ffffff' : OVERLAY_HALO;
     ctx.stroke();
   }
+}
+
+const GAUGE_STATUS_LABEL: Record<AngleStatus, string> = {
+  good: 'อยู่ในช่วงเป้าหมาย',
+  warn: 'ใกล้ช่วงเป้าหมาย',
+  bad: 'นอกช่วงเป้าหมาย',
+};
+
+/**
+ * Target ROM gauge for the HUD: a 0–180° dial with the target range as a
+ * band, the ideal angle as a tick and the live angle as a needle, coloured
+ * by status. Large type so it is readable from a few metres away.
+ */
+function RomGauge({ value, target }: { value: number | undefined; target: { nameTh: string; minAngle: number; maxAngle: number; idealAngle: number } }) {
+  const cx = 100;
+  const cy = 100;
+  const r = 80;
+  const clamp = (v: number) => Math.min(180, Math.max(0, v));
+  const pt = (v: number, radius = r) => {
+    const a = (Math.PI * clamp(v)) / 180;
+    return { x: cx - radius * Math.cos(a), y: cy - radius * Math.sin(a) };
+  };
+  const arcPath = (from: number, to: number, radius = r) => {
+    const a = pt(from, radius);
+    const b = pt(to, radius);
+    return `M${a.x.toFixed(1)},${a.y.toFixed(1)} A${radius},${radius} 0 0 1 ${b.x.toFixed(1)},${b.y.toFixed(1)}`;
+  };
+  const status = value === undefined ? null : getAngleStatus(value, target.minAngle, target.maxAngle);
+  const color = status ? OVERLAY_COLOR[ANGLE_STATUS_HEX[status]] : 'rgba(255,255,255,0.4)';
+  const needle = value === undefined ? null : pt(value, r - 4);
+  const ideal = [pt(target.idealAngle, r - 14), pt(target.idealAngle, r + 10)];
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg viewBox="0 0 200 112" className="w-[clamp(9rem,24vh,17rem)]" role="img" aria-label={`${target.nameTh} ${value === undefined ? 'ไม่พบ' : `${Math.round(value)} องศา`}`}>
+        <path d={arcPath(0, 180)} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={14} strokeLinecap="round" />
+        <path d={arcPath(target.minAngle, target.maxAngle)} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={14} />
+        <line x1={ideal[0].x} y1={ideal[0].y} x2={ideal[1].x} y2={ideal[1].y} stroke="#ffffff" strokeWidth={3} strokeLinecap="round" />
+        {needle && (
+          <>
+            <line x1={cx} y1={cy} x2={needle.x} y2={needle.y} stroke={color} strokeWidth={5} strokeLinecap="round" style={{ transition: 'all 120ms linear' }} />
+            <circle cx={needle.x} cy={needle.y} r={7} fill={color} stroke="#fff" strokeWidth={2} style={{ transition: 'all 120ms linear' }} />
+          </>
+        )}
+        <circle cx={cx} cy={cy} r={6} fill="#fff" />
+      </svg>
+      <p className="-mt-1 text-[clamp(1.75rem,6vh,3.75rem)] font-black leading-none tabular-nums" style={{ color }}>
+        {value === undefined ? '—' : `${Math.round(value)}°`}
+      </p>
+      <p className="mt-1 text-center text-[clamp(0.75rem,1.8vh,1rem)] font-semibold text-white/80">
+        {status ? GAUGE_STATUS_LABEL[status] : 'มองไม่เห็นข้อต่อ'}
+      </p>
+      <p className="text-[clamp(0.7rem,1.5vh,0.9rem)] text-white/55 tabular-nums">
+        {target.nameTh} · เป้าหมาย {target.minAngle}°–{target.maxAngle}°
+      </p>
+    </div>
+  );
+}
+
+/** Primary target, or its left/right counterpart when that side is the one closer to its range */
+function gaugeTarget<T extends { name: string; isPrimary?: boolean; minAngle: number; maxAngle: number }>(
+  targets: T[],
+  angles: Record<string, number>
+): T | null {
+  const primary = targets.find((t) => t.isPrimary) ?? targets[0];
+  if (!primary) return null;
+  const base = primary.name.replace(/^(left|right)_/, '');
+  const candidates = targets.filter((t) => t.name.replace(/^(left|right)_/, '') === base && angles[t.name] !== undefined);
+  if (!candidates.length) return primary;
+  const dist = (t: T) => {
+    const v = angles[t.name];
+    return v >= t.minAngle && v <= t.maxAngle ? 0 : Math.min(Math.abs(v - t.minAngle), Math.abs(v - t.maxAngle));
+  };
+  return candidates.reduce((best, t) => (dist(t) < dist(best) ? t : best));
 }
 
 function readPref(key: string, fallback = false): boolean {
@@ -390,7 +521,8 @@ export function LiveSessionView() {
   // Remembered per-device preferences. Only the active-session screen reads
   // them (never server-rendered), so the lazy localStorage read is hydration-safe.
   const [ttsEnabled, setTtsEnabled] = useState(() => readPref('physio.ttsEnabled', true)); // coach voice on unless muted
-  const [panelCollapsed, setPanelCollapsed] = useState(() => readPref('physio.panelCollapsed'));
+  // Focus Mode: the info panel starts collapsed; the HUD shows the essentials
+  const [panelCollapsed, setPanelCollapsed] = useState(() => readPref('physio.panelCollapsed', true));
   const [demoOpen, setDemoOpen] = useState(true);
   // Video recording (PDPA): consent is per patient, recording can be turned off per session
   const [videoConsent, setVideoConsent] = useState<{ consented: boolean; consentedAt: string | null } | null>(null);
@@ -923,6 +1055,7 @@ export function LiveSessionView() {
       setPersonVisible(false);
       setIsPaused(false);
       setElapsedSeconds(0);
+      setPanelCollapsed(true); // Focus Mode on every new session
       setPhase('active');
       lastCoachCallRef.current = Date.now(); // first coach cue after the greeting
       cueGateRef.current.allow('greeting', 'info', 'rest', Date.now());
@@ -1353,8 +1486,8 @@ export function LiveSessionView() {
         const t = attempt.target;
         const message = `Range not reached — ${attempt.deficit}° short of the target`;
         pendingFaultsRef.current.push({ type: 'INCOMPLETE_ROM', joint: t.name, measuredAngle: attempt.peakAngle, expectedMin: t.minAngle, expectedMax: t.maxAngle, deficit: attempt.deficit, message, occurredAt: now });
-        showFormCue(`Go a little further — ${Math.round(attempt.deficit)}° short of the target range`);
         const cueTarget = exercise?.targetJoints.find((tj) => tj.name === t.name);
+        showFormCue(cueTarget ? phraseForState(exercise?.slug, cueTarget, cueState(cueTarget, attempt.peakAngle)) : 'ลองขยับให้สุดช่วงอีกนิดนะครับ');
         // Direction comes from the peak angle (a shallow squat is above its range, a low arm below)
         if (cueTarget) {
           // Spoken once the patient has finished returning (see below)
@@ -1385,7 +1518,7 @@ export function LiveSessionView() {
         const stable = new Set(faultPersistRef.current.update(faults.map((f) => f.checkId), now));
         const fault = faults.find((f) => stable.has(f.checkId));
         if (fault && cue(compensationCue(fault.checkId), 'posture', `posture:${fault.checkId}`)) {
-          showFormCue(fault.message);
+          showFormCue(compensationCue(fault.checkId));
           lastCoachCallRef.current = now; // the coach doesn't talk over a correction
         }
       } else {
@@ -1482,7 +1615,7 @@ export function LiveSessionView() {
             <Card className="mb-6">
               <CardContent className="space-y-3 p-4">
                 <div className="flex flex-wrap items-start gap-3">
-                  <div className={`rounded-full p-2 ${videoConsent.consented ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-muted text-muted-foreground'}`}>
+                  <div className={`rounded-full p-2 ${videoConsent.consented ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300' : 'bg-muted text-muted-foreground'}`}>
                     {videoConsent.consented ? <ShieldCheck className="h-5 w-5" /> : <Video className="h-5 w-5" />}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -1516,7 +1649,7 @@ export function LiveSessionView() {
                     <label className="flex items-start gap-2 text-xs">
                       <input
                         type="checkbox"
-                        className="mt-0.5 h-4 w-4 accent-emerald-600"
+                        className="mt-0.5 h-4 w-4 accent-teal-600"
                         checked={consentChecked}
                         onChange={(e) => setConsentChecked(e.target.checked)}
                       />
@@ -1525,7 +1658,7 @@ export function LiveSessionView() {
                     <div className="flex gap-2">
                       <Button
                         size="sm"
-                        className="bg-emerald-600 text-white hover:bg-emerald-700"
+                        className="bg-teal-600 text-white hover:bg-teal-700"
                         disabled={!consentChecked || savingConsent}
                         onClick={() => saveVideoConsent(true)}
                       >
@@ -1559,7 +1692,7 @@ export function LiveSessionView() {
           {!loadingExercises && !loadError && (
             <section className="mb-8">
               <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-                <Target className="h-5 w-5 text-emerald-600" />
+                <Target className="h-5 w-5 text-teal-600" />
                 ภารกิจวันนี้
                 <span className="text-sm font-normal text-muted-foreground">
                   ({quests.filter((q) => q.status === 'COMPLETED').length}/{quests.length} สำเร็จ)
@@ -1577,7 +1710,7 @@ export function LiveSessionView() {
                     return (
                       <Card
                         key={quest.id}
-                        className={`${quest.id === selectedQuestId ? 'ring-2 ring-emerald-500' : ''} ${done ? 'opacity-75' : ''}`}
+                        className={`${quest.id === selectedQuestId ? 'ring-2 ring-teal-500' : ''} ${done ? 'opacity-75' : ''}`}
                       >
                         <CardContent className="space-y-2 p-4">
                           <div className="flex items-start justify-between gap-2">
@@ -1588,7 +1721,7 @@ export function LiveSessionView() {
                               </p>
                             </div>
                             {done ? (
-                              <Badge className="bg-emerald-600 text-white">
+                              <Badge className="bg-teal-600 text-white">
                                 <CheckCircle className="mr-1 h-3 w-3" /> สำเร็จ
                               </Badge>
                             ) : (
@@ -1604,7 +1737,7 @@ export function LiveSessionView() {
                             <p className="text-xs text-amber-600 dark:text-amber-400">มุมเป้าหมายปรับโดยผู้ดูแลของคุณ</p>
                           )}
                           <Button
-                            className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+                            className="w-full bg-teal-600 text-white hover:bg-teal-700"
                             size="sm"
                             disabled={connecting}
                             onClick={() => handleStartExercise({ questId: quest.id })}
@@ -1651,6 +1784,8 @@ export function LiveSessionView() {
       ? Math.round(sessionAccuracy.reduce((a, b) => a + b, 0) / sessionAccuracy.length)
       : null;
     const soundLabel = ttsEnabled ? 'ปิดเสียงโค้ช' : 'เปิดเสียงโค้ช';
+    const totalSets = selectedExercise?.sets || 3;
+    const gauge = gaugeTarget(targets, liveAngles);
 
     return (
       <div className="relative h-[100dvh] overflow-hidden bg-black">
@@ -1671,7 +1806,7 @@ export function LiveSessionView() {
         {/* Loading overlay while MediaPipe initializes */}
         {!mediaPipeLoaded && !cameraError && !mediaPipeError && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70">
-            <Loader2 className="mb-3 h-10 w-10 animate-spin text-emerald-400" />
+            <Loader2 className="mb-3 h-10 w-10 animate-spin text-teal-300" />
             <p className="text-sm font-medium text-white">กำลังเริ่มต้น AI...</p>
             <p className="mt-1 text-xs text-white/60">
               กำลังโหลดโมเดลตรวจจับท่าทาง (MediaPipe Pose) — ครั้งแรกอาจใช้เวลา 5-15 วินาที
@@ -1690,7 +1825,7 @@ export function LiveSessionView() {
         {/* No-person hint once detection is running */}
         {detectionActive && !personVisible && (
           <div className="absolute inset-x-4 top-20 z-20 mx-auto flex max-w-md items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm text-white backdrop-blur-sm lg:right-[22rem]">
-            <PersonStanding className="h-4 w-4 text-emerald-400" />
+            <PersonStanding className="h-4 w-4 text-teal-300" />
             ถอยหลังให้เห็นลำตัว/ขาทั้งข้างในกรอบกล้อง
           </div>
         )}
@@ -1715,7 +1850,7 @@ export function LiveSessionView() {
         <div className="absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent px-3 py-3 sm:px-4">
           <button
             onClick={handleStopSession}
-            className="rounded-full bg-white/10 p-2 text-white backdrop-blur-sm transition-colors hover:bg-white/20"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition-colors hover:bg-white/20"
             aria-label="หยุดเซสชัน"
           >
             <ChevronLeft className="h-5 w-5" />
@@ -1739,14 +1874,14 @@ export function LiveSessionView() {
               aria-pressed={ttsEnabled}
               aria-label={soundLabel}
               title={soundLabel}
-              className={`rounded-full p-2 backdrop-blur-sm transition-colors ${
-                ttsEnabled ? 'bg-emerald-500/90 text-white hover:bg-emerald-500' : 'bg-white/10 text-white/80 hover:bg-white/20'
+              className={`flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-sm transition-colors ${
+                ttsEnabled ? 'bg-teal-500/90 text-white hover:bg-teal-500' : 'bg-white/10 text-white/80 hover:bg-white/20'
               }`}
             >
               {ttsEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
             </button>
             <div className="flex items-center gap-1.5 rounded-full bg-black/40 px-3 py-1.5 backdrop-blur-sm">
-              <Clock className="h-4 w-4 text-emerald-400" />
+              <Clock className="h-4 w-4 text-teal-300" />
               <span className="font-mono text-sm font-semibold text-white">{formatTime(elapsedSeconds)}</span>
             </div>
           </div>
@@ -1757,10 +1892,86 @@ export function LiveSessionView() {
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
             <Pause className="mb-3 h-12 w-12 text-amber-400" />
             <p className="text-lg font-semibold text-white">หยุดชั่วคราว</p>
-            <Button className="mt-4 bg-emerald-600 text-white hover:bg-emerald-700" onClick={handleTogglePause}>
+            <Button className="mt-4 bg-teal-600 text-white hover:bg-teal-700" onClick={handleTogglePause}>
               <Play className="mr-2 h-4 w-4" />
               ดำเนินการต่อ
             </Button>
+          </div>
+        )}
+
+        {/* ─── Focus HUD: large, high-contrast, readable from 2–3 m ──── */}
+        {mediaPipeLoaded && (
+          <div
+            className={`pointer-events-none absolute inset-x-3 bottom-[9.75rem] z-20 items-stretch justify-center gap-2 sm:gap-3 lg:inset-x-auto lg:bottom-6 lg:left-6 lg:justify-start ${panelCollapsed ? 'flex' : 'hidden lg:flex'}`}
+            aria-live="polite"
+          >
+            <div className="flex min-w-[clamp(6.5rem,16vh,11rem)] flex-col justify-between rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:px-5">
+              <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-teal-300">ครั้ง</p>
+              <p className="whitespace-nowrap leading-none tabular-nums">
+                <motion.span
+                  key={`rep-${currentSet}-${currentRep}`}
+                  initial={{ scale: 1.35, color: '#5eead4' }}
+                  animate={{ scale: 1, color: '#ffffff' }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 18 }}
+                  className="inline-block origin-bottom-left text-[clamp(2.75rem,10vh,6.5rem)] font-black"
+                >
+                  {currentRep}
+                </motion.span>
+                <span className="text-[clamp(1.1rem,3.6vh,2.4rem)] font-bold text-white/55">/{repsPerSet}</span>
+              </p>
+              <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/15">
+                <div
+                  className="h-full rounded-full bg-teal-400 transition-[width] duration-300"
+                  style={{ width: `${Math.min(100, (currentRep / repsPerSet) * 100)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="flex min-w-[clamp(5.5rem,13vh,9rem)] flex-col justify-between rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:px-5">
+              <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-teal-300">เซ็ต</p>
+              <p className="whitespace-nowrap leading-none tabular-nums">
+                <span className="text-[clamp(2.75rem,10vh,6.5rem)] font-black">{currentSet}</span>
+                <span className="text-[clamp(1.1rem,3.6vh,2.4rem)] font-bold text-white/55">/{totalSets}</span>
+              </p>
+              <div className="mt-2 flex gap-1.5" aria-hidden="true">
+                {Array.from({ length: totalSets }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={`h-2.5 flex-1 rounded-full ${i < currentSet - 1 ? 'bg-teal-400' : i === currentSet - 1 ? 'bg-teal-400/50' : 'bg-white/15'}`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {gauge && (
+              <div className="hidden rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:block">
+                <RomGauge value={liveAngles[gauge.name]} target={gauge} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Current cue in large type (posture correction first, then coach) */}
+        {mediaPipeLoaded && detectionActive && personVisible && (formCue || aiFeedback) && (
+          <div className="pointer-events-none absolute inset-x-3 top-16 z-20 flex justify-center lg:inset-x-auto lg:top-20 lg:left-6 lg:right-[22rem] lg:justify-start">
+            <motion.div
+              key={formCue ?? aiFeedback}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              role="status"
+              className={`flex max-w-3xl items-start gap-3 rounded-2xl border px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:px-5 ${
+                formCue ? 'border-amber-300/60 bg-amber-500/85 text-slate-950' : 'border-white/15 bg-slate-950/75'
+              }`}
+            >
+              {formCue ? (
+                <AlertTriangle className="mt-1 h-[clamp(1.25rem,3vh,2rem)] w-[clamp(1.25rem,3vh,2rem)] shrink-0" />
+              ) : (
+                <Volume2 className="mt-1 h-[clamp(1.25rem,3vh,2rem)] w-[clamp(1.25rem,3vh,2rem)] shrink-0 text-teal-300" />
+              )}
+              <p className={`text-[clamp(1.1rem,3.2vh,2rem)] font-bold leading-snug ${formCue ? 'text-slate-950' : 'text-white'}`}>
+                {formCue ?? aiFeedback}
+              </p>
+            </motion.div>
           </div>
         )}
 
@@ -1784,7 +1995,7 @@ export function LiveSessionView() {
               <button
                 type="button"
                 onClick={togglePanel}
-                className="rounded-full p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
                 aria-expanded={!panelCollapsed}
                 aria-label={panelCollapsed ? 'ขยายแผงข้อมูล' : 'ย่อแผงข้อมูล'}
               >
@@ -1817,7 +2028,7 @@ export function LiveSessionView() {
                 {/* Joint angles */}
                 <section>
                   <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
-                    <Target className="h-3.5 w-3.5 text-emerald-400" />
+                    <Target className="h-3.5 w-3.5 text-teal-300" />
                     มุมข้อต่อปัจจุบัน
                   </h4>
                   <div className="space-y-2">
@@ -1861,7 +2072,7 @@ export function LiveSessionView() {
                 <section>
                   <div className="mb-1.5 flex items-center justify-between text-xs text-white/60">
                     <span className="flex items-center gap-1.5 font-semibold text-white/80">
-                      <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                      <CheckCircle className="h-3.5 w-3.5 text-teal-300" />
                       ความคืบหน้า (เซ็ต {currentSet})
                     </span>
                     <span className="font-mono font-bold text-white">
@@ -1909,8 +2120,8 @@ export function LiveSessionView() {
                 type="button"
                 onClick={toggleTts}
                 aria-pressed={ttsEnabled}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                  ttsEnabled ? 'bg-emerald-500/90 text-white hover:bg-emerald-500' : 'bg-white/10 text-white/80 hover:bg-white/20'
+                className={`flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors ${
+                  ttsEnabled ? 'bg-teal-500/90 text-white hover:bg-teal-500' : 'bg-white/10 text-white/80 hover:bg-white/20'
                 }`}
               >
                 {ttsEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
@@ -1919,14 +2130,14 @@ export function LiveSessionView() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleTogglePause}
-                  className="rounded-full bg-white/10 p-2.5 text-white transition-colors hover:bg-white/20"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
                   aria-label={isPaused ? 'ดำเนินการต่อ' : 'หยุดชั่วคราว'}
                 >
                   {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
                 </button>
                 <button
                   onClick={handleStopSession}
-                  className="rounded-full bg-red-500/80 p-2.5 text-white transition-colors hover:bg-red-500"
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-red-500/85 text-white transition-colors hover:bg-red-500"
                   aria-label="จบเซสชัน"
                 >
                   <Square className="h-4 w-4" />
@@ -1946,7 +2157,7 @@ export function LiveSessionView() {
     const avgAcc = summaryData.avgAccuracy;
     const accColor =
       avgAcc >= 80
-        ? 'text-emerald-500'
+        ? 'text-teal-500'
         : avgAcc >= 60
         ? 'text-amber-500'
         : 'text-red-500';
@@ -1960,7 +2171,7 @@ export function LiveSessionView() {
         >
           <Card className="overflow-hidden">
             {/* Header */}
-            <div className="bg-emerald-600 px-6 py-8 text-center text-white">
+            <div className="bg-teal-600 px-6 py-8 text-center text-white">
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
@@ -1978,7 +2189,7 @@ export function LiveSessionView() {
               {/* Stats */}
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="rounded-xl bg-muted/50 p-3">
-                  <p className="text-2xl font-bold text-emerald-600">
+                  <p className="text-2xl font-bold text-teal-600">
                     {summaryData.totalReps}
                   </p>
                   <p className="text-xs text-muted-foreground">ครั้งทั้งหมด</p>
@@ -2011,7 +2222,7 @@ export function LiveSessionView() {
                         key={idx}
                         className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold text-white ${
                           acc >= 80
-                            ? 'bg-emerald-500'
+                            ? 'bg-teal-500'
                             : acc >= 60
                             ? 'bg-amber-500'
                             : 'bg-red-500'
@@ -2043,7 +2254,7 @@ export function LiveSessionView() {
                   ฝึกอีกครั้ง
                 </Button>
                 <Button
-                  className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700"
+                  className="flex-1 bg-teal-600 text-white hover:bg-teal-700"
                   onClick={() => {
                     handleBackToHome();
                     setActiveTab('dashboard');

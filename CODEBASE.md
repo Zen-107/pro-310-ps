@@ -138,6 +138,7 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 - **POST /api/reports/[sessionId]** (CLINICIAN) — generate + store an AI clinical summary (`summarizeSession` in `src/lib/ai-agent.ts`)
 
 ### AI agent (`src/lib/ai-agent.ts`)
+- **GET /api/clinician/summary** (CLINICIAN, care team) — dashboard summary cards: sessions completed today, completed sessions awaiting review, and red flags (patient-assistant escalations in the last 7 days, latest per patient)
 - **GET /api/patients/[id]/ai-insights** (CLINICIAN, care team) — computed per-exercise trends over the last 20 completed sessions: accuracy/ROM slope, fault rate per rep (early vs recent half), top compensations, flags. No AI call
 - **POST /api/patients/[id]/ai-insights** (CLINICIAN) — same trends + AI clinical summary/recommendations (`aiError` set and trends still returned if the AI service fails)
 - **POST /api/messages/assistant** (PATIENT) — `{ body }` → AI companion answer; question (`ASSISTANT_QUESTION`) and reply (`ASSISTANT_REPLY`, no sender) are both stored in the care-team thread. Red-flag symptoms get a fixed escalation reply without calling the model (`escalated: true`). 20 questions/hour

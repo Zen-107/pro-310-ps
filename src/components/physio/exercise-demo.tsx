@@ -146,7 +146,7 @@ export function ExerciseDemo({
   const side = skel.view === 'side';
   const near = 'fill-slate-300 dark:fill-slate-500';
   const far = side ? 'fill-slate-400 dark:fill-slate-600' : near;
-  const active = 'fill-emerald-400 dark:fill-emerald-500';
+  const active = 'fill-teal-400 dark:fill-teal-500';
   const outline = 'stroke-slate-500/40 dark:stroke-slate-900/50';
 
   const highlightLegNear = ['knee', 'hip', 'hip_flexion', 'hip_opening'].includes(demo.measurement);
@@ -202,7 +202,7 @@ export function ExerciseDemo({
         {target && (
           <path
             d={arcPath(m.vertex, 22, a0 + sign * target.minAngle, sign * (target.maxAngle - target.minAngle), true)}
-            className="fill-emerald-500/15 stroke-emerald-500/40"
+            className="fill-teal-500/15 stroke-teal-500/40"
             strokeWidth={0.6}
           />
         )}

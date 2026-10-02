@@ -134,7 +134,7 @@ export function ExercisesView() {
 
                   <div>
                     <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
-                      <BookOpen className="h-4 w-4 text-emerald-600" /> ขั้นตอน
+                      <BookOpen className="h-4 w-4 text-teal-600" /> ขั้นตอน
                     </p>
                     <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                       {ex.instructions.map((step, i) => (
@@ -145,7 +145,7 @@ export function ExercisesView() {
 
                   <div>
                     <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
-                      <Target className="h-4 w-4 text-emerald-600" /> มุมเป้าหมาย
+                      <Target className="h-4 w-4 text-teal-600" /> มุมเป้าหมาย
                     </p>
                     <div className="space-y-1">
                       {targets.map((t) => (
@@ -178,7 +178,7 @@ export function ExercisesView() {
 
                   {quest ? (
                     quest.status === 'COMPLETED' ? (
-                      <div className="flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+                      <div className="flex items-center justify-between rounded-lg bg-teal-50 p-3 text-sm text-teal-700 dark:bg-teal-950/30 dark:text-teal-400">
                         <span className="flex items-center gap-1.5">
                           <CheckCircle className="h-4 w-4" /> ภารกิจวันนี้สำเร็จแล้ว
                         </span>
@@ -187,7 +187,7 @@ export function ExercisesView() {
                         </Button>
                       </div>
                     ) : (
-                      <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => startQuest(quest.id)}>
+                      <Button className="w-full bg-teal-600 hover:bg-teal-700" onClick={() => startQuest(quest.id)}>
                         <Play className="h-4 w-4" /> เริ่มภารกิจวันนี้ ({quest.exercise.sets} × {quest.exercise.repsPerSet})
                       </Button>
                     )

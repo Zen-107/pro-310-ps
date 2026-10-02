@@ -130,7 +130,7 @@ function getAccBgColor(acc: number) {
 function AlertIcon({ type }: { type: PatientAlert['type'] }) {
   switch (type) {
     case 'warning': return <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />;
-    case 'info': return <Info className="h-4 w-4 text-emerald-500 shrink-0" />;
+    case 'info': return <Info className="h-4 w-4 text-teal-500 shrink-0" />;
     case 'success': return <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />;
   }
 }
@@ -138,7 +138,7 @@ function AlertIcon({ type }: { type: PatientAlert['type'] }) {
 function AlertStyle({ type }: { type: PatientAlert['type'] }) {
   switch (type) {
     case 'warning': return 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20';
-    case 'info': return 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20';
+    case 'info': return 'border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/20';
     case 'success': return 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30';
   }
 }
@@ -366,7 +366,7 @@ export function DoctorPatients() {
               <CardContent className="p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                   {/* Avatar */}
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-teal-700 flex items-center justify-center shrink-0">
                     <User className="h-7 w-7 text-white" />
                   </div>
 
@@ -421,7 +421,7 @@ export function DoctorPatients() {
                           size="sm"
                           onClick={handleSaveNotes}
                           disabled={notesSaved || savingNotes}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                          className="bg-teal-600 hover:bg-teal-700 text-white"
                         >
                           {savingNotes ? (
                             <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
@@ -441,14 +441,14 @@ export function DoctorPatients() {
           {/* ── 4. Stats Row (4 cards) ── */}
           <motion.div variants={FADE_UP} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
-              icon={<Calendar className="h-5 w-5 text-emerald-600" />}
+              icon={<Calendar className="h-5 w-5 text-teal-600" />}
               label="เซสชันทั้งหมด"
               value={String(patient.totalSessions)}
               sub={`${patient.recentSessions7d} เซสชันใน 7 วัน`}
               delay={0}
             />
             <StatCard
-              icon={<Target className="h-5 w-5 text-emerald-600" />}
+              icon={<Target className="h-5 w-5 text-teal-600" />}
               label="ความแม่นยำเฉลี่ย"
               value={`${patient.avgAccuracy}%`}
               valueClass={getAccuracyTextColor(patient.avgAccuracy)}
@@ -466,7 +466,7 @@ export function DoctorPatients() {
             <StatCard
               icon={
                 patient.improvementTrend >= 0 ? (
-                  <TrendingUp className="h-5 w-5 text-emerald-600" />
+                  <TrendingUp className="h-5 w-5 text-teal-600" />
                 ) : (
                   <TrendingDown className="h-5 w-5 text-red-500" />
                 )
@@ -475,7 +475,7 @@ export function DoctorPatients() {
               value={`${patient.improvementTrend >= 0 ? '+' : ''}${patient.improvementTrend}%`}
               valueClass={
                 patient.improvementTrend > 0
-                  ? 'text-emerald-600 dark:text-emerald-400'
+                  ? 'text-teal-600 dark:text-teal-400'
                   : patient.improvementTrend < 0
                     ? 'text-red-600 dark:text-red-400'
                     : 'text-muted-foreground'
@@ -560,7 +560,7 @@ export function DoctorPatients() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-emerald-600" />
+                      <TrendingUp className="h-4 w-4 text-teal-600" />
                       แนวโน้มความแม่นยำ
                     </CardTitle>
                   </CardHeader>
@@ -629,7 +629,7 @@ export function DoctorPatients() {
                               onClick={() => setSelectedJoint(j)}
                               className={`text-xs px-2.5 py-1 rounded-full transition-colors font-medium ${
                                 effectiveJoint === j
-                                  ? 'bg-emerald-600 text-white shadow-sm'
+                                  ? 'bg-teal-600 text-white shadow-sm'
                                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
                               }`}
                             >
