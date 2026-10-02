@@ -152,7 +152,7 @@ export function ReportReps({ reps }: { reps: ReportRep[] }) {
         <ListOrdered className="h-4 w-4 text-emerald-600" />
         ผลรายครั้ง ({reps.length} ครั้ง)
       </h4>
-      <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto print-expand">
+      <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-muted">
             <tr className="text-left">
@@ -329,7 +329,7 @@ export function ReportFaultsPanel({ faults, totalReps }: { faults: ReportFaults;
       {faults.items.length === 0 ? (
         <p className="text-xs text-muted-foreground">ไม่พบข้อผิดพลาดของท่าทางในเซสชันนี้</p>
       ) : (
-        <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto print-expand">
+        <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto">
           <table className="w-full text-xs min-w-[520px]">
             <thead className="sticky top-0 bg-muted">
               <tr className="text-left">

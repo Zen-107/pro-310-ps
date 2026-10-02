@@ -236,10 +236,20 @@ async function main() {
 
   // ─── Organizations ────────────────────────────────────────────────
   const hospital = await db.organization.create({
-    data: { name: 'โรงพยาบาลสาธิต AI Physio (Demo Hospital)', type: 'HOSPITAL', phone: '02-000-0000' },
+    data: {
+      name: 'โรงพยาบาลสาธิต AI Physio (Demo Hospital)',
+      type: 'HOSPITAL',
+      address: 'กลุ่มงานเวชศาสตร์ฟื้นฟู 123 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพมหานคร 10000',
+      phone: '02-000-0000',
+    },
   });
   const clinic = await db.organization.create({
-    data: { name: 'คลินิกกายภาพบำบัดสาธิต (Demo PT Clinic)', type: 'CLINIC', phone: '02-000-0001' },
+    data: {
+      name: 'คลินิกกายภาพบำบัดสาธิต (Demo PT Clinic)',
+      type: 'CLINIC',
+      address: '45 ถนนตัวอย่าง ตำบลตัวอย่าง อำเภอเมือง จังหวัดตัวอย่าง 50000',
+      phone: '02-000-0001',
+    },
   });
 
   // ─── Users ────────────────────────────────────────────────────────
@@ -278,9 +288,9 @@ async function main() {
   });
 
   const patientSeeds = [
-    { email: 'patient1@demo.aiphysio.local', name: 'คุณสมชาย ใจดี', dob: '1971-03-15', gender: 'MALE', condition: 'ปวดเข่าเรื้อรัง OA Grade 2' },
-    { email: 'patient2@demo.aiphysio.local', name: 'คุณสมหญิง รักเรียน', dob: '1984-07-02', gender: 'FEMALE', condition: 'บาดเจ็บไหล่ซ้าย rotator cuff' },
-    { email: 'patient3@demo.aiphysio.local', name: 'คุณวิชัย กล้าหาญ', dob: '1966-11-20', gender: 'MALE', condition: 'ท่าเดินผิดปกติ หลังผ่าตัดเข่า' },
+    { hn: '69-00001', email: 'patient1@demo.aiphysio.local', name: 'คุณสมชาย ใจดี', dob: '1971-03-15', gender: 'MALE', condition: 'ปวดเข่าเรื้อรัง OA Grade 2' },
+    { hn: '69-00002', email: 'patient2@demo.aiphysio.local', name: 'คุณสมหญิง รักเรียน', dob: '1984-07-02', gender: 'FEMALE', condition: 'บาดเจ็บไหล่ซ้าย rotator cuff' },
+    { hn: '69-00003', email: 'patient3@demo.aiphysio.local', name: 'คุณวิชัย กล้าหาญ', dob: '1966-11-20', gender: 'MALE', condition: 'ท่าเดินผิดปกติ หลังผ่าตัดเข่า' },
   ] as const;
 
   const patients: Patient[] = [];
@@ -289,6 +299,7 @@ async function main() {
       await db.patient.create({
         data: {
           name: p.name,
+          hn: p.hn,
           dateOfBirth: new Date(p.dob),
           gender: p.gender,
           condition: p.condition,

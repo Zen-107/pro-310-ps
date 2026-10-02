@@ -75,6 +75,7 @@ interface PatientAlert {
 interface DetailedPatient {
   id: string;
   name: string;
+  hn?: string | null;
   age: number | null;
   gender: string;
   condition: string;
@@ -372,7 +373,10 @@ export function DoctorPatients() {
                   {/* Info */}
                   <div className="flex-1 min-w-0 space-y-3">
                     <div>
-                      <h3 className="text-lg font-bold">{patient.name}</h3>
+                      <h3 className="text-lg font-bold">
+                        {patient.name}
+                        {patient.hn && <span className="ml-2 align-middle text-xs font-normal text-muted-foreground">HN {patient.hn}</span>}
+                      </h3>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-sm text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Calendar className="h-3.5 w-3.5" /> อายุ {patient.age ?? '-'} ปี

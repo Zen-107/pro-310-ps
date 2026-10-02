@@ -49,6 +49,7 @@ import { evaluateFormChecks, type FormCheck } from '@/lib/form-checks';
 import { ExerciseDemo } from '@/components/physio/exercise-demo';
 import { encodeFrame, REPLAY_CHUNK_FRAMES, REPLAY_FRAME_MS, type ReplayFrame } from '@/lib/replay';
 import { SessionVideoRecorder, pickRecorderMime } from '@/lib/session-video-recorder';
+import { chime, loadVoices, pickThaiVoice, speak } from '@/lib/speech';
 import { VIDEO_CONSENT_POINTS, VIDEO_CONSENT_TITLE } from '@/lib/consent';
 import {
   calculateAllAngles,
@@ -208,6 +209,52 @@ async function loadScriptWithRetry(src: string, attempts = 2): Promise<void> {
 }
 
 // ─── Helper: format time MM:SS ────────────────────────────────────────
+/**
+ * Skeleton overlay. NOTE: selfieMode is OFF, so landmark x are raw
+ * (unmirrored); <video> and <canvas> are flipped by the same CSS, so raw
+ * coordinates line up with the mirrored preview.
+ */
+function drawSkeleton(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  landmarks: Landmark[],
+  colors: Record<number, string>
+) {
+  const scale = Math.max(1, width / 640);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 3 * scale;
+  for (const [i, j] of SKELETON_CONNECTIONS) {
+    const a = landmarks[i];
+    const b = landmarks[j];
+    if (!isVisible(a) || !isVisible(b)) continue;
+    const ca = colors[i];
+    const cb = colors[j];
+    ctx.strokeStyle =
+      ca === ANGLE_STATUS_HEX.bad || cb === ANGLE_STATUS_HEX.bad
+        ? ANGLE_STATUS_HEX.bad
+        : ca === ANGLE_STATUS_HEX.warn || cb === ANGLE_STATUS_HEX.warn
+          ? ANGLE_STATUS_HEX.warn
+          : ANGLE_STATUS_HEX.good;
+    ctx.beginPath();
+    ctx.moveTo(a.x * width, a.y * height);
+    ctx.lineTo(b.x * width, b.y * height);
+    ctx.stroke();
+  }
+  ctx.lineWidth = 2 * scale;
+  ctx.strokeStyle = '#ffffff';
+  for (const idx of KEY_INDICES) {
+    const lm = landmarks[idx];
+    if (!isVisible(lm)) continue;
+    ctx.beginPath();
+    ctx.arc(lm.x * width, lm.y * height, 6 * scale, 0, 2 * Math.PI);
+    ctx.fillStyle = colors[idx] || ANGLE_STATUS_HEX.good;
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
 function readPref(key: string): boolean {
   try {
     return typeof window !== 'undefined' && localStorage.getItem(key) === '1';
@@ -391,6 +438,10 @@ export function LiveSessionView() {
   const isPausedRef = useRef<boolean>(false);
   const ttsEnabledRef = useRef<boolean>(false);
   const thaiVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const lastChimeTextRef = useRef<string | null>(null);
+  // Latest skeleton to draw; written by pose results, painted by the rAF render loop
+  const overlayRef = useRef<{ landmarks: Landmark[]; colors: Record<number, string> } | null>(null);
+  const overlayVersionRef = useRef(0);
   const formCueRef = useRef<string | null>(null); // latest compensation cue, for the coach
   const videoRecorderRef = useRef<SessionVideoRecorder | null>(null);
   const recordVideoRef = useRef<boolean>(false); // consent && per-session toggle, read at camera start
@@ -413,8 +464,9 @@ export function LiveSessionView() {
   // Thai voice for speech feedback (voices load asynchronously)
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    // Best installed Thai voice (neural/online voices first), see lib/speech.ts
     const pick = () => {
-      thaiVoiceRef.current = window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith('th')) ?? null;
+      thaiVoiceRef.current = pickThaiVoice(window.speechSynthesis.getVoices());
     };
     pick();
     window.speechSynthesis.addEventListener('voiceschanged', pick);
@@ -635,20 +687,21 @@ export function LiveSessionView() {
   }, [flushLogs, getSessionMetrics, releaseMedia]);
 
   // ─── TTS helper ─────────────────────────────────────────────────────
-  // Speech uses the browser's built-in Web Speech API (free, Thai voices on
-  // most systems) — no server TTS service.
+  // Speech: browser Web Speech API with the best Thai voice; when the device
+  // has no Thai voice, a short Web Audio chime signals new on-screen advice
+  // instead of reading Thai with a foreign voice.
   const say = useCallback((text: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (typeof window === 'undefined') return;
+    if (!thaiVoiceRef.current || !('speechSynthesis' in window)) {
+      // Chime only when the advice changes, not for every repeated cue
+      if (text !== lastChimeTextRef.current) chime('cue');
+      lastChimeTextRef.current = text;
+      return;
+    }
     try {
-      const synth = window.speechSynthesis;
-      const utterance = new SpeechSynthesisUtterance(text.slice(0, 300));
-      utterance.lang = 'th-TH';
-      utterance.rate = 0.95;
-      if (thaiVoiceRef.current) utterance.voice = thaiVoiceRef.current;
-      synth.cancel(); // newest feedback replaces any queued line
-      synth.speak(utterance);
+      speak(text, thaiVoiceRef.current);
     } catch {
-      // Silently fail TTS
+      chime('cue');
     }
   }, []);
 
@@ -662,8 +715,8 @@ export function LiveSessionView() {
     [say]
   );
 
-  // Mute / unmute. Turning sound on speaks immediately, inside the click,
-  // which also unlocks speech in browsers that require a user gesture.
+  // Mute / unmute. Turning sound on plays immediately, inside the click,
+  // which also unlocks audio in browsers that require a user gesture.
   const toggleTts = useCallback(() => {
     const next = !ttsEnabledRef.current;
     ttsEnabledRef.current = next;
@@ -673,16 +726,38 @@ export function LiveSessionView() {
     } catch {
       // ignore
     }
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      if (next) toast.error('เบราว์เซอร์นี้ไม่รองรับเสียงพูด');
+    if (!next) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
       return;
     }
-    if (next) {
+    if (thaiVoiceRef.current) {
       say('เปิดเสียงโค้ชแล้วครับ');
-      if (!thaiVoiceRef.current) toast.message('อุปกรณ์นี้อาจไม่มีเสียงภาษาไทย — ติดตั้งเสียงภาษาไทยในระบบปฏิบัติการเพื่อเสียงที่ชัดขึ้น');
-    } else {
-      window.speechSynthesis.cancel();
+      return;
     }
+    chime('ok'); // audible confirmation right away, within the user gesture
+    // Voices may still be loading: decide once the list is available
+    void loadVoices().then((voices) => {
+      thaiVoiceRef.current = pickThaiVoice(voices);
+      if (thaiVoiceRef.current) {
+        say('เปิดเสียงโค้ชแล้วครับ');
+        return;
+      }
+      // One quiet, dismissible notice per device — never a blocking banner
+      let shown = false;
+      try {
+        shown = localStorage.getItem('physio.noThaiVoiceNotice') === '1';
+        localStorage.setItem('physio.noThaiVoiceNotice', '1');
+      } catch {
+        // ignore
+      }
+      if (!shown) {
+        toast('ไม่พบเสียงพูดภาษาไทยในอุปกรณ์นี้', {
+          description: 'ระบบจะใช้เสียงสัญญาณแทนเมื่อมีคำแนะนำใหม่ (ติดตั้งเสียงภาษาไทยในระบบปฏิบัติการเพื่อฟังเป็นคำพูด)',
+          duration: 6000,
+          closeButton: true,
+        });
+      }
+    });
   }, [say]);
 
   const togglePanel = useCallback(() => {
@@ -890,6 +965,7 @@ export function LiveSessionView() {
 
     let cancelled = false;
     let rafId = 0;
+    let videoFrameId = 0;
     let pose: PoseInstance | null = null;
 
     async function initMediaPipe() {
@@ -1022,6 +1098,16 @@ export function LiveSessionView() {
 
         // 4) Drive detection with our own rAF loop: throttles to the display
         //    refresh rate and never queues frames while the model is busy.
+        // Inference is paced by the camera: requestVideoFrameCallback fires once
+        // per decoded video frame (no duplicate work on the same frame); older
+        // browsers fall back to requestAnimationFrame.
+        const useVideoFrames = typeof HTMLVideoElement !== 'undefined' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+        const schedule = () => {
+          if (cancelled) return;
+          const v = videoRef.current;
+          if (useVideoFrames && v) videoFrameId = v.requestVideoFrameCallback(() => void sendLoop());
+          else rafId = requestAnimationFrame(() => void sendLoop());
+        };
         const sendLoop = async () => {
           if (cancelled) return;
           const v = videoRef.current;
@@ -1035,9 +1121,9 @@ export function LiveSessionView() {
               processingRef.current = false;
             }
           }
-          if (!cancelled) rafId = requestAnimationFrame(sendLoop);
+          schedule();
         };
-        rafId = requestAnimationFrame(sendLoop);
+        schedule();
       } catch (err) {
         if (cancelled) return;
         console.error('[MediaPipe init failed]', err);
@@ -1082,6 +1168,7 @@ export function LiveSessionView() {
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);
+      if (videoFrameId) videoRef.current?.cancelVideoFrameCallback?.(videoFrameId);
       // Covers a graph created but not yet handed to poseRef (init in flight)
       closePose(pose);
     };
@@ -1093,18 +1180,8 @@ export function LiveSessionView() {
       if (stoppingRef.current) return;
       const r = results as { poseLandmarks?: Landmark[]; poseWorldLandmarks?: Landmark[] };
 
-      const canvas = canvasRef.current;
       const video = videoRef.current;
-      if (!canvas || !video) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      // Match canvas to video size
-      if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      }
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!video) return;
 
       const now = Date.now();
       lastFrameTimeRef.current = now;
@@ -1118,6 +1195,8 @@ export function LiveSessionView() {
       }
       if (!rawLandmarks || !hasPerson) {
         smootherRef.current.reset();
+        overlayRef.current = null;
+        overlayVersionRef.current++;
         return;
       }
 
@@ -1164,46 +1243,9 @@ export function LiveSessionView() {
         });
       });
 
-      // Draw skeleton connections
-      // NOTE: selfieMode is OFF, so landmark.x are RAW (unmirrored) coords.
-      // Both <video> and <canvas> are flipped by the same CSS (-scale-x-100),
-      // therefore drawing raw coordinates aligns the skeleton exactly with the
-      // mirrored body in the preview — no extra flip needed here.
-      SKELETON_CONNECTIONS.forEach(([i, j]) => {
-        const lm1 = landmarks[i];
-        const lm2 = landmarks[j];
-        if (!isVisible(lm1) || !isVisible(lm2)) return;
-
-        const c1 = jointColorMap[i];
-        const c2 = jointColorMap[j];
-        let lineColor = ANGLE_STATUS_HEX.good;
-        if (c1 === ANGLE_STATUS_HEX.bad || c2 === ANGLE_STATUS_HEX.bad) {
-          lineColor = ANGLE_STATUS_HEX.bad;
-        } else if (c1 === ANGLE_STATUS_HEX.warn || c2 === ANGLE_STATUS_HEX.warn) {
-          lineColor = ANGLE_STATUS_HEX.warn;
-        }
-
-        ctx.beginPath();
-        ctx.moveTo(lm1.x * canvas.width, lm1.y * canvas.height);
-        ctx.lineTo(lm2.x * canvas.width, lm2.y * canvas.height);
-        ctx.strokeStyle = lineColor;
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-      });
-
-      // Draw joint circles
-      KEY_INDICES.forEach((idx) => {
-        const lm = landmarks[idx];
-        if (!isVisible(lm)) return;
-        ctx.beginPath();
-        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 6, 0, 2 * Math.PI);
-        ctx.fillStyle = jointColorMap[idx] || ANGLE_STATUS_HEX.good;
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      });
+      // Hand the frame to the render loop (drawn on the next animation frame)
+      overlayRef.current = { landmarks, colors: jointColorMap };
+      overlayVersionRef.current++;
 
       // ─── Rep detection (see lib/rep-counter.ts) ────────────────────
       const showFormCue = (message: string) => {
@@ -1298,6 +1340,37 @@ export function LiveSessionView() {
     },
     [callCoach, flushLogs, handleStopSession]
   );
+
+  // ─── Skeleton render loop ───────────────────────────────────────────
+  // Paints the latest smoothed landmarks on every animation frame in which
+  // they changed, decoupled from inference callbacks (no drawing work inside
+  // MediaPipe's callback, no tearing). The canvas backing store follows the
+  // video's resolution; line widths scale with it.
+  useEffect(() => {
+    if (phase !== 'active') return;
+    let raf = 0;
+    let drawnVersion = -1;
+    const render = () => {
+      raf = requestAnimationFrame(render);
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (!canvas || !video || video.videoWidth === 0) return;
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        drawnVersion = -1;
+      }
+      if (overlayVersionRef.current === drawnVersion) return;
+      drawnVersion = overlayVersionRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const overlay = overlayRef.current;
+      if (overlay) drawSkeleton(ctx, canvas.width, canvas.height, overlay.landmarks, overlay.colors);
+    };
+    raf = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(raf);
+  }, [phase]);
 
   // Keep the ref pointed at the newest handler so the once-registered
   // pose.onResults callback never runs a stale closure.

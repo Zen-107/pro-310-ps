@@ -228,6 +228,7 @@ model Patient {
   userId         String?   @unique
   organizationId String
   name           String
+  hn             String? // Hospital Number, unique within the organization
   dateOfBirth    DateTime? @db.Date
   gender         Gender    @default(UNSPECIFIED)
   condition      String?
@@ -252,6 +253,7 @@ model Patient {
   messages        CareMessage[]
   threadReads     CareThreadRead[]
 
+  @@unique([organizationId, hn])
   @@index([organizationId])
   @@map("patients")
 }

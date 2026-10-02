@@ -5,7 +5,8 @@ import { sessionScope } from '@/lib/access';
 import { jsonError, notFound, serverError } from '@/lib/api-utils';
 import { ANGLE_DEFINITION, JOINT_FORMULAS } from '@/lib/joint-formulas';
 import { summarizeSession } from '@/lib/ai-agent';
-import { displayText, TEXT_LIMITS, type TargetDTO } from '@/lib/presenters';
+import { displayText, GENDER_LABEL_TH, TEXT_LIMITS, type TargetDTO } from '@/lib/presenters';
+import { ageFromDob } from '@/lib/dates';
 
 type Params = { params: Promise<{ sessionId: string }> };
 
@@ -25,7 +26,24 @@ async function loadSession(user: SessionUser, id: string) {
     where: { AND: [{ id }, sessionScope(user)] },
     include: {
       exercise: true,
-      patient: { select: { name: true } },
+      patient: {
+        select: {
+          name: true,
+          hn: true,
+          dateOfBirth: true,
+          gender: true,
+          condition: true,
+          organization: { select: { name: true, address: true, phone: true } },
+          // Fallback attending clinician when the session has no prescriber
+          careAssignments: {
+            where: { role: 'PRIMARY' },
+            take: 1,
+            select: { clinician: { select: { title: true, licenseNumber: true, user: { select: { name: true } } } } },
+          },
+        },
+      },
+      clinician: { select: { title: true, licenseNumber: true, user: { select: { name: true } } } },
+      prescription: { select: { title: true } },
       reps: { orderBy: { repNumber: 'asc' } },
       logs: true,
       faults: { orderBy: { occurredAt: 'asc' }, include: { rep: { select: { repNumber: true } } } },
@@ -77,10 +95,25 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
   const incompleteDeficits = s.faults.filter((f) => f.type === 'INCOMPLETE_ROM' && f.deficit !== null).map((f) => f.deficit as number);
 
   const stored = s.reports[0];
+  const attending = s.clinician ?? s.patient.careAssignments[0]?.clinician ?? null;
+  // Document reference: PT-<BE yyyymmdd>-<session suffix>, stable per session
+  const d = s.startedAt;
+  const ymd = `${d.getFullYear() + 543}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   return {
     sessionId: s.id,
+    documentNumber: `PT-${ymd}-${s.id.slice(-6).toUpperCase()}`,
     patientName: s.patient.name,
-    exerciseName: s.exercise.name,
+    patient: {
+      name: s.patient.name,
+      hn: s.patient.hn,
+      age: ageFromDob(s.patient.dateOfBirth),
+      gender: GENDER_LABEL_TH[s.patient.gender],
+      condition: displayText(s.patient.condition, TEXT_LIMITS.condition),
+    },
+    organization: s.patient.organization,
+    attending: attending && { name: attending.user.name, title: attending.title, licenseNumber: attending.licenseNumber },
+    prescriptionTitle: s.prescription?.title ?? null,
+    exerciseName: s.exercise.nameTh,
     exerciseNameEn: s.exercise.name,
     category: s.exercise.category,
     status: s.status,

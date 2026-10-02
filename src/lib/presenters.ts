@@ -178,6 +178,7 @@ export function totalMinutes(sessions: CompletedSessionLite[]): number {
 export function patientBasics(p: {
   id: string;
   name: string;
+  hn?: string | null;
   dateOfBirth: Date | null;
   gender: Gender;
   condition: string | null;
@@ -186,6 +187,7 @@ export function patientBasics(p: {
   return {
     id: p.id,
     name: p.name,
+    hn: p.hn ?? null,
     age: ageFromDob(p.dateOfBirth),
     dateOfBirth: p.dateOfBirth?.toISOString().slice(0, 10) ?? null,
     gender: GENDER_LABEL_TH[p.gender],

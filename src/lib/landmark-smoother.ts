@@ -68,6 +68,39 @@ export class OneEuroFilter {
   }
 }
 
+// ─── Presence & left/right continuity ───────────────────────────────
+
+/** Landmarks predicted outside the image (± margin) count as not present */
+const FRAME_MARGIN = 0.02;
+
+/**
+ * MediaPipe index pairs (left, right) that can be mislabelled together.
+ * Upper = face, shoulders, arms, hands; lower = hips, legs, feet. When a
+ * patient turns sideways or a limb is occluded the model sometimes swaps a
+ * whole side for a few frames; the groups are corrected independently.
+ */
+const SWAP_GROUPS: [number, number][][] = [
+  [[1, 4], [2, 5], [3, 6], [7, 8], [9, 10], [11, 12], [13, 14], [15, 16], [17, 18], [19, 20], [21, 22]],
+  [[23, 24], [25, 26], [27, 28], [29, 30], [31, 32]],
+];
+
+/** A swap is accepted only if it is clearly more continuous than keeping the labels */
+const SWAP_RATIO = 0.6;
+const SWAP_MIN_GAIN = 0.02; // normalized image units per compared pair
+/** Shoulder/hip spread (normalized x) above which the person faces the camera: trust the model */
+const FRONTAL_SPREAD = 0.12;
+/** Previous frame older than this is too stale for a continuity check */
+const CONTINUITY_MAX_GAP_MS = 400;
+const CONTINUITY_MIN_VIS = 0.3;
+
+function swapPairs<T>(arr: T[], pairs: [number, number][]) {
+  for (const [l, r] of pairs) {
+    if (l < arr.length && r < arr.length) [arr[l], arr[r]] = [arr[r], arr[l]];
+  }
+}
+
+const dist2d = (a: Landmark, b: Landmark) => Math.hypot(a.x - b.x, a.y - b.y);
+
 interface Track {
   tracked: boolean;
   visibility: number | null;
@@ -77,8 +110,70 @@ interface Track {
 
 export class LandmarkSmoother {
   private tracks: Track[] = [];
+  /** Per SWAP_GROUPS entry: true while the model's left/right labels are being swapped back */
+  private swapped: boolean[] = SWAP_GROUPS.map(() => false);
+  private lastOut: Landmark[] | null = null;
+  private lastT = 0;
 
   constructor(private readonly params: OneEuroParams = DEFAULT_ONE_EURO) {}
+
+  /** true when the last process() call corrected a left/right label swap */
+  get correctingSwap(): boolean {
+    return this.swapped.some(Boolean);
+  }
+
+  /**
+   * Left/right continuity: compare the frame (with the current correction
+   * applied) against the previous smoothed output. If swapping a group's
+   * labels is clearly more continuous, toggle that group's correction; when
+   * ambiguous (limbs crossing) the current mapping is kept. Facing the
+   * camera, the model's labels are reliable, so corrections are cleared.
+   */
+  private fixLabels(image: Landmark[], world: Landmark[] | null, t: number) {
+    const prev = this.lastOut;
+    const fresh = prev && t - this.lastT <= CONTINUITY_MAX_GAP_MS;
+
+    SWAP_GROUPS.forEach((pairs, g) => {
+      if (this.swapped[g]) {
+        swapPairs(image, pairs);
+        if (world) swapPairs(world, pairs);
+      }
+      if (!fresh) return;
+
+      // Frontal view: wide shoulder (upper) / hip (lower) spread → trust labels
+      const [l, r] = g === 0 ? [11, 12] : [23, 24];
+      const spread = Math.abs(image[l].x - image[r].x);
+      const confident = (image[l].visibility ?? 0) > 0.6 && (image[r].visibility ?? 0) > 0.6;
+      if (confident && spread > FRONTAL_SPREAD && this.swapped[g]) {
+        swapPairs(image, pairs); // undo correction
+        if (world) swapPairs(world, pairs);
+        this.swapped[g] = false;
+        return;
+      }
+
+      let keep = 0;
+      let cross = 0;
+      let n = 0;
+      for (const [li, ri] of pairs) {
+        const a = image[li];
+        const b = image[ri];
+        const pa = prev[li];
+        const pb = prev[ri];
+        if (!a || !b || !pa || !pb) continue;
+        const usable = [a, b, pa, pb].every((p) => (p.visibility ?? 0) >= CONTINUITY_MIN_VIS);
+        if (!usable) continue;
+        keep += dist2d(a, pa) + dist2d(b, pb);
+        cross += dist2d(a, pb) + dist2d(b, pa);
+        n++;
+      }
+      if (n < 2) return;
+      if (cross < keep * SWAP_RATIO && keep - cross > SWAP_MIN_GAIN * n) {
+        swapPairs(image, pairs);
+        if (world) swapPairs(world, pairs);
+        this.swapped[g] = !this.swapped[g];
+      }
+    });
+  }
 
   private track(i: number): Track {
     const make = () => new OneEuroFilter(this.params);
@@ -93,6 +188,8 @@ export class LandmarkSmoother {
   /** Forget all state (e.g. when the person leaves the frame). */
   reset() {
     this.tracks = [];
+    this.swapped = SWAP_GROUPS.map(() => false);
+    this.lastOut = null;
   }
 
   /**
@@ -109,10 +206,18 @@ export class LandmarkSmoother {
     const outImage: Landmark[] = [];
     const outWorld: Landmark[] = [];
 
+    // Work on copies: label correction reorders entries
+    image = image.slice();
+    world = hasWorld ? world!.slice() : null;
+    this.fixLabels(image, world, timestampMs);
+
     for (let i = 0; i < image.length; i++) {
       const tr = this.track(i);
       const raw = image[i];
-      const rawVis = raw.visibility ?? 0;
+      // Presence: predictions outside the frame are guesses, not detections
+      const inFrame =
+        raw.x >= -FRAME_MARGIN && raw.x <= 1 + FRAME_MARGIN && raw.y >= -FRAME_MARGIN && raw.y <= 1 + FRAME_MARGIN;
+      const rawVis = inFrame ? raw.visibility ?? 0 : 0;
       tr.visibility = tr.visibility === null ? rawVis : tr.visibility + VISIBILITY_EMA * (rawVis - tr.visibility);
 
       if (!tr.tracked && tr.visibility >= VISIBILITY_ON) {
@@ -144,6 +249,8 @@ export class LandmarkSmoother {
         if (hasWorld) outWorld.push({ ...world![i], visibility });
       }
     }
+    this.lastOut = outImage;
+    this.lastT = timestampMs;
     return { image: outImage, world: hasWorld ? outWorld : null };
   }
 }

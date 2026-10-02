@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import ReactMarkdown from 'react-markdown';
+import { ClinicalSummaryMarkdown, ReportPrintDocument, type PrintableReport } from '@/components/physio/report-print';
 import { useAppStore } from '@/lib/store';
 import { categoryLabel } from '@/lib/exercises-data';
 import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
@@ -89,7 +89,7 @@ interface JointReport {
   accuracy: number;
 }
 
-interface ReportData {
+interface ReportData extends PrintableReport {
   sessionId: string;
   patientName: string;
   exerciseName: string;
@@ -405,46 +405,8 @@ export function DoctorReports() {
             transition={{ duration: 0.3 }}
           >
             <Card className="border-emerald-500/20 overflow-hidden" data-print-root>
-              {/* Print-only document header (EMR) */}
-              {report && (
-                <div data-print-only className="border-b-2 border-black px-1 pb-3 mb-2 text-black">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-lg font-bold">รายงานผลการฝึกกายภาพบำบัด (Clinical Session Report)</p>
-                      <p className="text-xs">AI Physio · ข้อมูลจากการตรวจจับท่าทางด้วยกล้อง ใช้ประกอบการตรวจร่างกายโดยแพทย์/นักกายภาพบำบัด</p>
-                    </div>
-                    <div className="text-right text-[10px] leading-tight">
-                      <p>Session ID: {report.sessionId}</p>
-                      <p>พิมพ์เมื่อ: {new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}</p>
-                    </div>
-                  </div>
-                  <table className="mt-2 w-full text-xs">
-                    <tbody>
-                      <tr>
-                        <td className="py-0.5 pr-2 font-semibold w-28">ผู้ป่วย</td>
-                        <td className="py-0.5">
-                          {report.patientName}
-                          {activePatient?.age != null && ` · อายุ ${activePatient.age} ปี`}
-                          {activePatient?.gender && ` · ${activePatient.gender}`}
-                        </td>
-                        <td className="py-0.5 pr-2 font-semibold w-28">ท่าฝึก</td>
-                        <td className="py-0.5">
-                          {report.exerciseName} ({categoryLabel(report.category)})
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="py-0.5 pr-2 font-semibold">ภาวะ/การวินิจฉัย</td>
-                        <td className="py-0.5">{activePatient?.condition || '—'}</td>
-                        <td className="py-0.5 pr-2 font-semibold">วันเวลาฝึก</td>
-                        <td className="py-0.5">
-                          {new Date(report.startedAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}
-                          {report.endedAt && ` – ${new Date(report.endedAt).toLocaleTimeString('th-TH', { timeStyle: 'short' })}`}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              {/* Official printed document (only visible when printing) */}
+              {report && <ReportPrintDocument report={report} />}
 
               {/* Report header */}
               <div data-print-hide className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-4 text-white">
@@ -456,7 +418,7 @@ export function DoctorReports() {
                     <div className="min-w-0">
                       <h3 className="font-semibold truncate">
                         {report
-                          ? report.exerciseName
+                          ? `${report.patient.name}${report.patient.hn ? ` (HN ${report.patient.hn})` : ''} · ${report.exerciseName}`
                           : 'กำลังสร้างรายงาน...'}
                       </h3>
                       <p className="text-xs text-slate-300 truncate">
@@ -496,7 +458,7 @@ export function DoctorReports() {
                 </div>
               </div>
 
-              <CardContent className="p-5 sm:p-6 space-y-6">
+              <CardContent data-print-hide className="p-5 sm:p-6 space-y-6">
                 {/* Loading spinner state */}
                 {(generating || loadingReport) && !report && (
                   <div className="py-16 flex flex-col items-center">
@@ -701,9 +663,6 @@ export function DoctorReports() {
 
                     <ReportFaultsPanel faults={report.faults} totalReps={report.totalReps} />
 
-                    <p data-print-only className="text-xs italic">
-                      Clinical Session Replay และวิดีโอการฝึก (ถ้ามี) ดูได้ในระบบอิเล็กทรอนิกส์ — Session ID {report.sessionId}
-                    </p>
                     <div data-print-hide>
                     <ClinicalSessionReplay
                       key={`replay-${report.sessionId}`}
@@ -729,7 +688,10 @@ export function DoctorReports() {
                       </h4>
                       <div className="prose prose-sm max-w-none dark:prose-invert p-5 rounded-xl bg-muted/40 border border-dashed border-muted-foreground/20 prose-headings:text-emerald-700 dark:prose-headings:text-emerald-400 prose-strong:text-foreground prose-li:marker:text-amber-500">
                         {report.clinicalSummary ? (
-                          <ReactMarkdown>{report.clinicalSummary}</ReactMarkdown>
+                          <ClinicalSummaryMarkdown
+                            content={report.clinicalSummary}
+                            jointNames={Object.fromEntries(report.jointReport.map((j) => [j.joint, j.nameTh]))}
+                          />
                         ) : (
                           <div className="not-prose flex flex-col items-center gap-2 py-4 text-center">
                             <p className="text-sm text-muted-foreground">ยังไม่มีสรุปคลินิกสำหรับเซสชันนี้</p>
@@ -757,20 +719,6 @@ export function DoctorReports() {
                       </>
                     )}
 
-                    {/* Print-only sign-off for the medical record */}
-                    <div data-print-only className="print-avoid-break pt-6 text-xs text-black">
-                      <div className="grid grid-cols-2 gap-10">
-                        <div>
-                          <div className="mt-10 border-t border-black pt-1">ลงชื่อ แพทย์ / นักกายภาพบำบัดผู้ตรวจสอบ</div>
-                          <div className="mt-1">( ............................................................ )</div>
-                          <div className="mt-1">เลขที่ใบอนุญาต ......................... วันที่ ..........................</div>
-                        </div>
-                        <div className="text-[10px] leading-relaxed">
-                          ข้อมูลมุมข้อต่อคำนวณจาก MediaPipe Pose ({report.algorithmVersion}) เป้าหมายและวิธีคำนวณแสดงไว้ในรายงาน
-                          สรุปที่สร้างโดย AI ต้องได้รับการตรวจสอบโดยบุคลากรทางการแพทย์ก่อนใช้ในการตัดสินใจทางคลินิก
-                        </div>
-                      </div>
-                    </div>
                   </>
                 )}
               </CardContent>

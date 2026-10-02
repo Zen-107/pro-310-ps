@@ -16,6 +16,7 @@ import { db } from '@/lib/db';
 import { parseFormChecks } from '@/lib/form-checks';
 import { mergeTargets } from '@/lib/presenters';
 import { cleanText, safeTruncate } from '@/lib/text-safe';
+import { cleanClinicalSummary, thaiMeasurementName } from '@/lib/clinical-markdown';
 
 // ─── Model access ────────────────────────────────────────────────────
 // Every supported provider exposes an OpenAI-compatible Chat Completions
@@ -182,6 +183,7 @@ export interface SessionReportInput {
   angleDefinition: string;
   scoring: Record<string, string>;
   jointReport: {
+    joint?: string;
     nameTh: string;
     formula: string | null;
     target: { idealAngle: number; minAngle: number; maxAngle: number } | null;
@@ -199,47 +201,51 @@ export interface SessionReportInput {
   };
 }
 
-const REPORTER_SYSTEM = 'คุณคือนักกายภาพบำบัดที่เขียนรายงานคลินิก ใช้ภาษาไทยที่เป็นมืออาชีพ แต่อ่านง่าย';
+const REPORTER_SYSTEM = `คุณคือนักกายภาพบำบัดที่เขียนบันทึกทางคลินิกลงเวชระเบียน ใช้ภาษาไทยทางการแพทย์ที่สุภาพ กระชับ อ่านง่าย
+กฎการเขียน:
+- ไม่ต้องเขียนหัวรายงาน ชื่อผู้ป่วย HN วันที่ หรือข้อมูลประจำตัวใดๆ (ระบบใส่ไว้ในหัวเอกสารแล้ว) เริ่มที่หัวข้อแรกทันที
+- ไม่ใช้ตาราง ไม่ใช้เส้นคั่น (---) ใช้หัวข้อระดับ ### และย่อหน้า/รายการสั้นๆ เท่านั้น (ตารางตัวเลขระบบแสดงแยกไว้แล้ว)
+- เรียกข้อต่อด้วยชื่อภาษาไทยตามที่ให้มาเท่านั้น ห้ามใช้ชื่อตัวแปรภาษาอังกฤษ สูตร หรือรหัส เช่น left_knee, angle(...), INCOMPLETE_ROM
+- อ้างอิงเฉพาะตัวเลขที่ให้มา ห้ามแต่งข้อมูลเพิ่ม และระบุข้อจำกัดเมื่อข้อมูลน้อย
+- ห้ามวินิจฉัยโรคหรือเปลี่ยนแผนการรักษา ข้อเสนอแนะเป็นประเด็นให้ผู้ดูแลพิจารณา`;
+
+const FAULT_LABEL_TH = { INCOMPLETE_ROM: 'ทำไม่สุดระยะ', COMPENSATION: 'ท่าชดเชย', LOW_ACCURACY: 'ความแม่นยำต่ำ' } as const;
 
 export async function summarizeSession(report: SessionReportInput): Promise<AgentText> {
+  // Thai names only: identifiers and formulas in the prompt end up in the text
   const jointLines = report.jointReport
     .map((j) => {
-      const range = j.target ? `เป้าหมาย ${j.target.minAngle}–${j.target.maxAngle}° (ideal ${j.target.idealAngle}°)` : 'ไม่มีเป้าหมาย';
-      return `- ${j.nameTh} [${j.formula ?? '-'}]: เฉลี่ย ${j.avgAngle}° (ต่ำสุด ${j.minAngle}°, สูงสุด ${j.maxAngle}°), ${range}, ถูกต้อง ${j.accuracy}% จาก ${j.samples} ครั้ง`;
+      const range = j.target ? `ช่วงเป้าหมาย ${j.target.minAngle}–${j.target.maxAngle}° (ค่าที่เหมาะสม ${j.target.idealAngle}°)` : 'ไม่มีช่วงเป้าหมาย';
+      return `- ${j.nameTh}: เฉลี่ย ${j.avgAngle}° (ต่ำสุด ${j.minAngle}°, สูงสุด ${j.maxAngle}°), ${range}, อยู่ในช่วงเป้าหมาย ${j.accuracy}% ของ ${j.samples} ครั้ง`;
     })
     .join('\n');
+  const names = Object.fromEntries(report.jointReport.filter((j) => j.joint).map((j) => [j.joint!, j.nameTh]));
+  const primaryTh = report.primaryJoint ? thaiMeasurementName(report.primaryJoint, names) : '-';
+  const minutes = report.endedAt ? Math.max(1, Math.round((report.endedAt.getTime() - report.startedAt.getTime()) / 60000)) : null;
 
-  const prompt = `สร้าง Clinical Summary Report สำหรับนักกายภาพบำบัด
+  const prompt = `ข้อมูลการฝึก:
+- ท่าฝึก: ${report.exerciseName}${report.exerciseNameEn && report.exerciseNameEn !== report.exerciseName ? ` (${report.exerciseNameEn})` : ''}
+- ระยะเวลา: ${minutes ? `ประมาณ ${minutes} นาที` : 'ไม่ทราบ'}
+- จำนวนครั้งที่นับได้: ${report.totalReps} ครั้ง, ความแม่นยำเฉลี่ย ${report.avgAccuracy}%
+- ช่วงการเคลื่อนไหว (ROM) ของ${primaryTh}: ${report.maxRom}° (จาก ${report.romMinAngle ?? '-'}° ถึง ${report.romMaxAngle ?? '-'}°)
 
-ข้อมูลเซสชัน:
-- ท่าทาง: ${report.exerciseName} (${report.exerciseNameEn}), หมวด ${report.category}
-- เวลา: ${report.startedAt.toLocaleString('th-TH')} – ${report.endedAt?.toLocaleString('th-TH') ?? '-'}
-- จำนวนครั้ง: ${report.totalReps}, ความแม่นยำเฉลี่ย ${report.avgAccuracy}%
-- ROM (${report.primaryJoint ?? '-'}): ${report.maxRom}° (ช่วง ${report.romMinAngle ?? '-'}° – ${report.romMaxAngle ?? '-'}°)
-
-วิธีคำนวณ:
-- มุม: ${report.angleDefinition}
-- ${report.scoring.accuracy}
-- ${report.scoring.rom}
-
-ข้อมูลข้อต่อแต่ละจุด:
+มุมข้อต่อที่วัดได้:
 ${jointLines || '- ไม่มีข้อมูลข้อต่อ'}
 
 ข้อผิดพลาดของท่าทาง:
-- ครั้งที่ไม่ถูกต้อง: ${report.faults.incorrectReps} จาก ${report.totalReps}
-- ทำไม่สุดระยะ (INCOMPLETE_ROM): ${report.faults.counts.INCOMPLETE_ROM} ครั้ง${report.faults.avgIncompleteDeficit !== null ? ` (ขาดเฉลี่ย ${report.faults.avgIncompleteDeficit}°)` : ''}
-- ท่าชดเชย (COMPENSATION): ${report.faults.compensations.map((c) => `${c.message} ×${c.count}`).join(', ') || 'ไม่พบ'}
-- ความแม่นยำต่ำ (LOW_ACCURACY): ${report.faults.counts.LOW_ACCURACY} ครั้ง
+- ครั้งที่ไม่ถูกต้อง: ${report.faults.incorrectReps} จาก ${report.totalReps} ครั้ง
+- ${FAULT_LABEL_TH.INCOMPLETE_ROM}: ${report.faults.counts.INCOMPLETE_ROM} ครั้ง${report.faults.avgIncompleteDeficit !== null ? ` (ขาดจากช่วงเป้าหมายเฉลี่ย ${report.faults.avgIncompleteDeficit}°)` : ''}
+- ${FAULT_LABEL_TH.COMPENSATION}: ${report.faults.compensations.map((c) => `"${c.message}" ${c.count} ครั้ง`).join(', ') || 'ไม่พบ'} (ข้อความท่าชดเชยเป็นภาษาอังกฤษ ให้สรุปเป็นภาษาไทย)
+- ${FAULT_LABEL_TH.LOW_ACCURACY}: ${report.faults.counts.LOW_ACCURACY} ครั้ง
 
-กรุณาสรุปเป็นรายงานคลินิกภาษาไทย 3-4 ย่อหน้า:
-1. สรุปผลการฝึก
-2. การวิเคราะห์ข้อต่อแต่ละจุด (อ้างอิงตัวเลขด้านบน)
-3. คำแนะนำสำหรับครั้งต่อไป
-4. ระดับความเสี่ยง (ถ้ามี)
+เขียนบันทึกทางคลินิก 4 หัวข้อ:
+### 1. สรุปผลการฝึก
+### 2. การประเมินมุมข้อต่อและช่วงการเคลื่อนไหว
+### 3. ข้อเสนอแนะสำหรับการฝึกครั้งต่อไป
+### 4. ข้อควรระวัง (ถ้ามี)`;
 
-หมายเหตุ: ข้อมูลมาจากการตรวจจับท่าทางด้วย AI แพทย์ควรพิจารณาร่วมกับการตรวจร่างกาย ห้ามเปลี่ยนแผนการรักษาเอง`;
-
-  return complete(REPORTER_SYSTEM, prompt);
+  const result = await complete(REPORTER_SYSTEM, prompt);
+  return { ...result, content: cleanClinicalSummary(result.content, names) };
 }
 
 // ─── 1b. Fault-trend analysis across sessions ────────────────────────

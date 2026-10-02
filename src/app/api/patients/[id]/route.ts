@@ -144,6 +144,11 @@ export async function PATCH(req: Request, { params }: Params) {
   }
   if (body.condition !== undefined) data.condition = optionalString(body.condition) ?? null;
   if (body.phone !== undefined) data.phone = optionalString(body.phone, 50) ?? null;
+  if (body.hn !== undefined) {
+    const hn = optionalString(body.hn, 30) ?? null;
+    if (hn && !/^[A-Za-z0-9\-\/]{1,30}$/.test(hn)) return badRequest('hn may contain letters, digits, - and / (max 30)');
+    data.hn = hn;
+  }
   // `therapistNotes` accepted as an alias used by older screens
   const notes = body.clinicalNotes ?? body.therapistNotes;
   if (notes !== undefined) data.clinicalNotes = optionalString(notes, 10000) ?? null;
