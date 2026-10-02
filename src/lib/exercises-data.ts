@@ -1,3 +1,5 @@
+import type { FormCheck } from './form-checks';
+
 export interface TargetJoint {
   name: string;
   nameTh: string;
@@ -22,6 +24,8 @@ export interface ExerciseData {
   restSeconds: number;
   icon: string;
   bodyPart: string;
+  /** Compensation checks evaluated at each rep's best moment (see form-checks.ts) */
+  formChecks?: FormCheck[];
 }
 
 export const EXERCISES: ExerciseData[] = [
@@ -61,6 +65,15 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "Footprints",
     bodyPart: "lower",
+    formChecks: [
+      {
+        "id": "other_leg_straight",
+        "type": "min",
+        "measurement": "{other}_knee",
+        "threshold": 160,
+        "message": "Keep the other leg straight on the surface"
+      }
+    ],
   },
   {
     name: "Straight Leg Raise",
@@ -102,6 +115,15 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "ArrowUpFromLine",
     bodyPart: "lower",
+    formChecks: [
+      {
+        "id": "lifted_knee_straight",
+        "type": "min",
+        "measurement": "{side}_knee",
+        "threshold": 160,
+        "message": "Keep the lifted knee straight"
+      }
+    ],
   },
   {
     name: "Shoulder Flexion",
@@ -139,6 +161,22 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "MoveUp",
     bodyPart: "upper",
+    formChecks: [
+      {
+        "id": "elbow_straight",
+        "type": "min",
+        "measurement": "{side}_elbow",
+        "threshold": 150,
+        "message": "Keep your elbow straight"
+      },
+      {
+        "id": "trunk_upright",
+        "type": "min",
+        "measurement": "{side}_hip",
+        "threshold": 160,
+        "message": "Keep your trunk upright — do not lean back"
+      }
+    ],
   },
   {
     name: "Shoulder Abduction",
@@ -176,6 +214,22 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "MoveHorizontal",
     bodyPart: "upper",
+    formChecks: [
+      {
+        "id": "elbow_straight",
+        "type": "min",
+        "measurement": "{side}_elbow",
+        "threshold": 150,
+        "message": "Keep your elbow straight"
+      },
+      {
+        "id": "trunk_upright",
+        "type": "min",
+        "measurement": "{side}_hip",
+        "threshold": 165,
+        "message": "Keep your trunk upright — do not lean sideways"
+      }
+    ],
   },
   {
     name: "Hip Bridge",
@@ -217,71 +271,16 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "Mountain",
     bodyPart: "lower",
-  },
-  {
-    name: "Neck Rotation",
-    nameTh: "หมุนคอ",
-    category: "neck",
-    description: "การฝึกหมุนคอเพื่อลดอาการปวดคอ และฟื้นฟูขอบเขตการเคลื่อนไหว",
-    instructions: [
-      "นั่งตรง มองตรงไปข้างหน้า",
-      "ค่อยๆ หมุนหัวไปทางซ้าย",
-      "ค้างไว้ 3-5 วินาที",
-      "กลับมาท่าเดิม แล้วหมุนไปทางขวา",
-      "ค้างไว้ 3-5 วินาที แล้วกลับมา",
-    ],
-    targetJoints: [
+    formChecks: [
       {
-        name: "neck",
-        nameTh: "คอ",
-        idealAngle: 45,
-        minAngle: 35,
-        maxAngle: 55,
-        unit: "°",
-      },
+        "id": "pelvis_level",
+        "type": "symmetry",
+        "measurement": "left_hip",
+        "other": "right_hip",
+        "maxDiff": 10,
+        "message": "Keep your pelvis level — lift both hips evenly"
+      }
     ],
-    difficulty: "beginner",
-    sets: 2,
-    repsPerSet: 8,
-    restSeconds: 20,
-    icon: "RotateCcw",
-    bodyPart: "upper",
-  },
-  {
-    name: "Ankle Dorsiflexion",
-    nameTh: "ดึงข้อเท้าเข้าหาตัว",
-    category: "ankle",
-    description: "การฝึกดึงข้อเท้าเข้าหาตัวเพื่อฟื้นฟูข้อเท้าหลังบาดเจ็บ",
-    instructions: [
-      "นั่งบนเก้าอี้ ขาตรง",
-      "ค่อยดึงปลายเท้าเข้าหาตัว",
-      "ค้างไว้ 3-5 วินาที",
-      "ค่อยปล่อยลง",
-    ],
-    targetJoints: [
-      {
-        name: "left_ankle",
-        nameTh: "ข้อเท้าซ้าย",
-        idealAngle: 20,
-        minAngle: 15,
-        maxAngle: 25,
-        unit: "°",
-      },
-      {
-        name: "right_ankle",
-        nameTh: "ข้อเท้าขวา",
-        idealAngle: 20,
-        minAngle: 15,
-        maxAngle: 25,
-        unit: "°",
-      },
-    ],
-    difficulty: "beginner",
-    sets: 3,
-    repsPerSet: 10,
-    restSeconds: 20,
-    icon: "Footprints",
-    bodyPart: "lower",
   },
   {
     name: "Wall Squat",
@@ -319,36 +318,16 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 45,
     icon: "PersonStanding",
     bodyPart: "lower",
-  },
-  {
-    name: "Cat-Cow Stretch",
-    nameTh: "ท่าแมว-วัว",
-    category: "back",
-    description: "การฝึกท่าคลายกล้ามเนื้อหลัง เพิ่มความยืดหยุ่นของกระดูกสันหลัง",
-    instructions: [
-      "คุกเข่า มือวางราบพื้น",
-      "หายใจเข้า มองขึ้น โค้งหลังลง",
-      "หายใจออก มองลง โค้งหลังขึ้น",
-      "ทำช้าๆ ตามลมหายใจ",
-    ],
-    targetJoints: [
+    formChecks: [
       {
-        name: "spine_flexion",
-        nameTh: "โค้งหลังขึ้น (ท่าแมว)",
-        idealAngle: 45,
-        minAngle: 30,
-        maxAngle: 60,
-        unit: "°",
-        rationale:
-          "PROXY: head–trunk flexion in four-point kneeling (MediaPipe has no spine landmarks). Normal thoraco-lumbar flexion is 45–50° (Physiopedia); the proxy also includes neck flexion. A rep = round the back (cat), then return or arch (cow, negative values).",
-      },
+        "id": "weight_even",
+        "type": "symmetry",
+        "measurement": "left_knee",
+        "other": "right_knee",
+        "maxDiff": 15,
+        "message": "Keep your weight even on both legs"
+      }
     ],
-    difficulty: "beginner",
-    sets: 2,
-    repsPerSet: 10,
-    restSeconds: 20,
-    icon: "StretchHorizontal",
-    bodyPart: "full",
   },
   {
     name: "Arm Circles",
@@ -386,6 +365,15 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 20,
     icon: "RefreshCw",
     bodyPart: "upper",
+    formChecks: [
+      {
+        "id": "elbow_straight",
+        "type": "min",
+        "measurement": "{side}_elbow",
+        "threshold": 150,
+        "message": "Keep your elbow straight"
+      }
+    ],
   },
   {
     name: "Clamshell",
@@ -417,47 +405,6 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 20,
     icon: "Copy",
     bodyPart: "lower",
-  },
-  {
-    name: "Prone Scapular Squeeze",
-    nameTh: "หดี่บริเวณกระดูกสะบัก",
-    category: "back",
-    description: "การฝึกหดกล้ามเนื้อสะบักเพื่อแก้ไขท่าทาง และฟื้นฟูกล้ามเนื้อหลังส่วนบน",
-    instructions: [
-      "นอนคว่ำบนพื้นเรียบ",
-      "แขนวางข้างลำตัว",
-      "ค่อยหดีกระดูกสะบักเข้าหากัน",
-      "ค้างไว้ 5 วินาที",
-      "ค่อยคลาย",
-    ],
-    targetJoints: [
-      {
-        name: "left_shoulder_extension",
-        nameTh: "ยกแขนซ้ายจากการบีบสะบัก",
-        idealAngle: 15,
-        minAngle: 8,
-        maxAngle: 30,
-        unit: "°",
-        rationale:
-          "PROXY: arm lift above the trunk line while squeezing the shoulder blades lying face down; scapular retraction itself is not visible to MediaPipe. Kept well below normal shoulder hyperextension of 50° (Physiopedia).",
-      },
-      {
-        name: "right_shoulder_extension",
-        nameTh: "ยกแขนขวาจากการบีบสะบัก",
-        idealAngle: 15,
-        minAngle: 8,
-        maxAngle: 30,
-        unit: "°",
-        rationale:
-          "Same as left side.",
-      },
-    ],
-    difficulty: "beginner",
-    sets: 3,
-    repsPerSet: 10,
-    restSeconds: 20,
-    icon: "Compress",
-    bodyPart: "upper",
   },
 ];
 

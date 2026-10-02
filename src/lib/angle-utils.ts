@@ -23,8 +23,6 @@ interface Vec3 {
 // Key landmark indices
 export const LANDMARKS = {
   NOSE: 0,
-  LEFT_EAR: 7,
-  RIGHT_EAR: 8,
   LEFT_SHOULDER: 11,
   RIGHT_SHOULDER: 12,
   LEFT_ELBOW: 13,
@@ -37,8 +35,6 @@ export const LANDMARKS = {
   RIGHT_KNEE: 26,
   LEFT_ANKLE: 27,
   RIGHT_ANKLE: 28,
-  LEFT_FOOT_INDEX: 31,
-  RIGHT_FOOT_INDEX: 32,
 } as const;
 
 // Landmarks below this visibility are treated as missing
@@ -87,18 +83,6 @@ export function angleAt(a: Vec3, b: Vec3, c: Vec3): number | null {
   return round1(Math.acos(cos) * (180 / Math.PI));
 }
 
-/**
- * Whether p lies below the line through a→b in image space (y grows downward).
- * Used to give a sign to angles measured against a roughly horizontal trunk.
- * Returns null when the line is too close to vertical to decide.
- */
-function isBelowLine(p: Vec3, a: Vec3, b: Vec3): boolean | null {
-  const dx = b.x - a.x;
-  if (Math.abs(dx) < 1e-3) return null;
-  const cross = dx * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-  return cross * Math.sign(dx) > 0;
-}
-
 export interface AngleOptions {
   /** Image width / height, used when world landmarks are unavailable */
   aspect?: number;
@@ -120,18 +104,9 @@ export function calculateAllAngles(image: Landmark[], opts: AngleOptions = {}): 
   // 3D point for angle magnitudes
   const p = (i: number): Vec3 =>
     world ? { x: world[i].x, y: world[i].y, z: world[i].z } : { x: image[i].x * aspect, y: image[i].y, z: 0 };
-  // Image-space point (y down) for above/below decisions
-  const ip = (i: number): Vec3 => ({ x: image[i].x * aspect, y: image[i].y, z: 0 });
   const set = (name: string, value: number | null) => {
     if (value !== null && Number.isFinite(value)) angles[name] = round1(value);
   };
-  // Side whose three landmarks are most visible (for side-view exercises)
-  const bestSide = <T extends { idx: number[] }>(left: T, right: T): T | null => {
-    const score = (s: T) => Math.min(...s.idx.map((i) => image[i]?.visibility ?? 0));
-    const best = score(left) >= score(right) ? left : right;
-    return score(best) >= MIN_VISIBILITY ? best : null;
-  };
-
   const joint = (name: string, a: number, b: number, c: number) => {
     if (visible(a, b, c)) set(name, angleAt(p(a), p(b), p(c)));
   };
@@ -162,50 +137,6 @@ export function calculateAllAngles(image: Landmark[], opts: AngleOptions = {}): 
   if (visible(L.LEFT_KNEE, L.RIGHT_KNEE, L.LEFT_HIP, L.RIGHT_HIP)) {
     set('hip_opening', angleAt(p(L.LEFT_KNEE), mid(p(L.LEFT_HIP), p(L.RIGHT_HIP)), p(L.RIGHT_KNEE)));
   }
-
-  // Ankle dorsiflexion: 90 − angle(knee, ankle, toes) — 0 = neutral, + = toes toward shin
-  const ankle = (name: string, knee: number, ank: number, toe: number) => {
-    if (!visible(knee, ank, toe)) return;
-    const a = angleAt(p(knee), p(ank), p(toe));
-    set(name, a === null ? null : 90 - a);
-  };
-  ankle('left_ankle', L.LEFT_KNEE, L.LEFT_ANKLE, L.LEFT_FOOT_INDEX);
-  ankle('right_ankle', L.RIGHT_KNEE, L.RIGHT_ANKLE, L.RIGHT_FOOT_INDEX);
-
-  // Neck rotation (yaw): angle of the ear-to-ear line in the x/z plane.
-  // 0 = facing the camera, ~90 = full profile. World landmarks give true depth;
-  // the image fallback uses MediaPipe's relative z (approximate).
-  if (visible(L.LEFT_EAR, L.RIGHT_EAR)) {
-    const le = world ? world[L.LEFT_EAR] : image[L.LEFT_EAR];
-    const re = world ? world[L.RIGHT_EAR] : image[L.RIGHT_EAR];
-    const yaw = Math.abs(Math.atan2(le.z - re.z, le.x - re.x) * (180 / Math.PI));
-    set('neck', Math.min(yaw, 180 - yaw));
-  }
-
-  // Spinal flexion proxy (cat-cow): ±(180 − angle(ear, shoulder, hip)) on the
-  // more visible side; + when the ear is below the hip→shoulder line (cat,
-  // back rounded), − when above (cow). MediaPipe has no spine landmarks.
-  const trunk = bestSide(
-    { idx: [L.LEFT_EAR, L.LEFT_SHOULDER, L.LEFT_HIP] },
-    { idx: [L.RIGHT_EAR, L.RIGHT_SHOULDER, L.RIGHT_HIP] }
-  );
-  if (trunk) {
-    const [ear, sh, hip] = trunk.idx;
-    const a = angleAt(p(ear), p(sh), p(hip));
-    const below = isBelowLine(ip(ear), ip(hip), ip(sh));
-    if (a !== null && below !== null) set('spine_flexion', (below ? 1 : -1) * (180 - a));
-  }
-
-  // Shoulder extension proxy (prone scapular squeeze): ±angle(hip, shoulder,
-  // elbow); + when the elbow is lifted above the shoulder→hip line.
-  const extension = (name: string, hip: number, sh: number, elbow: number) => {
-    if (!visible(hip, sh, elbow)) return;
-    const a = angleAt(p(hip), p(sh), p(elbow));
-    const below = isBelowLine(ip(elbow), ip(sh), ip(hip));
-    if (a !== null && below !== null) set(name, (below ? -1 : 1) * a);
-  };
-  extension('left_shoulder_extension', L.LEFT_HIP, L.LEFT_SHOULDER, L.LEFT_ELBOW);
-  extension('right_shoulder_extension', L.RIGHT_HIP, L.RIGHT_SHOULDER, L.RIGHT_ELBOW);
 
   return angles;
 }
