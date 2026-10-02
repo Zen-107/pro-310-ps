@@ -5,6 +5,7 @@ import { motion, type Variants } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ReviewQueue } from '@/components/physio/review-queue';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   LineChart, Line, ResponsiveContainer,
@@ -215,6 +216,11 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
       <motion.div variants={item}>
         <h2 className="text-2xl font-bold tracking-tight">ภาพรวมผู้ป่วย</h2>
         <p className="text-muted-foreground mt-1">ติดตามความคืบหน้าของผู้ป่วยทั้งหมด</p>
+      </motion.div>
+
+      {/* ---- Completed sessions awaiting review ---- */}
+      <motion.div variants={item}>
+        <ReviewQueue />
       </motion.div>
 
       {/* ---- Summary Stats Row ---- */}

@@ -1,460 +1,207 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
+import { BookOpen, CheckCircle, ExternalLink, Play, RotateCcw, Target } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import {
-  Footprints,
-  MoveUp,
-  Circle,
-  AlignCenterVertical,
-  ArrowUpDown,
-  MoveHorizontal,
-  RefreshCw,
-  Mountain,
-  ArrowUpFromLine,
-  RotateCcw,
-  Copy,
-  Minimize2 as Compress,
-  PersonStanding,
-  StretchHorizontal,
-  ChevronRight,
-  Search,
-  Filter,
-  Activity,
-  Dumbbell,
-  Clock,
-  Zap,
-} from 'lucide-react';
-import {
-  CATEGORIES,
-  EXERCISES,
-  DIFFICULTY_COLORS,
-  DIFFICULTY_LABELS,
-  exerciseIdFromName,
-  type ExerciseData,
-  type TargetJoint,
-} from '@/lib/exercises-data';
+import { DIFFICULTY_COLORS, DIFFICULTY_LABELS } from '@/lib/exercises-data';
 import { useAppStore } from '@/lib/store';
+import { ExerciseDemo } from '@/components/physio/exercise-demo';
 
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  Footprints,
-  MoveUp,
-  Circle,
-  AlignCenterVertical,
-  ArrowUpDown,
-  MoveHorizontal,
-  RefreshCw,
-  Mountain,
-  ArrowUpFromLine,
-  RotateCcw,
-  Copy,
-  Compress,
-  PersonStanding,
-  StretchHorizontal,
-};
+// Patient's prescribed exercises: demo, steps, targets and sources.
+// There is no free practice — sessions start from today's quests only.
 
-interface ExerciseWithId extends ExerciseData {
+interface Target {
+  name: string;
+  nameTh: string;
+  idealAngle: number;
+  minAngle: number;
+  maxAngle: number;
+  isPrimary?: boolean;
+  overridden?: boolean;
+}
+
+interface Reference {
+  title: string;
+  url: string;
+  institution: string;
+  relevance: string;
+  verifiedByName: string | null;
+}
+
+interface Exercise {
   id: string;
+  slug: string;
+  name: string;
+  description: string;
+  difficulty: string;
+  instructions: string[];
+  targetJoints: Target[];
+  references: Reference[];
+}
+
+interface QuestToday {
+  id: string;
+  status: string;
+  exercise: { id: string; sets: number; repsPerSet: number; targetJoints: Target[] };
 }
 
 export function ExercisesView() {
-  const [exercises, setExercises] = useState<ExerciseWithId[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedExercise, setSelectedExercise] = useState<ExerciseWithId | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const setSelectedExerciseId = useAppStore((s) => s.setSelectedExerciseId);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
+  const setSelectedQuestId = useAppStore((s) => s.setSelectedQuestId);
+  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [quests, setQuests] = useState<QuestToday[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    // Fallback to local data when the API is unavailable
-    const localExercises = () =>
-      EXERCISES.map((e) => ({ ...e, id: exerciseIdFromName(e.name) }));
-
-    async function fetchExercises() {
-      let data: ExerciseWithId[];
-      try {
-        const res = await fetch('/api/exercises');
-        data = res.ok ? await res.json() : localExercises();
-      } catch {
-        data = localExercises();
-      }
-      if (cancelled) return;
-      setExercises(data);
-      setLoading(false);
-    }
-    fetchExercises();
+    Promise.all([fetch('/api/exercises'), fetch('/api/quests/today')])
+      .then(async ([exRes, qRes]) => {
+        if (!exRes.ok || !qRes.ok) throw new Error();
+        const [ex, q] = await Promise.all([exRes.json(), qRes.json()]);
+        if (cancelled) return;
+        setExercises(Array.isArray(ex) ? ex : []);
+        setQuests(Array.isArray(q?.quests) ? q.quests : []);
+      })
+      .catch(() => !cancelled && setError(true))
+      .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const filteredExercises = exercises.filter((ex) => {
-    const matchesCategory = selectedCategory === 'all' || ex.category === selectedCategory;
-    const matchesSearch =
-      searchQuery === '' ||
-      ex.nameTh.includes(searchQuery) ||
-      ex.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ex.description.includes(searchQuery);
-    return matchesCategory && matchesSearch;
-  });
-
-  const getCategoryCount = (catId: string) => {
-    if (catId === 'all') return exercises.length;
-    return exercises.filter((e) => e.category === catId).length;
-  };
-
-  function handleStartExercise(ex: ExerciseWithId) {
-    setSelectedExerciseId(ex.id);
+  function startQuest(questId: string) {
+    setSelectedQuestId(questId);
     setActiveTab('camera');
   }
 
-  if (selectedExercise) {
+  if (loading) {
     return (
-      <ExerciseDetail
-        exercise={selectedExercise}
-        onBack={() => setSelectedExercise(null)}
-        onStart={() => handleStartExercise(selectedExercise)}
-      />
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid gap-4 md:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Skeleton key={i} className="h-96 rounded-xl" />
+          ))}
+        </div>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">คลังท่ากายภาพบำบัด</h2>
+        <h2 className="text-2xl font-bold tracking-tight">ท่ากายภาพของฉัน</h2>
         <p className="text-muted-foreground mt-1">
-          เลือกท่าทางที่ต้องการฝึก พร้อมคำแนะนำจาก AI
+          ท่าที่ผู้ดูแลกำหนดให้คุณ — ดูท่าตัวอย่างและขั้นตอนก่อนเริ่มภารกิจวันนี้
         </p>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="ค้นหาท่ากายภาพ..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-        />
-      </div>
+      {error && <p className="text-sm text-red-600">โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่</p>}
 
-      {/* Categories */}
-      <ScrollArea className="w-full">
-        <div className="flex gap-2 pb-2">
-          <Button
-            variant={selectedCategory === 'all' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedCategory('all')}
-            className={
-              selectedCategory === 'all'
-                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shrink-0'
-                : 'shrink-0'
-            }
-          >
-            <Activity className="h-3.5 w-3.5 mr-1.5" />
-            ทั้งหมด ({getCategoryCount('all')})
-          </Button>
-          {CATEGORIES.map((cat) => {
-            const CatIcon = iconMap[cat.icon] || Activity;
-            return (
-              <Button
-                key={cat.id}
-                variant={selectedCategory === cat.id ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setSelectedCategory(cat.id)}
-                className={
-                  selectedCategory === cat.id
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shrink-0'
-                    : 'shrink-0'
-                }
-              >
-                <CatIcon className="h-3.5 w-3.5 mr-1.5" />
-                {cat.name}
-                <span className="ml-1 text-xs opacity-70">({getCategoryCount(cat.id)})</span>
-              </Button>
-            );
-          })}
-        </div>
-      </ScrollArea>
-
-      {/* Exercise Grid */}
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="overflow-hidden">
-              <CardHeader className="pb-3">
-                <Skeleton className="h-5 w-3/4" />
-                <Skeleton className="h-4 w-1/2 mt-2" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-2/3 mt-2" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : filteredExercises.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center py-16"
-        >
-          <Dumbbell className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-          <p className="text-muted-foreground text-lg">ไม่พบท่ากายภาพที่ค้นหา</p>
-          <p className="text-muted-foreground/70 text-sm mt-1">ลองค้นหาด้วยคำอื่น หรือเลือกหมวดหมู่อื่น</p>
-        </motion.div>
-      ) : (
-        <motion.div
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-          initial="hidden"
-          animate="show"
-          variants={{
-            hidden: {},
-            show: { transition: { staggerChildren: 0.06 } },
-          }}
-        >
-          <AnimatePresence>
-            {filteredExercises.map((exercise) => (
-              <motion.div
-                key={exercise.id}
-                variants={{
-                  hidden: { opacity: 0, y: 20 },
-                  show: { opacity: 1, y: 0 },
-                }}
-                layout
-              >
-                <Card
-                  className="overflow-hidden cursor-pointer hover:shadow-lg hover:shadow-emerald-500/5 transition-all duration-300 group border-border/50 hover:border-emerald-500/30"
-                  onClick={() => setSelectedExercise(exercise)}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          {(() => {
-                            const Icon = iconMap[exercise.icon] || Activity;
-                            return <Icon className="h-4 w-4 text-emerald-600 shrink-0" />;
-                          })()}
-                          <CardTitle className="text-base font-semibold truncate">
-                            {exercise.nameTh}
-                          </CardTitle>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{exercise.name}</p>
-                      </div>
-                      <Badge variant="secondary" className={DIFFICULTY_COLORS[exercise.difficulty]}>
-                        {DIFFICULTY_LABELS[exercise.difficulty]}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                      {exercise.description}
-                    </p>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Dumbbell className="h-3 w-3" />
-                        {exercise.sets} × {exercise.repsPerSet}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {exercise.restSeconds}s พัก
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Zap className="h-3 w-3" />
-                        {exercise.targetJoints.length} ข้อต่อ
-                      </span>
-                    </div>
-                    <div className="flex justify-end mt-3">
-                      <span className="text-emerald-600 text-xs font-medium flex items-center gap-1 group-hover:gap-2 transition-all">
-                        ดูรายละเอียด <ChevronRight className="h-3 w-3" />
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </motion.div>
+      {!error && exercises.length === 0 && (
+        <Card className="border-dashed">
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">
+            ยังไม่มีท่าที่ได้รับมอบหมาย — ผู้ดูแลของคุณจะเพิ่มแผนการรักษาให้
+          </CardContent>
+        </Card>
       )}
-    </div>
-  );
-}
 
-function ExerciseDetail({
-  exercise,
-  onBack,
-  onStart,
-}: {
-  exercise: ExerciseWithId;
-  onBack: () => void;
-  onStart: () => void;
-}) {
-  const ExerciseIcon = iconMap[exercise.icon] || Activity;
-  const categoryInfo = CATEGORIES.find((c) => c.id === exercise.category);
+      <div className="grid gap-4 md:grid-cols-2">
+        {exercises.map((ex, idx) => {
+          const quest = quests.find((q) => q.exercise.id === ex.id);
+          // Today's quest carries the clinician's overrides; otherwise show defaults
+          const targets = quest?.exercise.targetJoints ?? ex.targetJoints;
+          const primary = targets.find((t) => t.isPrimary) ?? targets[0];
+          return (
+            <motion.div key={ex.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }}>
+              <Card className="h-full">
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="text-lg">{ex.name}</CardTitle>
+                    <Badge variant="secondary" className={DIFFICULTY_COLORS[ex.difficulty] || ''}>
+                      {DIFFICULTY_LABELS[ex.difficulty] || ex.difficulty}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{ex.description}</p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <ExerciseDemo slug={ex.slug} target={primary} />
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="space-y-6"
-    >
-      {/* Back button */}
-      <Button variant="ghost" size="sm" onClick={onBack} className="text-muted-foreground">
-        <ChevronRight className="h-4 w-4 mr-1 rotate-180" />
-        กลับ
-      </Button>
+                  <div>
+                    <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+                      <BookOpen className="h-4 w-4 text-emerald-600" /> ขั้นตอน
+                    </p>
+                    <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+                      {ex.instructions.map((step, i) => (
+                        <li key={i}>{step}</li>
+                      ))}
+                    </ol>
+                  </div>
 
-      {/* Header */}
-      <Card className="overflow-hidden border-emerald-500/20">
-        <div className="bg-gradient-to-r from-emerald-600 to-emerald-500 p-6 text-white">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
-              <ExerciseIcon className="h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold">{exercise.nameTh}</h2>
-              <p className="text-emerald-100 text-sm">{exercise.name}</p>
-            </div>
-          </div>
-          <div className="flex gap-2 mt-3">
-            <Badge className="bg-white/20 text-white border-0">
-              {categoryInfo?.name || exercise.category}
-            </Badge>
-            <Badge className="bg-white/20 text-white border-0">
-              {DIFFICULTY_LABELS[exercise.difficulty]}
-            </Badge>
-          </div>
-        </div>
-        <CardContent className="p-6">
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            {exercise.description}
-          </p>
-        </CardContent>
-      </Card>
+                  <div>
+                    <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+                      <Target className="h-4 w-4 text-emerald-600" /> มุมเป้าหมาย
+                    </p>
+                    <div className="space-y-1">
+                      {targets.map((t) => (
+                        <div key={t.name} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            {t.nameTh}
+                            {t.overridden && <span className="ml-1 text-xs text-amber-600">(ปรับโดยผู้ดูแล)</span>}
+                          </span>
+                          <span className="tabular-nums">
+                            {t.minAngle}°–{t.maxAngle}°
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-      {/* Instructions */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Activity className="h-4 w-4 text-emerald-600" />
-            วิธีทำ
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {exercise.instructions.map((step, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="flex gap-3"
-            >
-              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
-                  {i + 1}
-                </span>
-              </div>
-              <p className="text-sm pt-0.5">{step}</p>
+                  {ex.references.length > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      <p className="mb-1 font-medium text-foreground">แหล่งอ้างอิง</p>
+                      {ex.references.map((r) => (
+                        <a key={r.url} href={r.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-foreground">
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                          <span className="truncate">
+                            {r.institution} — {r.title}
+                          </span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+
+                  {quest ? (
+                    quest.status === 'COMPLETED' ? (
+                      <div className="flex items-center justify-between rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle className="h-4 w-4" /> ภารกิจวันนี้สำเร็จแล้ว
+                        </span>
+                        <Button size="sm" variant="outline" onClick={() => startQuest(quest.id)}>
+                          <RotateCcw className="h-3.5 w-3.5" /> ฝึกซ้ำ
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => startQuest(quest.id)}>
+                        <Play className="h-4 w-4" /> เริ่มภารกิจวันนี้ ({quest.exercise.sets} × {quest.exercise.repsPerSet})
+                      </Button>
+                    )
+                  ) : (
+                    <p className="rounded-lg border border-dashed p-3 text-center text-sm text-muted-foreground">
+                      ไม่มีภารกิจของท่านี้ในวันนี้
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
             </motion.div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Target Joints */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Target className="h-4 w-4 text-amber-500" />
-            มุมข้อต่อเป้าหมาย
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {exercise.targetJoints.map((joint: TargetJoint) => (
-              <div
-                key={joint.name}
-                className="flex items-center justify-between p-3 rounded-xl bg-muted/50"
-              >
-                <div>
-                  <p className="text-sm font-medium">{joint.nameTh}</p>
-                  <p className="text-xs text-muted-foreground">{joint.name}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-bold text-emerald-600">{joint.idealAngle}°</p>
-                  <p className="text-xs text-muted-foreground">
-                    ช่วง: {joint.minAngle}° - {joint.maxAngle}°
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Session Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Clock className="h-4 w-4 text-emerald-600" />
-            โปรแกรมการฝึก
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20">
-              <p className="text-2xl font-bold text-emerald-600">{exercise.sets}</p>
-              <p className="text-xs text-muted-foreground mt-1">เซ็ต</p>
-            </div>
-            <div className="text-center p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20">
-              <p className="text-2xl font-bold text-amber-600">{exercise.repsPerSet}</p>
-              <p className="text-xs text-muted-foreground mt-1">ครั้ง/เซ็ต</p>
-            </div>
-            <div className="text-center p-3 rounded-xl bg-muted">
-              <p className="text-2xl font-bold">{exercise.restSeconds}s</p>
-              <p className="text-xs text-muted-foreground mt-1">พักเซ็ต</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Start Button */}
-      <Button
-        onClick={onStart}
-        className="w-full h-14 text-base font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-lg shadow-emerald-600/20"
-      >
-        <Activity className="h-5 w-5 mr-2" />
-        เริ่มฝึกท่านี้
-      </Button>
-    </motion.div>
-  );
-}
-
-function Target({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="10" />
-      <circle cx="12" cy="12" r="6" />
-      <circle cx="12" cy="12" r="2" />
-    </svg>
+          );
+        })}
+      </div>
+    </div>
   );
 }

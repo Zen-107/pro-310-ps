@@ -27,6 +27,7 @@ export interface ReportRep {
   bestAngle: number;
   accuracy: number;
   durationMs: number;
+  isCorrect?: boolean;
 }
 
 export interface ReportReview {
@@ -142,7 +143,9 @@ export function ReportReps({ reps }: { reps: ReportRep[] }) {
                 <td className="p-2">{r.setNumber}</td>
                 <td className="p-2">{r.repNumber}</td>
                 <td className="p-2 text-right">{r.bestAngle}°</td>
-                <td className={`p-2 text-right font-semibold ${getAccuracyTextColor(r.accuracy)}`}>{r.accuracy}%</td>
+                <td className={`p-2 text-right font-semibold ${getAccuracyTextColor(r.accuracy)}`}>
+                  {r.accuracy}%{r.isCorrect === false && <span className="ml-1 text-amber-600" title="Incorrect rep">⚠</span>}
+                </td>
                 <td className="p-2 text-right text-muted-foreground">{(r.durationMs / 1000).toFixed(1)} วิ</td>
               </tr>
             ))}
@@ -221,6 +224,114 @@ export function ReviewPanel({
           ต้องติดตาม
         </Button>
       </div>
+    </div>
+  );
+}
+
+export interface ReportFaults {
+  total: number;
+  counts: { INCOMPLETE_ROM: number; COMPENSATION: number; LOW_ACCURACY: number };
+  incorrectReps: number;
+  avgIncompleteDeficit: number | null;
+  compensations: { checkId: string; message: string; count: number }[];
+  items: {
+    type: 'INCOMPLETE_ROM' | 'COMPENSATION' | 'LOW_ACCURACY';
+    repNumber: number | null;
+    joint: string;
+    measuredAngle: number;
+    expectedMin: number | null;
+    expectedMax: number | null;
+    deficit: number | null;
+    message: string;
+    occurredAt: string;
+  }[];
+}
+
+const FAULT_LABEL: Record<ReportFaults['items'][number]['type'], string> = {
+  INCOMPLETE_ROM: 'ทำไม่สุดระยะ',
+  COMPENSATION: 'ท่าชดเชย',
+  LOW_ACCURACY: 'ความแม่นยำต่ำ',
+};
+
+/** Form faults: incomplete ROM, compensations and low-accuracy reps */
+export function ReportFaultsPanel({ faults, totalReps }: { faults: ReportFaults; totalReps: number }) {
+  const expected = (f: ReportFaults['items'][number]) =>
+    f.expectedMin !== null && f.expectedMax !== null
+      ? `${f.expectedMin}–${f.expectedMax}°`
+      : f.expectedMin !== null
+        ? `≥ ${f.expectedMin}°`
+        : f.expectedMax !== null
+          ? `≤ ${f.expectedMax}°`
+          : '—';
+  return (
+    <div className="space-y-3">
+      <h4 className="text-sm font-semibold flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 text-amber-500" />
+        ข้อผิดพลาดของท่าทาง (Form faults)
+      </h4>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
+        <div className="rounded-lg border p-2.5">
+          <p className="text-lg font-bold tabular-nums">{faults.incorrectReps}/{totalReps}</p>
+          <p className="text-[11px] text-muted-foreground">ครั้งที่ไม่ถูกต้อง</p>
+        </div>
+        <div className="rounded-lg border p-2.5">
+          <p className="text-lg font-bold tabular-nums">{faults.counts.INCOMPLETE_ROM}</p>
+          <p className="text-[11px] text-muted-foreground">
+            ทำไม่สุดระยะ{faults.avgIncompleteDeficit !== null && ` (ขาด ~${faults.avgIncompleteDeficit}°)`}
+          </p>
+        </div>
+        <div className="rounded-lg border p-2.5">
+          <p className="text-lg font-bold tabular-nums">{faults.counts.COMPENSATION}</p>
+          <p className="text-[11px] text-muted-foreground">ท่าชดเชย</p>
+        </div>
+        <div className="rounded-lg border p-2.5">
+          <p className="text-lg font-bold tabular-nums">{faults.counts.LOW_ACCURACY}</p>
+          <p className="text-[11px] text-muted-foreground">ความแม่นยำต่ำ</p>
+        </div>
+      </div>
+      {faults.compensations.length > 0 && (
+        <ul className="space-y-1 text-xs">
+          {faults.compensations.map((c) => (
+            <li key={c.checkId} className="flex justify-between rounded bg-amber-50 px-2.5 py-1.5 dark:bg-amber-950/30">
+              <span>{c.message}</span>
+              <span className="font-semibold tabular-nums">×{c.count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {faults.items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">ไม่พบข้อผิดพลาดของท่าทางในเซสชันนี้</p>
+      ) : (
+        <div className="rounded-xl border overflow-x-auto max-h-64 overflow-y-auto">
+          <table className="w-full text-xs min-w-[520px]">
+            <thead className="sticky top-0 bg-muted">
+              <tr className="text-left">
+                <th className="p-2 font-medium">ครั้งที่</th>
+                <th className="p-2 font-medium">ประเภท</th>
+                <th className="p-2 font-medium">ค่าที่วัด</th>
+                <th className="p-2 font-medium text-right">วัดได้</th>
+                <th className="p-2 font-medium text-right">ที่ควรเป็น</th>
+                <th className="p-2 font-medium text-right">ห่าง</th>
+              </tr>
+            </thead>
+            <tbody>
+              {faults.items.map((f, i) => (
+                <tr key={i} className="border-t align-top">
+                  <td className="p-2 tabular-nums">{f.repNumber ?? '—'}</td>
+                  <td className="p-2">
+                    <span className="font-medium">{FAULT_LABEL[f.type]}</span>
+                    <div className="text-muted-foreground">{f.message}</div>
+                  </td>
+                  <td className="p-2 font-mono text-muted-foreground">{f.joint}</td>
+                  <td className="p-2 text-right tabular-nums">{Math.round(f.measuredAngle)}°</td>
+                  <td className="p-2 text-right tabular-nums">{expected(f)}</td>
+                  <td className="p-2 text-right tabular-nums text-amber-600">{f.deficit !== null ? `${f.deficit}°` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

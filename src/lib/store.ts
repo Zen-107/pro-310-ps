@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
-export type PatientTab = 'dashboard' | 'exercises' | 'camera' | 'history';
-export type DoctorTab = 'overview' | 'patients' | 'reports' | 'plans';
+export type PatientTab = 'dashboard' | 'exercises' | 'camera' | 'history' | 'chat';
+export type DoctorTab = 'overview' | 'patients' | 'reports' | 'plans' | 'messages';
 
 export type ActiveTab = PatientTab | DoctorTab;
 
@@ -13,6 +13,9 @@ interface AppState {
   // Doctor: selected patient for detail view
   selectedPatientId: string | null;
   setSelectedPatientId: (id: string | null) => void;
+  // Doctor: session to open in the reports tab (e.g. from the review queue)
+  selectedSessionId: string | null;
+  setSelectedSessionId: (id: string | null) => void;
 
   // Patient side: which patient identity am I?
   currentPatientId: string | null;
@@ -54,6 +57,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   selectedPatientId: null,
   setSelectedPatientId: (id) => set({ selectedPatientId: id }),
+  selectedSessionId: null,
+  setSelectedSessionId: (id) => set({ selectedSessionId: id }),
 
   currentPatientId: null,
   setCurrentPatientId: (id) => set({ currentPatientId: id }),

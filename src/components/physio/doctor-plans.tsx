@@ -409,7 +409,7 @@ export function DoctorPlans() {
                     {cat.exercises.map((ex) => (
                       <div key={ex.id} className="flex items-center justify-between gap-2 rounded-lg border p-2.5">
                         <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{ex.nameTh}</p>
+                          <p className="text-sm font-medium truncate">{ex.name}</p>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${DIFFICULTY_COLORS[ex.difficulty] || ''}`}>
                               {DIFFICULTY_LABELS[ex.difficulty] || ex.difficulty}
@@ -499,8 +499,7 @@ function PrescriptionItemEditor({
         <CardContent className="p-4 space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="font-semibold">{item.exercise.nameTh}</p>
-              <p className="text-xs text-muted-foreground">{item.exercise.name}</p>
+              <p className="font-semibold">{item.exercise.name}</p>
             </div>
             <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" disabled={busy} onClick={onRemove}>
               <Trash2 className="h-4 w-4" />

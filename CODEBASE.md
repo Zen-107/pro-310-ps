@@ -99,7 +99,7 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 - **/api/auth/*** — next-auth (sign-in, sign-out, session, csrf)
 
 ### Exercises (any role)
-- **GET /api/exercises** — PUBLISHED library with `targetJoints` (formula, isPrimary, rationale) and `references` (citations); filters `?category=&bodyPart=&difficulty=`
+- **GET /api/exercises** — PUBLISHED library with `targetJoints` (formula, isPrimary, rationale), `formChecks` and `references` (citations). Clinicians get the full library; **patients only their prescribed exercises**
 
 ### Patients (CLINICIAN, care team)
 - **GET /api/patients** — care-team patients with summary stats
@@ -120,11 +120,11 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 - **GET /api/quests?patientId=&days=14** — history + adherence %
 
 ### Sessions
-- **GET /api/sessions?patientId=&status=&limit=** — sessions in scope
-- **POST /api/sessions** (PATIENT) — `{ questId }` or `{ exerciseId }` (free practice). Snapshots merged targets, formulas and algorithm version; returns the exercise to run
+- **GET /api/sessions?patientId=&status=&awaitingReview=true&limit=** — sessions in scope, with `faultCount`; `awaitingReview=true` = completed and not yet reviewed (clinician review queue)
+- **POST /api/sessions** (PATIENT) — `{ questId }` only; free practice is disabled (`{ exerciseId }` → 403). Stores `prescriptionId`, `prescriptionItemId` and the prescribing `clinicianId`; snapshots merged targets, form checks, formulas and algorithm version; returns the exercise to run
 - **GET /api/sessions/[id]** — metrics, target snapshot, reps, joint logs, review
 - **PATCH /api/sessions/[id]** (owning PATIENT, once) — `{ status: COMPLETED|CANCELLED, totalReps, avgAccuracy, romMinAngle, romMaxAngle, primaryJoint }`; server sets `endedAt`, `romDegrees` and the quest status
-- **POST /api/sessions/[id]/logs** (owning PATIENT) — `{ reps: [...], logs: [...] }`, ≤ 200 rows/request; logs link to reps by `repNumber`; locked after review
+- **POST /api/sessions/[id]/logs** (owning PATIENT) — `{ reps: [...], logs: [...], faults: [...] }`, ≤ 200 rows/request; logs and faults link to reps by `repNumber`; locked after review
 - **POST /api/sessions/[id]/review** (CLINICIAN) — `{ status: APPROVED|NEEDS_ATTENTION, comment? }`
 
 ### Reports
@@ -133,6 +133,11 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 
 ### Stats
 - **GET /api/stats?patientId=&days=30** — `profile` (streak, totals), `dailyData`, `categoryData`, `romData`
+
+### Care-team chat
+- **GET /api/messages?patientId=&after=ISO** — messages in a patient's thread (patients: own thread). Marks the thread read for the caller
+- **POST /api/messages** — `{ patientId?, body }` (≤ 2000 chars) to the care-team thread
+- **GET /api/messages/threads** — threads in scope with last message and unread count
 
 ### AI Coach (PATIENT)
 - **POST /api/coach** — feedback from current visible target angles
@@ -258,14 +263,19 @@ calculateAllAngles(image, { aspect: videoWidth / videoHeight, world });
 | `left/right_hip_flexion` | 180 − angle(shoulder, hip, knee) | Straight Leg Raise |
 | `hip_opening` | angle(left_knee, mid_hip, right_knee) | Clamshell |
 | `left/right_shoulder` | angle(hip, shoulder, elbow) | Shoulder Flexion/Abduction, Arm Circles |
-| `left/right_ankle` | 90 − angle(knee, ankle, foot_index) | Ankle Dorsiflexion |
-| `neck` | head yaw from the ear-to-ear line (x/z) | Neck Rotation |
-| `spine_flexion` | ±(180 − angle(ear, shoulder, hip)), + = head below trunk line — **proxy** | Cat-Cow |
-| `left/right_shoulder_extension` | ±angle(hip, shoulder, elbow), + = elbow above trunk line — **proxy** | Prone Scapular Squeeze |
+| `left/right_elbow` | angle(shoulder, elbow, wrist) | form checks |
 
-Signed measurements decide "above/below the trunk line" in image space (y down), so they work whichever way the patient faces.
+The catalogue is limited to major joints MediaPipe tracks reliably in 3D. Neck, ankle (foot landmark) and the cat-cow / prone-scapular proxies were removed; their enum values remain in the schema only so old rows stay valid.
+
+**Smoothing** (`src/lib/landmark-smoother.ts`): every image and world coordinate passes a One Euro low-pass filter (min cutoff 1 Hz, β 5, derivative cutoff 2 Hz — ≈ 2.4× less jitter at rest, < 1° error once a hold settles). Visibility uses hysteresis: tracked from ≥ 0.65, dropped below 0.5; untracked landmarks are reported with visibility 0 and their filter restarts on re-acquisition.
 
 **Scoring:** `isAngleCorrect()` → in range = correct; accuracy = max(0, 100 − deviation/tolerance × 50), tolerance = (max − min)/2. **ROM** = max − min of the primary measurement during the session.
+
+**Form faults** (`src/lib/rep-counter.ts`, `src/lib/form-checks.ts`), stored in `SessionFault`:
+- `INCOMPLETE_ROM` — moved ≥ 10° from rest toward the range, returned without reaching it (2 s warm-up and 300 ms minimum ignore noise); deficit = degrees short
+- `COMPENSATION` — an exercise form check failed at the rep's best moment (e.g. lifted knee < 160° in SLR, trunk lean, left/right asymmetry); `{side}`/`{other}` templates follow the counted side
+- `LOW_ACCURACY` — counted rep < 60%
+- A rep with COMPENSATION or LOW_ACCURACY is stored with `isCorrect = false`
 
 **Targets** are developer estimates (`angleBasis = DEVELOPER_ESTIMATE`) bounded by normative ROM (Physiopedia; Soucie et al., *Haemophilia* 2011), with the reasoning stored in `ExerciseJointTarget.rationale`.
 
@@ -285,12 +295,14 @@ This is the heart of the app. Pipeline per session:
 3. **Detection Loop** — a `requestAnimationFrame` loop calls `pose.send({ image: video })`, skipping
    frames while a previous `send()` is in flight. `onResults` is registered once and dispatches through a ref.
 
-4. **Per frame** — `calculateAllAngles(poseLandmarks, { aspect, world: poseWorldLandmarks })` (3D when available), draw the skeleton on the
+4. **Per frame** — smooth landmarks (One Euro + visibility hysteresis), then `calculateAllAngles(smoothed.image, { aspect, world: smoothed.world })` (3D when available), draw the skeleton on the
    canvas, push `liveAngles` to the store at most every 100 ms.
 
-5. **Reps & accuracy** — on the first target joint: a rep is *enter range → hold ≥ 300 ms → leave range
-   by 5°*. It is scored with `isAngleCorrect` on the best angle reached while in range.
-   ROM = max − min of that joint (visible frames only).
+5. **Reps, accuracy & faults** — `RepCounter` tracks the primary measurement and its left/right counterpart: a rep is *enter range → hold ≥ 300 ms → leave range by 5°*, scored on the best angle reached; both sides within 800 ms count once. Incomplete attempts, failed form checks and low-accuracy reps become `SessionFault` rows and an on-screen form cue.
+   ROM = max − min of the side that moved most.
+
+   **Quests only:** the pre-session screen lists today's quests (with an animated demo); there is no free practice.
+   **Demo rig** (`src/lib/exercise-poses.ts`, `exercise-demo.tsx`): anatomical SVG silhouette driven by joint-angle keyframes with IK for planted feet; the overlay measures the rig with the engine's formula and shows the target band. Start/end positions follow the cited AAOS/NHS instructions; not yet verified against Kisner & Colby (pending clinician review).
 
 6. **AI Coach** — `POST /api/coach` at most every 8 s with only the visible target-joint angles; one
    request in flight, aborted on stop/unmount.

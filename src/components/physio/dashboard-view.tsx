@@ -47,7 +47,7 @@ interface QuestSummary {
   id: string;
   status: string;
   prescription: { clinicianName: string };
-  exercise: { nameTh: string; sets: number; repsPerSet: number };
+  exercise: { name: string; sets: number; repsPerSet: number };
 }
 
 interface TodayQuests {
@@ -396,7 +396,7 @@ export function DashboardView({ onStartSession }: { onStartSession: () => void }
               quests.quests.map((q) => (
                 <div key={q.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{q.exercise.nameTh}</p>
+                    <p className="truncate text-sm font-medium">{q.exercise.name}</p>
                     <p className="text-xs text-muted-foreground">
                       {q.exercise.sets} เซ็ต × {q.exercise.repsPerSet} ครั้ง · {q.prescription.clinicianName}
                     </p>

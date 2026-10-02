@@ -23,6 +23,8 @@ import {
   ReportFormulas,
   ReportReps,
   ReviewPanel,
+  ReportFaultsPanel,
+  type ReportFaults,
   type ReportRep,
   type ReportReview,
   type ReportTarget,
@@ -105,6 +107,7 @@ interface ReportData {
   targets: ReportTarget[];
   jointReport: JointReport[];
   reps: ReportRep[];
+  faults: ReportFaults;
   /** Latest stored AI summary (null until generated) */
   clinicalSummary: string | null;
   generatedAt: string | null;
@@ -146,6 +149,8 @@ function formatShortDate(iso: string) {
 
 export function DoctorReports() {
   const selectedPatientId = useAppStore((s) => s.selectedPatientId);
+  const queuedSessionId = useAppStore((s) => s.selectedSessionId);
+  const setSelectedSessionIdInStore = useAppStore((s) => s.setSelectedSessionId);
   const setSelectedPatientId = useAppStore((s) => s.setSelectedPatientId);
 
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -244,6 +249,17 @@ export function DoctorReports() {
       setLoadingReport(false);
     }
   }
+
+  /* ---- Deep link from the review queue: open that session once loaded ---- */
+  useEffect(() => {
+    if (!queuedSessionId || sessionsLoading) return;
+    if (!sessions.some((s) => s.id === queuedSessionId)) return;
+    const id = setTimeout(() => {
+      openReport(queuedSessionId);
+      setSelectedSessionIdInStore(null);
+    }, 0);
+    return () => clearTimeout(id);
+  }, [queuedSessionId, sessions, sessionsLoading]);
 
   /* ---- Generate / regenerate the AI clinical summary ---- */
   async function generateReport(sessionId: string) {
@@ -376,7 +392,7 @@ export function DoctorReports() {
                     <div className="min-w-0">
                       <h3 className="font-semibold truncate">
                         {report
-                          ? `${report.exerciseName} (${report.exerciseNameEn})`
+                          ? report.exerciseName
                           : 'กำลังสร้างรายงาน...'}
                       </h3>
                       <p className="text-xs text-slate-300 truncate">
@@ -603,6 +619,8 @@ export function DoctorReports() {
 
                     <ReportReps reps={report.reps} />
 
+                    <ReportFaultsPanel faults={report.faults} totalReps={report.totalReps} />
+
                     <Separator />
 
                     {/* ---- Clinical Summary (Markdown) ---- */}
@@ -723,7 +741,7 @@ export function DoctorReports() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-medium truncate">
-                            {s.exercise?.nameTh || 'ท่ากายภาพ'}
+                            {s.exercise?.name || 'Exercise'}
                           </p>
                           {s.exercise?.category && (
                             <Badge

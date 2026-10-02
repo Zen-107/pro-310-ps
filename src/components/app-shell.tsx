@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { signOut } from 'next-auth/react';
 import { useAppStore, type ActiveTab, type DoctorTab, type PatientTab } from '@/lib/store';
@@ -13,9 +13,11 @@ import { DoctorOverview } from '@/components/physio/doctor-overview';
 import { DoctorPatients } from '@/components/physio/doctor-patients';
 import { DoctorReports } from '@/components/physio/doctor-reports';
 import { DoctorPlans } from '@/components/physio/doctor-plans';
+import { DoctorMessages } from '@/components/physio/doctor-messages';
+import { CareChat } from '@/components/physio/care-chat';
 import {
   LayoutDashboard, Dumbbell, Camera, History, Activity,
-  Stethoscope, Users, FileText, ClipboardList, LogOut, UserCircle, ShieldAlert,
+  Stethoscope, Users, FileText, ClipboardList, LogOut, UserCircle, ShieldAlert, MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -24,6 +26,7 @@ const patientTabs: { id: PatientTab; label: string; icon: React.ComponentType<{ 
   { id: 'exercises', label: 'ท่ากายภาพ', icon: Dumbbell },
   { id: 'camera', label: 'เริ่มฝึก', icon: Camera },
   { id: 'history', label: 'ประวัติ', icon: History },
+  { id: 'chat', label: 'ข้อความ', icon: MessageCircle },
 ];
 
 const doctorTabs: { id: DoctorTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -31,6 +34,7 @@ const doctorTabs: { id: DoctorTab; label: string; icon: React.ComponentType<{ cl
   { id: 'patients', label: 'ผู้ป่วย', icon: Users },
   { id: 'reports', label: 'รายงาน', icon: FileText },
   { id: 'plans', label: 'แผนรักษา', icon: ClipboardList },
+  { id: 'messages', label: 'ข้อความ', icon: MessageCircle },
 ];
 
 const handleSignOut = () => signOut({ callbackUrl: '/login' });
@@ -52,6 +56,24 @@ export function AppShell({ user }: { user: SessionUser }) {
   useEffect(() => {
     setCurrentPatientId(user.patientId);
   }, [user.patientId, setCurrentPatientId]);
+
+  // Unread care-team messages for the tab badge
+  const [unread, setUnread] = useState(0);
+  useEffect(() => {
+    if (user.role === 'ADMIN') return;
+    let cancelled = false;
+    const load = () =>
+      fetch('/api/messages/threads')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => !cancelled && d && setUnread(d.totalUnread ?? 0))
+        .catch(() => {});
+    load();
+    const id = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [user.role, tab]);
 
   useEffect(() => {
     if (isSessionActive && activeTab !== 'camera') {
@@ -140,6 +162,9 @@ export function AppShell({ user }: { user: SessionUser }) {
                 >
                   <Icon className="h-4 w-4" />
                   {t.label}
+                  {(t.id === 'chat' || t.id === 'messages') && unread > 0 && t.id !== tab && (
+                    <span className="ml-1 rounded-full bg-emerald-600 px-1.5 text-[10px] font-semibold text-white">{unread}</span>
+                  )}
                   {isActive && (
                     <motion.div
                       layoutId="desktop-tab-indicator"
@@ -171,6 +196,15 @@ export function AppShell({ user }: { user: SessionUser }) {
               )}
               {!isDoctor && tab === 'exercises' && <ExercisesView />}
               {!isDoctor && tab === 'history' && <HistoryView />}
+              {!isDoctor && tab === 'chat' && (
+                <div className="space-y-4">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">ข้อความถึงทีมผู้ดูแล</h2>
+                    <p className="text-muted-foreground mt-1">แพทย์และนักกายภาพในทีมของคุณเห็นข้อความเดียวกัน</p>
+                  </div>
+                  <CareChat viewer="PATIENT" />
+                </div>
+              )}
 
               {/* Clinician Views */}
               {isDoctor && tab === 'overview' && (
@@ -179,6 +213,7 @@ export function AppShell({ user }: { user: SessionUser }) {
               {isDoctor && tab === 'patients' && <DoctorPatients />}
               {isDoctor && tab === 'reports' && <DoctorReports />}
               {isDoctor && tab === 'plans' && <DoctorPlans />}
+              {isDoctor && tab === 'messages' && <DoctorMessages />}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -206,7 +241,12 @@ export function AppShell({ user }: { user: SessionUser }) {
                   </div>
                 ) : (
                   <>
-                    <Icon className="h-5 w-5" />
+                    <span className="relative">
+                      <Icon className="h-5 w-5" />
+                      {(t.id === 'chat' || t.id === 'messages') && unread > 0 && t.id !== tab && (
+                        <span className="absolute -right-2 -top-1 rounded-full bg-emerald-600 px-1 text-[9px] font-semibold text-white">{unread}</span>
+                      )}
+                    </span>
                     <span className="text-[10px] font-medium">{t.label}</span>
                     {isActive && (
                       <motion.div
