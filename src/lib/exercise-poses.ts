@@ -198,31 +198,6 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
     },
   },
 
-  // Supine, other knee bent; raise the straight leg to the bent thigh's height
-  ex_straight_leg_raise: {
-    slug: 'ex_straight_leg_raise',
-    view: 'side',
-    measurement: 'hip_flexion',
-    props: { mat: true },
-    caption: 'Lying on your back, other knee bent, lift the straight leg',
-    pose: (t) => {
-      const hip = { x: 128, y: GROUND - 9 };
-      const lift = lerp(1, 36, t);
-      const farAnkle = { x: hip.x + 52, y: GROUND - 4 };
-      const far = twoBone(hip, farAnkle, SEG.thigh, SEG.shin, -1);
-      return {
-        view: 'side',
-        hip,
-        torso: 180,
-        head: 182,
-        armNear: { upper: 4, lower: 2, end: 0 },
-        armFar: { upper: 6, lower: 3, end: 0 },
-        legNear: { upper: -lift, lower: -lift, end: -lift - 80 },
-        legFar: { upper: far.a1, lower: far.a2, end: 0, lowerTo: farAnkle },
-      };
-    },
-  },
-
   // Standing, raise the straight arm forward and overhead
   ex_shoulder_flexion: {
     slug: 'ex_shoulder_flexion',
@@ -268,16 +243,6 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
     },
   },
 
-  // Supine, knees bent, feet flat: lift hips until shoulder–hip–knee is straight
-  ex_hip_bridge: {
-    slug: 'ex_hip_bridge',
-    view: 'side',
-    measurement: 'hip',
-    props: { mat: true },
-    caption: 'Knees bent, feet flat, lift the hips into a straight line',
-    pose: (t) => bridgePose(lerp(0, BRIDGE_TOP_LIFT, t)),
-  },
-
   // Back against the wall, feet forward, slide down to ~90° knee bend
   ex_wall_squat: {
     slug: 'ex_wall_squat',
@@ -305,6 +270,37 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
     },
   },
 
+  // Free-standing squat (side view): feet planted, hips back, chest forward,
+  // arms reaching forward for balance; down to ≈95° interior knee angle
+  ex_squat: {
+    slug: 'ex_squat',
+    view: 'side',
+    measurement: 'knee',
+    props: {},
+    caption: 'Feet shoulder-width, push the hips back and bend the knees as if sitting on a chair',
+    pose: (t) => {
+      const ankle = { x: 138, y: GROUND - 4 };
+      const knee = lerp(174, 95, t); // interior knee angle
+      const shinTilt = lerp(3, 28, t); // knee travels forward over the toes
+      const kneePt = add(ankle, dir(-90 + shinTilt), SEG.shin);
+      const thighDir = 90 + shinTilt + knee; // knee → hip
+      const hip = add(kneePt, dir(thighDir), SEG.thigh);
+      const thigh = thighDir - 180; // hip → knee
+      const shin = 90 + shinTilt; // knee → ankle
+      const lean = lerp(4, 38, t); // trunk inclination forward
+      return {
+        view: 'side',
+        hip,
+        torso: -90 + lean,
+        head: -90 + lean * 0.6,
+        armNear: { upper: lerp(60, -4, t), lower: lerp(60, -4, t), end: lerp(60, -4, t) },
+        armFar: { upper: lerp(62, -2, t), lower: lerp(62, -2, t), end: lerp(62, -2, t) },
+        legNear: { upper: thigh, lower: shin, end: 0, lowerTo: ankle },
+        legFar: { upper: thigh + 2, lower: shin, end: 0, lowerTo: { x: ankle.x + 3, y: ankle.y } },
+      };
+    },
+  },
+
   // Front view: large slow circles reaching overhead
   ex_arm_circles: {
     slug: 'ex_arm_circles',
@@ -328,70 +324,7 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
     },
   },
 
-  // Side-lying, hips and knees bent, feet together: open the top knee
-  ex_clamshell: {
-    slug: 'ex_clamshell',
-    view: 'side',
-    measurement: 'hip_opening',
-    props: { mat: true },
-    caption: 'Lying on your side, feet together, open the top knee',
-    pose: (t) => {
-      const hip = { x: 142, y: GROUND - 16 };
-      const open = lerp(4, 42, t);
-      const feet = { x: hip.x + 58, y: GROUND - 6 };
-      const bottomThigh = 58;
-      const topThigh = bottomThigh - open;
-      const bottomKnee = add(hip, dir(bottomThigh), SEG.thigh);
-      const topKnee = add(hip, dir(topThigh), SEG.thigh);
-      return {
-        view: 'side',
-        hip,
-        torso: 181,
-        head: 176,
-        armNear: { upper: 10, lower: 40, end: 60 },
-        armFar: { upper: 176, lower: 170, end: 170 },
-        legNear: { upper: topThigh, lower: angleOf(sub(feet, topKnee)), end: 10, lowerTo: { x: feet.x, y: feet.y - 3 } },
-        legFar: { upper: bottomThigh, lower: angleOf(sub(feet, bottomKnee)), end: 10, lowerTo: feet },
-      };
-    },
-  },
 };
-
-// ─── Hip bridge geometry ────────────────────────────────────────────
-// Shoulders stay on the floor and the feet stay planted; the pelvis rises.
-
-const BRIDGE_SHOULDER: Pt = { x: 62, y: GROUND - 10 };
-const BRIDGE_ANKLE: Pt = { x: BRIDGE_SHOULDER.x + SEG.torso + 40, y: GROUND - 4 };
-
-function bridgePose(lift: number): Pose {
-  const hip = { x: BRIDGE_SHOULDER.x + Math.sqrt(SEG.torso ** 2 - lift ** 2), y: BRIDGE_SHOULDER.y - lift };
-  const ik = twoBone(hip, BRIDGE_ANKLE, SEG.thigh, SEG.shin, -1);
-  const torso = angleOf(sub(BRIDGE_SHOULDER, hip));
-  return {
-    view: 'side',
-    hip,
-    torso,
-    head: 182,
-    armNear: { upper: 4, lower: 2, end: 0 },
-    armFar: { upper: 6, lower: 3, end: 0 },
-    legNear: { upper: ik.a1, lower: ik.a2, end: 0, lowerTo: BRIDGE_ANKLE },
-    legFar: { upper: ik.a1 + 1.5, lower: ik.a2, end: 0, lowerTo: { x: BRIDGE_ANKLE.x + 3, y: BRIDGE_ANKLE.y } },
-  };
-}
-
-/** Lift (px) at which shoulder–hip–knee is closest to a straight line */
-const BRIDGE_TOP_LIFT = (() => {
-  let best = 0;
-  let bestAngle = 0;
-  for (let lift = 0; lift <= SEG.torso * 0.85; lift += 0.25) {
-    const a = measure(buildSkeleton(bridgePose(lift)), 'hip').value;
-    if (a > bestAngle) {
-      bestAngle = a;
-      best = lift;
-    }
-  }
-  return best;
-})();
 
 // ─── Timeline ───────────────────────────────────────────────────────
 

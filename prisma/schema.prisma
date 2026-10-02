@@ -183,15 +183,18 @@ model Organization {
 
 // Login identity (Credentials auth). Clinician/Patient hold the profile.
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  name         String
-  role         UserRole
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  name            String
+  role            UserRole
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  // Terms of use / PDPA consent accepted in the entry popup (see lib/terms.ts)
+  termsVersion    String?
+  termsAcceptedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   clinician    Clinician?
   patient      Patient?
@@ -224,25 +227,25 @@ model Clinician {
 }
 
 model Patient {
-  id             String    @id @default(cuid())
-  userId         String?   @unique
-  organizationId String
-  name           String
-  hn             String? // Hospital Number, unique within the organization
-  dateOfBirth    DateTime? @db.Date
-  gender         Gender    @default(UNSPECIFIED)
-  condition      String?
-  phone          String?
-  clinicalNotes  String? // care-team notes, never shown to the patient
-  consentVersion String? // PDPA consent record
-  consentAt      DateTime?
+  id                  String    @id @default(cuid())
+  userId              String?   @unique
+  organizationId      String
+  name                String
+  hn                  String? // Hospital Number, unique within the organization
+  dateOfBirth         DateTime? @db.Date
+  gender              Gender    @default(UNSPECIFIED)
+  condition           String?
+  phone               String?
+  clinicalNotes       String? // care-team notes, never shown to the patient
+  consentVersion      String? // PDPA consent record
+  consentAt           DateTime?
   // Separate, explicit consent to record session video (PDPA sensitive data).
   // null = not given or withdrawn; recording is refused server-side without it.
   videoConsentVersion String?
   videoConsentAt      DateTime?
-  archivedAt     DateTime? // medical records are archived, never hard-deleted
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  archivedAt          DateTime? // medical records are archived, never hard-deleted
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
   organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -491,12 +494,12 @@ model ExerciseSession {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  exercise         Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
-  quest            Quest?            @relation(fields: [questId], references: [id], onDelete: SetNull)
-  prescription     Prescription?     @relation(fields: [prescriptionId], references: [id], onDelete: SetNull)
-  prescriptionItem PrescriptionItem? @relation(fields: [prescriptionItemId], references: [id], onDelete: SetNull)
-  clinician        Clinician?        @relation(fields: [clinicianId], references: [id], onDelete: SetNull)
+  patient          Patient             @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  exercise         Exercise            @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  quest            Quest?              @relation(fields: [questId], references: [id], onDelete: SetNull)
+  prescription     Prescription?       @relation(fields: [prescriptionId], references: [id], onDelete: SetNull)
+  prescriptionItem PrescriptionItem?   @relation(fields: [prescriptionItemId], references: [id], onDelete: SetNull)
+  clinician        Clinician?          @relation(fields: [clinicianId], references: [id], onDelete: SetNull)
   reps             SessionRep[]
   logs             JointAngleLog[]
   faults           SessionFault[]

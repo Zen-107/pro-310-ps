@@ -76,56 +76,6 @@ export const EXERCISES: ExerciseData[] = [
     ],
   },
   {
-    name: "Straight Leg Raise",
-    nameTh: "ยกขาตรง",
-    category: "knee",
-    description: "การฝึกยกขาตรงขึ้นขณะนอนหงาย เสริมกล้ามเนื้อ Quadriceps และฟื้นฟูข้อเข่า",
-    instructions: [
-      "นอนหงายบนพื้นเรียบ",
-      "ขาที่ไม่ฝึกให้งอเข่าเล็กน้อย",
-      "ขาที่ฝึกให้ตรง ค่อยยกขึ้น",
-      "ยกจนขาสูงเท่าขาอีกข้าง",
-      "ค้างไว้ 3-5 วินาที แล้วค่อยลง",
-    ],
-    targetJoints: [
-      {
-        name: "left_hip_flexion",
-        nameTh: "งอสะโพกซ้าย (ยกขา)",
-        idealAngle: 35,
-        minAngle: 25,
-        maxAngle: 45,
-        unit: "°",
-        rationale:
-          "Raise the straight leg to the height of the bent opposite thigh (app instructions; AAOS: 6–10 in off the floor). Developer estimate ≈25–45° hip flexion, well inside normal hip flexion of 100–140° (Physiopedia).",
-      },
-      {
-        name: "right_hip_flexion",
-        nameTh: "งอสะโพกขวา (ยกขา)",
-        idealAngle: 35,
-        minAngle: 25,
-        maxAngle: 45,
-        unit: "°",
-        rationale:
-          "Same as left side.",
-      },
-    ],
-    difficulty: "beginner",
-    sets: 3,
-    repsPerSet: 10,
-    restSeconds: 30,
-    icon: "ArrowUpFromLine",
-    bodyPart: "lower",
-    formChecks: [
-      {
-        "id": "lifted_knee_straight",
-        "type": "min",
-        "measurement": "{side}_knee",
-        "threshold": 160,
-        "message": "Keep the lifted knee straight"
-      }
-    ],
-  },
-  {
     name: "Shoulder Flexion",
     nameTh: "ยกแขนขึ้นด้านหน้า",
     category: "shoulder",
@@ -232,57 +182,6 @@ export const EXERCISES: ExerciseData[] = [
     ],
   },
   {
-    name: "Hip Bridge",
-    nameTh: "ยกสะโพก",
-    category: "hip",
-    description: "การฝึกยกสะโพกขณะนอนหงาย เสริมกล้ามเนื้อกล้ามเนื้อ Gluteus และฟื้นฟูสะโพก",
-    instructions: [
-      "นอนหงาย งอเข่าทั้งสองข้าง",
-      "เท้าวางแบนบนพื้น กว้างเท่าไหล่",
-      "กดเท้าลงพื้น ค่อยยกสะโพกขึ้น",
-      "ยกจนลำตัวเป็นเส้นตรงจากไหล่ถึงเข่า",
-      "ค้างไว้ 3-5 วินาที แล้วค่อยลง",
-    ],
-    targetJoints: [
-      {
-        name: "left_hip",
-        nameTh: "สะโพกซ้าย (ไหล่–สะโพก–เข่า)",
-        idealAngle: 175,
-        minAngle: 160,
-        maxAngle: 180,
-        unit: "°",
-        rationale:
-          "Top of the bridge = shoulder, hip and knee in a straight line (app instructions), i.e. neutral hip extension ≈180°. Hyperextension is not targeted.",
-      },
-      {
-        name: "right_hip",
-        nameTh: "สะโพกขวา (ไหล่–สะโพก–เข่า)",
-        idealAngle: 175,
-        minAngle: 160,
-        maxAngle: 180,
-        unit: "°",
-        rationale:
-          "Same as left side.",
-      },
-    ],
-    difficulty: "beginner",
-    sets: 3,
-    repsPerSet: 12,
-    restSeconds: 30,
-    icon: "Mountain",
-    bodyPart: "lower",
-    formChecks: [
-      {
-        "id": "pelvis_level",
-        "type": "symmetry",
-        "measurement": "left_hip",
-        "other": "right_hip",
-        "maxDiff": 10,
-        "message": "Keep your pelvis level — lift both hips evenly"
-      }
-    ],
-  },
-  {
     name: "Wall Squat",
     nameTh: "ย่อตัวกับผนัง",
     category: "knee",
@@ -375,45 +274,6 @@ export const EXERCISES: ExerciseData[] = [
       }
     ],
   },
-  {
-    name: "Clamshell",
-    nameTh: "ท่าเปลือกหอย",
-    category: "hip",
-    description: "การฝึกเปิด-ปิดเข่าขณะนอนข้าง เสริมกล้ามเนื้อ Gluteus Medius",
-    instructions: [
-      "นอนข้าง เข่างอ 45 องศา",
-      "เท้าซ้อนกัน",
-      "ค่อยเปิดเข่าข้างบนขึ้น",
-      "ค้างไว้ 2-3 วินาที",
-      "ค่อยปิดลง",
-    ],
-    targetJoints: [
-      {
-        name: "hip_opening",
-        nameTh: "มุมเปิดเข่า",
-        idealAngle: 40,
-        minAngle: 30,
-        maxAngle: 50,
-        unit: "°",
-        rationale:
-          "Knee separation while feet stay together; combines hip abduction and external rotation. Developer estimate bounded by normal hip abduction ≈40° (Physiopedia).",
-      },
-    ],
-    difficulty: "beginner",
-    sets: 3,
-    repsPerSet: 12,
-    restSeconds: 20,
-    icon: "Copy",
-    bodyPart: "lower",
-  },
-
-  // ─── Telerehabilitation set (movements from the KIMORE and REHAB24-6 datasets) ───
-  // KIMORE (Capecci et al., IEEE TNSRE 2019): lifting of the arms, lateral tilt
-  // of the trunk, trunk rotation, pelvis rotation, squatting.
-  // REHAB24-6 (Černek et al., 2024): arm abduction, arm VW, push-ups, leg
-  // abduction, leg lunge, squats.
-  // Neither dataset publishes angle thresholds: the targets below are developer
-  // estimates bounded by normative active ROM (AAOS), reasoning in `rationale`.
   {
     name: "Trunk Lateral Flexion",
     nameTh: "เอียงลำตัวด้านข้าง",

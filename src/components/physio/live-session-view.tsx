@@ -49,7 +49,8 @@ import { evaluateFormChecks, type FormCheck } from '@/lib/form-checks';
 import { ExerciseDemo } from '@/components/physio/exercise-demo';
 import { encodeFrame, REPLAY_CHUNK_FRAMES, REPLAY_FRAME_MS, type ReplayFrame } from '@/lib/replay';
 import { SessionVideoRecorder, pickRecorderMime } from '@/lib/session-video-recorder';
-import { chime, loadVoices, pickThaiVoice, speak } from '@/lib/speech';
+import { pickThaiVoice, speakThai, stopSpeech, unlockAudio } from '@/lib/speech';
+import { compensationCue, cueState, localCue, phraseForState } from '@/lib/coach-cues';
 import { VIDEO_CONSENT_POINTS, VIDEO_CONSENT_TITLE } from '@/lib/consent';
 import {
   calculateAllAngles,
@@ -255,11 +256,13 @@ function drawSkeleton(
   }
 }
 
-function readPref(key: string): boolean {
+function readPref(key: string, fallback = false): boolean {
   try {
-    return typeof window !== 'undefined' && localStorage.getItem(key) === '1';
+    if (typeof window === 'undefined') return fallback;
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
   } catch {
-    return false;
+    return fallback;
   }
 }
 
@@ -383,7 +386,7 @@ export function LiveSessionView() {
   const [selectedExercise, setSelectedExercise] = useState<ExerciseFromAPI | null>(null);
   // Remembered per-device preferences. Only the active-session screen reads
   // them (never server-rendered), so the lazy localStorage read is hydration-safe.
-  const [ttsEnabled, setTtsEnabled] = useState(() => readPref('physio.ttsEnabled'));
+  const [ttsEnabled, setTtsEnabled] = useState(() => readPref('physio.ttsEnabled', true)); // coach voice on unless muted
   const [panelCollapsed, setPanelCollapsed] = useState(() => readPref('physio.panelCollapsed'));
   const [demoOpen, setDemoOpen] = useState(true);
   // Video recording (PDPA): consent is per patient, recording can be turned off per session
@@ -436,9 +439,8 @@ export function LiveSessionView() {
   const handlePoseResultsRef = useRef<(results: unknown) => void>(() => {});
   const selectedExerciseRef = useRef<ExerciseFromAPI | null>(null);
   const isPausedRef = useRef<boolean>(false);
-  const ttsEnabledRef = useRef<boolean>(false);
+  const ttsEnabledRef = useRef<boolean>(readPref('physio.ttsEnabled', true));
   const thaiVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
-  const lastChimeTextRef = useRef<string | null>(null);
   // Latest skeleton to draw; written by pose results, painted by the rAF render loop
   const overlayRef = useRef<{ landmarks: Landmark[]; colors: Record<number, string> } | null>(null);
   const overlayVersionRef = useRef(0);
@@ -489,7 +491,7 @@ export function LiveSessionView() {
   useEffect(() => {
     if (isPaused) videoRecorderRef.current?.pause();
     else videoRecorderRef.current?.resume();
-    if (isPaused && typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (isPaused) stopSpeech();
   }, [isPaused]);
 
   useEffect(() => {
@@ -687,23 +689,35 @@ export function LiveSessionView() {
   }, [flushLogs, getSessionMetrics, releaseMedia]);
 
   // ─── TTS helper ─────────────────────────────────────────────────────
-  // Speech: browser Web Speech API with the best Thai voice; when the device
-  // has no Thai voice, a short Web Audio chime signals new on-screen advice
-  // instead of reading Thai with a foreign voice.
-  const say = useCallback((text: string) => {
-    if (typeof window === 'undefined') return;
-    if (!thaiVoiceRef.current || !('speechSynthesis' in window)) {
-      // Chime only when the advice changes, not for every repeated cue
-      if (text !== lastChimeTextRef.current) chime('cue');
-      lastChimeTextRef.current = text;
-      return;
-    }
+  // Coach voice (lib/speech.ts speakThai): server Thai TTS first, so it works
+  // on devices with no Thai voice installed; then the browser's Thai voice;
+  // a chime only when neither can speak (told once per device).
+  const notifyNoVoice = useCallback(() => {
+    let shown = false;
     try {
-      speak(text, thaiVoiceRef.current);
+      shown = localStorage.getItem('physio.noThaiVoiceNotice') === '1';
+      localStorage.setItem('physio.noThaiVoiceNotice', '1');
     } catch {
-      chime('cue');
+      // ignore
+    }
+    if (!shown) {
+      toast('ไม่สามารถเล่นเสียงพูดได้ในขณะนี้', {
+        description: 'ระบบจะใช้เสียงสัญญาณแทนเมื่อมีคำแนะนำใหม่ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต',
+        duration: 6000,
+        closeButton: true,
+      });
     }
   }, []);
+
+  const say = useCallback(
+    (text: string) => {
+      if (typeof window === 'undefined') return;
+      void speakThai(text, thaiVoiceRef.current).then((out) => {
+        if (out === 'chime') notifyNoVoice();
+      });
+    },
+    [notifyNoVoice]
+  );
 
   const speakText = useCallback(
     (text: string) => {
@@ -715,7 +729,7 @@ export function LiveSessionView() {
     [say]
   );
 
-  // Mute / unmute. Turning sound on plays immediately, inside the click,
+  // Mute / unmute. Turning sound on speaks immediately, inside the click,
   // which also unlocks audio in browsers that require a user gesture.
   const toggleTts = useCallback(() => {
     const next = !ttsEnabledRef.current;
@@ -727,37 +741,11 @@ export function LiveSessionView() {
       // ignore
     }
     if (!next) {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+      stopSpeech();
       return;
     }
-    if (thaiVoiceRef.current) {
-      say('เปิดเสียงโค้ชแล้วครับ');
-      return;
-    }
-    chime('ok'); // audible confirmation right away, within the user gesture
-    // Voices may still be loading: decide once the list is available
-    void loadVoices().then((voices) => {
-      thaiVoiceRef.current = pickThaiVoice(voices);
-      if (thaiVoiceRef.current) {
-        say('เปิดเสียงโค้ชแล้วครับ');
-        return;
-      }
-      // One quiet, dismissible notice per device — never a blocking banner
-      let shown = false;
-      try {
-        shown = localStorage.getItem('physio.noThaiVoiceNotice') === '1';
-        localStorage.setItem('physio.noThaiVoiceNotice', '1');
-      } catch {
-        // ignore
-      }
-      if (!shown) {
-        toast('ไม่พบเสียงพูดภาษาไทยในอุปกรณ์นี้', {
-          description: 'ระบบจะใช้เสียงสัญญาณแทนเมื่อมีคำแนะนำใหม่ (ติดตั้งเสียงภาษาไทยในระบบปฏิบัติการเพื่อฟังเป็นคำพูด)',
-          duration: 6000,
-          closeButton: true,
-        });
-      }
-    });
+    unlockAudio();
+    say('เปิดเสียงโค้ชแล้วครับ');
   }, [say]);
 
   const togglePanel = useCallback(() => {
@@ -840,7 +828,10 @@ export function LiveSessionView() {
         })
         .catch(() => {
           if (controller.signal.aborted) return;
-          useAppStore.getState().setAiFeedback('ทำได้ดีครับ ค่อยๆ ทำต่อไปนะครับ');
+          // Coach unreachable: deterministic Thai cue, still spoken
+          const fb = localCue(exercise.slug, exercise.targetJoints, currentAngles);
+          useAppStore.getState().setAiFeedback(fb);
+          speakText(fb);
         })
         .finally(() => {
           if (coachAbortRef.current === controller) coachAbortRef.current = null;
@@ -855,6 +846,8 @@ export function LiveSessionView() {
   // The server returns the exercise with the prescription's dose and angle
   // overrides applied; the session runs on those merged targets.
   const handleStartExercise = useCallback(async (start: { questId: string }) => {
+    // Runs inside the click: unlocks speech + Web Audio for the whole session
+    if (ttsEnabledRef.current) unlockAudio();
     setConnecting(true);
     try {
       const st = useAppStore.getState();
@@ -901,12 +894,14 @@ export function LiveSessionView() {
       setIsPaused(false);
       setElapsedSeconds(0);
       setPhase('active');
+      lastCoachCallRef.current = Date.now(); // first coach cue after the greeting
+      speakText(`เริ่มท่า${exercise.nameTh}กันเลยครับ จัดตัวให้กล้องเห็นทั้งตัวนะครับ`);
     } catch {
       toast.error('ไม่สามารถเริ่มเซสชันได้ กรุณาตรวจสอบการเชื่อมต่อ');
     } finally {
       setConnecting(false);
     }
-  }, []);
+  }, [speakText]);
 
   // ─── Stop session ───────────────────────────────────────────────────
   const handleStopSession = useCallback(async () => {
@@ -1274,7 +1269,12 @@ export function LiveSessionView() {
           const t = rep.target;
           pendingFaultsRef.current.push({ repNumber, type: 'LOW_ACCURACY', joint: t.name, measuredAngle: rep.bestAngles[t.name], expectedMin: t.minAngle, expectedMax: t.maxAngle, deficit: Math.round(Math.abs(rep.bestAngles[t.name] - t.idealAngle) * 10) / 10, message: `Rep accuracy ${Math.round(rep.bestAccuracy)}% (below ${LOW_ACCURACY_THRESHOLD}%)`, occurredAt: now });
         }
-        if (compensations.length) showFormCue(compensations[0].message);
+        if (compensations.length) {
+          showFormCue(compensations[0].message);
+          // Posture fault: spoken right away in Thai, coach waits so it doesn't talk over it
+          speakText(compensationCue(compensations[0].checkId));
+          lastCoachCallRef.current = now;
+        }
 
         pendingRepsRef.current.push({
           setNumber: st.currentSet,
@@ -1325,6 +1325,10 @@ export function LiveSessionView() {
         const message = `Range not reached — ${attempt.deficit}° short of the target`;
         pendingFaultsRef.current.push({ type: 'INCOMPLETE_ROM', joint: t.name, measuredAngle: attempt.peakAngle, expectedMin: t.minAngle, expectedMax: t.maxAngle, deficit: attempt.deficit, message, occurredAt: now });
         showFormCue(`Go a little further — ${Math.round(attempt.deficit)}° short of the target range`);
+        const cueTarget = exercise?.targetJoints.find((tj) => tj.name === t.name);
+        // Direction comes from the peak angle (a shallow squat is above its range, a low arm below)
+        if (cueTarget) speakText(phraseForState(exercise?.slug, cueTarget, cueState(cueTarget, attempt.peakAngle)));
+        lastCoachCallRef.current = Date.now(); // don't talk over this cue
       };
 
       for (const event of repCounterRef.current?.update(angles, now) ?? []) {

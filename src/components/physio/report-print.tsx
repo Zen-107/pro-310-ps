@@ -88,6 +88,22 @@ function durationText(start: string, end: string | null): string {
   return `${Math.floor(sec / 60)} นาที ${sec % 60} วินาที`;
 }
 
+/**
+ * Default PDF file name (without .pdf): printresult_<last 6 of session id>_<patient name>,
+ * e.g. printresult_e15htr_คุณวิชัย กล้าหาญ. Characters invalid in file names are removed.
+ */
+export function printFileName(report: Pick<PrintableReport, 'sessionId' | 'patient'>): string {
+  const sessionNo = report.sessionId.slice(-6).toLowerCase();
+  const name =
+    report.patient.name
+      .normalize('NFC')
+      .replace(/[\\/:*?"<>|#%{}~&\u0000-\u001f]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 60) || 'patient';
+  return `printresult_${sessionNo}_${name}`;
+}
+
 export function ReportPrintDocument({ report }: { report: PrintableReport }) {
   const names = Object.fromEntries(report.jointReport.map((j) => [j.joint, j.nameTh]));
   const primary = report.targets.find((t) => t.name === report.primaryJoint) ?? report.targets.find((t) => t.isPrimary);

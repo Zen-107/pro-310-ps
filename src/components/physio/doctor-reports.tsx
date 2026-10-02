@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ClinicalSummaryMarkdown, ReportPrintDocument, type PrintableReport } from '@/components/physio/report-print';
+import { ClinicalSummaryMarkdown, printFileName, ReportPrintDocument, type PrintableReport } from '@/components/physio/report-print';
 import { useAppStore } from '@/lib/store';
 import { categoryLabel } from '@/lib/exercises-data';
 import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
@@ -34,6 +35,7 @@ import {
   FileText,
   RefreshCw,
   Printer,
+  Download,
   Loader2,
   ClipboardList,
   Eye,
@@ -184,6 +186,24 @@ export function DoctorReports() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [report, setReport] = useState<ReportData | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const printDocRef = useRef<HTMLDivElement>(null);
+
+  // One-click PDF of the official print layout (lib/report-pdf.ts)
+  const downloadPdf = async (r: PrintableReport) => {
+    const doc = printDocRef.current?.querySelector<HTMLElement>('.report-print');
+    if (!doc) return;
+    setDownloadingPdf(true);
+    try {
+      const { downloadReportPdf } = await import('@/lib/report-pdf');
+      await downloadReportPdf(doc, printFileName(r));
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      toast.error('สร้างไฟล์ PDF ไม่สำเร็จ ลองใช้ปุ่ม "พิมพ์" แล้วเลือกบันทึกเป็น PDF');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
   const [loadingReport, setLoadingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -406,7 +426,11 @@ export function DoctorReports() {
           >
             <Card className="border-emerald-500/20 overflow-hidden" data-print-root>
               {/* Official printed document (only visible when printing) */}
-              {report && <ReportPrintDocument report={report} />}
+              {report && (
+                <div ref={printDocRef} className="contents">
+                  <ReportPrintDocument report={report} />
+                </div>
+              )}
 
               {/* Report header */}
               <div data-print-hide className="bg-gradient-to-r from-slate-800 to-slate-700 px-5 py-4 text-white">
@@ -435,14 +459,24 @@ export function DoctorReports() {
                         size="sm"
                         className="text-slate-300 hover:text-white hover:bg-white/10"
                         disabled={generating || loadingReport}
-                        onClick={() =>
-                          printReport(
-                            `Session report - ${report.patientName} - ${report.exerciseName} - ${report.startedAt.slice(0, 10)}`
-                          )
-                        }
+                        onClick={() => printReport(printFileName(report))}
                       >
                         <Printer className="h-3.5 w-3.5 mr-1.5" />
-                        พิมพ์ / PDF
+                        พิมพ์
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-slate-300 hover:text-white hover:bg-white/10"
+                        disabled={generating || loadingReport || downloadingPdf}
+                        onClick={() => downloadPdf(report)}
+                      >
+                        {downloadingPdf ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5 mr-1.5" />
+                        )}
+                        ดาวน์โหลด PDF
                       </Button>
                       <Button
                         variant="ghost"
@@ -784,6 +818,7 @@ export function DoctorReports() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.03 }}
                       onClick={() => openReport(s.id)}
+                      data-session-id={s.id}
                       className={`
                         flex items-center justify-between p-3.5 rounded-xl cursor-pointer
                         transition-all duration-150 group

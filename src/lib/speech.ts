@@ -53,6 +53,17 @@ export function loadVoices(timeoutMs = 1500): Promise<SpeechSynthesisVoice[]> {
 export const SPEECH_RATE = 0.95;
 export const SPEECH_PITCH = 1.0;
 
+// Chrome garbage-collects an utterance that is only referenced by the speech
+// queue, and it then never plays. Keep the live one referenced.
+let currentUtterance: SpeechSynthesisUtterance | null = null;
+let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Speak Thai text. `voice` may be null (voice list not loaded yet): the
+ * browser then picks its own voice for lang th-TH. The newest cue replaces
+ * any queued one. Chrome silently drops an utterance passed to speak() in the
+ * same tick as cancel(), so after a cancel the new one starts a moment later.
+ */
 export function speak(text: string, voice: SpeechSynthesisVoice | null): void {
   const synth = window.speechSynthesis;
   const u = new SpeechSynthesisUtterance(text.slice(0, 300));
@@ -60,13 +71,197 @@ export function speak(text: string, voice: SpeechSynthesisVoice | null): void {
   if (voice) u.voice = voice;
   u.rate = SPEECH_RATE;
   u.pitch = SPEECH_PITCH;
-  synth.cancel(); // newest cue replaces any queued one
-  // Chrome sometimes stays paused after cancel(); resume is a no-op otherwise
-  synth.resume();
-  synth.speak(u);
+  u.volume = 1;
+  u.onend = u.onerror = () => {
+    if (currentUtterance === u) currentUtterance = null;
+  };
+  if (pendingTimer) clearTimeout(pendingTimer);
+  const start = () => {
+    pendingTimer = null;
+    currentUtterance = u;
+    synth.resume(); // Chrome can stay paused after cancel(); no-op otherwise
+    synth.speak(u);
+  };
+  if (synth.speaking || synth.pending) {
+    synth.cancel();
+    pendingTimer = setTimeout(start, 80);
+  } else {
+    start();
+  }
+}
+
+export function stopSpeech(): void {
+  if (typeof window === 'undefined') return;
+  speakToken++; // drops any cue still being fetched
+  fetchAbort?.abort();
+  fetchAbort = null;
+  if (audioEl) audioEl.pause();
+  if (!('speechSynthesis' in window)) return;
+  if (pendingTimer) clearTimeout(pendingTimer);
+  pendingTimer = null;
+  currentUtterance = null;
+  window.speechSynthesis.cancel();
+}
+
+// ─── Coach voice: server TTS → browser Thai voice → chime ────────────
+
+/** 'superseded' = a newer cue replaced this one before it played */
+export type SpeechOutput = 'server' | 'browser' | 'chime' | 'superseded';
+
+let audioEl: HTMLAudioElement | null = null;
+let fetchAbort: AbortController | null = null;
+let speakToken = 0;
+/** Server TTS is skipped until this time after repeated failures / when disabled */
+let serverRetryAt = 0;
+let serverFailures = 0;
+const SERVER_BACKOFF_MS = 60_000;
+const SERVER_TIMEOUT_MS = 5000;
+const clipCache = new Map<string, string>(); // text → object URL (recent cues replay instantly)
+const CLIP_CACHE_MAX = 60;
+
+function getAudioEl(): HTMLAudioElement {
+  audioEl ??= new Audio();
+  audioEl.preload = 'auto';
+  return audioEl;
+}
+
+/** 50 ms of silence as a WAV data URI (primes the audio element inside a click) */
+function silentWav(): string {
+  const samples = 400; // 8 kHz × 0.05 s, 8-bit mono
+  const buf = new Uint8Array(44 + samples);
+  const dv = new DataView(buf.buffer);
+  const str = (o: number, s: string) => [...s].forEach((c, i) => (buf[o + i] = c.charCodeAt(0)));
+  str(0, 'RIFF');
+  dv.setUint32(4, 36 + samples, true);
+  str(8, 'WAVEfmt ');
+  dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true); // PCM
+  dv.setUint16(22, 1, true); // mono
+  dv.setUint32(24, 8000, true);
+  dv.setUint32(28, 8000, true);
+  dv.setUint16(32, 1, true);
+  dv.setUint16(34, 8, true);
+  str(36, 'data');
+  dv.setUint32(40, samples, true);
+  buf.fill(128, 44); // 8-bit silence
+  let bin = '';
+  buf.forEach((b) => (bin += String.fromCharCode(b)));
+  return 'data:audio/wav;base64,' + btoa(bin);
+}
+
+async function serverClip(text: string, signal: AbortSignal): Promise<string> {
+  const cached = clipCache.get(text);
+  if (cached) return cached;
+  const res = await fetch(`/api/tts?text=${encodeURIComponent(text)}`, {
+    signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(SERVER_TIMEOUT_MS)]) : signal,
+  });
+  if (res.status === 503) serverRetryAt = Number.POSITIVE_INFINITY; // disabled on this server
+  if (!res.ok) throw new Error(`TTS ${res.status}`);
+  const url = URL.createObjectURL(await res.blob());
+  clipCache.set(text, url);
+  if (clipCache.size > CLIP_CACHE_MAX) {
+    const oldest = clipCache.keys().next().value!;
+    URL.revokeObjectURL(clipCache.get(oldest)!);
+    clipCache.delete(oldest);
+  }
+  return url;
+}
+
+/**
+ * Speak a Thai coaching cue, replacing whatever is playing:
+ *  1. server TTS (/api/tts) — works without any Thai voice installed;
+ *  2. the browser's Thai voice (Web Speech), when the server is unavailable;
+ *  3. a chime, when neither can speak.
+ * Resolves with the output used.
+ */
+export async function speakThai(text: string, browserVoice: SpeechSynthesisVoice | null): Promise<SpeechOutput> {
+  if (typeof window === 'undefined') return 'superseded';
+  stopSpeech();
+  const token = ++speakToken;
+  const clean = text.trim().slice(0, 300);
+  if (!clean) return 'superseded';
+
+  if (Date.now() >= serverRetryAt) {
+    const ctrl = new AbortController();
+    fetchAbort = ctrl;
+    try {
+      const url = await serverClip(clean, ctrl.signal);
+      if (token !== speakToken) return 'superseded';
+      const el = getAudioEl();
+      el.src = url;
+      await el.play();
+      serverFailures = 0;
+      return 'server';
+    } catch (e) {
+      if (token !== speakToken || (e instanceof DOMException && e.name === 'AbortError' && ctrl.signal.aborted)) return 'superseded';
+      if (++serverFailures >= 2 && serverRetryAt !== Number.POSITIVE_INFINITY) {
+        serverRetryAt = Date.now() + SERVER_BACKOFF_MS;
+        serverFailures = 0;
+      }
+    } finally {
+      if (fetchAbort === ctrl) fetchAbort = null;
+    }
+  }
+
+  const canSpeak = 'speechSynthesis' in window && (!!browserVoice || !voicesReady());
+  if (canSpeak) {
+    try {
+      speak(clean, browserVoice);
+      return 'browser';
+    } catch {
+      // fall through to the chime
+    }
+  }
+  chime('cue');
+  return 'chime';
+}
+
+/** true once the browser has reported its voice list (it can be empty before that) */
+export function voicesReady(): boolean {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis.getVoices().length > 0;
+}
+
+/**
+ * Call synchronously inside a click handler (e.g. "start session"). Browsers
+ * only allow speech and Web Audio after a user gesture; a silent utterance
+ * and resuming the AudioContext here unlock both for the rest of the session.
+ */
+export function unlockAudio(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // Priming the shared <audio> element lets later server clips autoplay (iOS Safari)
+    const el = getAudioEl();
+    el.src = silentWav();
+    void el.play().catch(() => {});
+  } catch {
+    // ignore
+  }
+  try {
+    if ('speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.lang = 'th-TH';
+      window.speechSynthesis.resume();
+      window.speechSynthesis.speak(u);
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    void getAudioCtx()?.resume();
+  } catch {
+    // ignore
+  }
 }
 
 let audioCtx: AudioContext | null = null;
+
+function getAudioCtx(): AudioContext | null {
+  const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctor) return null;
+  audioCtx ??= new Ctor();
+  return audioCtx;
+}
 
 /**
  * Short two-note chime (Web Audio) used instead of speech when no Thai voice
@@ -75,10 +270,8 @@ let audioCtx: AudioContext | null = null;
  */
 export function chime(kind: 'cue' | 'ok' = 'cue'): void {
   try {
-    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return;
-    audioCtx ??= new Ctor();
-    const ctx = audioCtx;
+    const ctx = getAudioCtx();
+    if (!ctx) return;
     if (ctx.state === 'suspended') void ctx.resume();
     const notes = kind === 'cue' ? [659.25, 880] : [783.99];
     notes.forEach((freq, i) => {

@@ -96,6 +96,7 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 
 ### Account
 - **GET /api/me** — signed-in user + clinician/patient profile
+- **GET / POST /api/me/terms** (any role) — entry consent popup (`src/components/terms-gate.tsx`, text and `TERMS_VERSION` in `src/lib/terms.ts`). Until the current version is accepted, the home page renders only the popup and every other API route returns 403 `TERMS_REQUIRED` (`requireApiUser`); `{ accept: true, version }` records it (also sets `Patient.consentAt`)
 - **GET / POST /api/me/video-consent** (PATIENT) — video-recording consent status; `{ consent: true|false }` gives (current `VIDEO_CONSENT_VERSION`, text in `src/lib/consent.ts`) or withdraws it
 - **/api/auth/*** — next-auth (sign-in, sign-out, session, csrf)
 
@@ -150,7 +151,8 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 - **GET /api/messages/threads** — threads in scope with last message and unread count
 
 ### AI Coach (PATIENT)
-- **POST /api/coach** — one natural Thai coaching cue (spoken by the browser). The model sees only qualitative joint states from `src/lib/coach-cues.ts`, never angle numbers; replies containing degrees/percentages are replaced by a deterministic cue
+- **GET /api/tts?text=** — Thai speech (audio/mpeg) for the coach voice, synthesised server-side so it works without a Thai voice on the device (`src/lib/tts-server.ts`: Google Translate TTS, Thai word-boundary chunking, in-memory cache, 200 requests / 10 min per user; `TTS_PROVIDER="off"` disables). Client order in `src/lib/speech.ts` `speakThai`: server audio → browser Thai voice → chime
+- **POST /api/coach** — one natural Thai coaching cue (spoken via /api/tts). The model sees only qualitative joint states from `src/lib/coach-cues.ts`, never angle numbers; replies containing degrees/percentages are replaced by a deterministic cue
 
 ---
 
@@ -268,13 +270,13 @@ calculateAllAngles(image, { aspect: videoWidth / videoHeight, world });
 | Measurement | Formula | Used by |
 |---|---|---|
 | `left/right_knee` | angle(hip, knee, ankle) | Knee Flexion, Wall Squat |
-| `left/right_hip` | angle(shoulder, hip, knee) | Hip Bridge |
-| `left/right_hip_flexion` | 180 − angle(shoulder, hip, knee) | Straight Leg Raise |
-| `hip_opening` | angle(left_knee, mid_hip, right_knee) | Clamshell |
+| `left/right_hip` | angle(shoulder, hip, knee) | — (no standing/sitting exercise uses it) |
+| `left/right_hip_flexion` | 180 − angle(shoulder, hip, knee) | — (no standing/sitting exercise uses it) |
+| `hip_opening` | angle(left_knee, mid_hip, right_knee) | — (no standing/sitting exercise uses it) |
 | `left/right_shoulder` | angle(hip, shoulder, elbow) | Shoulder Flexion/Abduction, Arm Circles |
 | `left/right_elbow` | angle(shoulder, elbow, wrist) | form checks |
 
-The catalogue is limited to major joints MediaPipe tracks reliably in 3D. Neck, ankle (foot landmark) and the cat-cow / prone-scapular proxies were removed; their enum values remain in the schema only so old rows stay valid.
+The catalogue is limited to major joints MediaPipe tracks reliably in 3D, and to standing or sitting exercises a single webcam can see; floor and lying exercises (straight leg raise, hip bridge, clamshell) were removed and are marked RETIRED in existing databases. Neck, ankle (foot landmark) and the cat-cow / prone-scapular proxies were removed; their enum values remain in the schema only so old rows stay valid.
 
 **Smoothing** (`src/lib/landmark-smoother.ts`): every image and world coordinate passes a One Euro low-pass filter (min cutoff 1 Hz, β 5, derivative cutoff 2 Hz — ≈ 2.4× less jitter at rest, < 1° error once a hold settles). Visibility uses hysteresis: tracked from ≥ 0.65, dropped below 0.5; untracked landmarks are reported with visibility 0 and their filter restarts on re-acquisition.
 

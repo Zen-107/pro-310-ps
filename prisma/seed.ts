@@ -93,17 +93,12 @@ const CITATIONS: Record<string, Citation[]> = {
     { source: 'cuhKnee', relevance: 'CLOSE', sourceExerciseName: 'Heel slides', note: 'Knee flexion by sliding the heel toward the buttocks; matches the long-sitting variant used in the app.' },
     { source: 'aaosKnee', relevance: 'PARTIAL', sourceExerciseName: 'Hamstring Curls', note: 'Knee flexion performed standing rather than sitting.' },
   ],
-  ex_straight_leg_raise: [
-    { source: 'aaosKnee', relevance: 'EXACT', sourceExerciseName: 'Straight-Leg Raises' },
-    { source: 'cuhKnee', relevance: 'EXACT', sourceExerciseName: 'Straight Leg Raise' },
-  ],
   ex_shoulder_flexion: [
     { source: 'nhsAaaShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Assisted Flexion', note: 'Stick-assisted flexion lying on the back; the app uses active standing flexion.' },
   ],
   ex_shoulder_abduction: [
     { source: 'nhsAaaShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Assisted Abduction', note: 'Assisted by the other arm; the app uses active abduction.' },
   ],
-  ex_hip_bridge: [{ source: 'aaosSpine', relevance: 'EXACT', sourceExerciseName: 'Hip Bridge' }],
   ex_wall_squat: [
     { source: 'aaosKnee', relevance: 'PARTIAL', sourceExerciseName: 'Half Squats', note: 'Free-standing half squat, not against a wall.' },
     { source: 'cuhKnee', relevance: 'PARTIAL', sourceExerciseName: 'Squat', note: 'Mid-stage squat, not against a wall.' },
@@ -112,7 +107,6 @@ const CITATIONS: Record<string, Citation[]> = {
     { source: 'aaosShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Pendulum', note: 'Pendulum circles with the arm hanging, not standing arm circles at shoulder height.' },
     { source: 'nhsAaaShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Pendular Exercises', note: 'Pendulum circles with the arm hanging.' },
   ],
-  ex_clamshell: [{ source: 'aaosHip', relevance: 'EXACT', sourceExerciseName: 'Clamshell' }],
   ex_trunk_lateral_flexion: [
     { source: 'kimore', relevance: 'CLOSE', sourceExerciseName: 'Lateral tilt of the trunk with the arms in extension (Ex2)' },
   ],
@@ -339,7 +333,7 @@ async function main() {
         create: [
           item('ex_knee_flexion', 3, 10, 30, [], 0),
           item('ex_wall_squat', 2, 8, 45, [1, 3, 5], 1),
-          item('ex_straight_leg_raise', 3, 10, 30, [], 2),
+          item('ex_squat', 2, 8, 45, [2, 4, 6], 2),
         ],
       },
     },
@@ -380,7 +374,6 @@ async function main() {
               ],
             },
           },
-          item('ex_straight_leg_raise', 3, 10, 30, [], 1),
         ],
       },
     },

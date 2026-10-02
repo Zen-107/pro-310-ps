@@ -168,3 +168,24 @@ const NUMERIC_ANGLE = /\d+(\.\d+)?\s*(°|องศา|deg|%|เปอร์เ�
 export function isSpeakable(text: string): boolean {
   return !!text.trim() && !NUMERIC_ANGLE.test(text) && text.length <= 220;
 }
+
+// Spoken Thai for posture faults (form checks, see exercises-data formChecks)
+const COMPENSATION_PHRASES: Record<string, string> = {
+  elbow_straight: 'เหยียดข้อศอกให้ตรงนะครับ',
+  knees_even: 'เข่าทั้งสองข้างเหยียดตรงไว้ครับ เอียงจากลำตัวแทน',
+  left_arm_overhead: 'เหยียดแขนค้างไว้เหนือศีรษะนะครับ',
+  right_arm_overhead: 'เหยียดแขนค้างไว้เหนือศีรษะนะครับ',
+  lifted_knee_straight: 'เข่าข้างที่ยกเหยียดตรงไว้นะครับ',
+  no_side_bend: 'บิดตัวอย่างเดียวครับ ไม่ต้องเอียงข้าง',
+  other_leg_straight: 'ขาอีกข้างเหยียดตรงไว้นะครับ',
+  trunk_lean: 'ยกอกขึ้นนิดนึงครับ อย่าโน้มตัวไปข้างหน้ามาก',
+  trunk_level: 'ให้สะโพกและลำตัวอยู่ระดับเดียวกันนะครับ',
+  trunk_shift: 'ลำตัวอยู่ตรงกลางไว้ครับ อย่าเอียงไปข้างใดข้างหนึ่ง',
+  trunk_upright: 'ลำตัวตั้งตรงไว้นะครับ',
+  weight_even: 'ลงน้ำหนักให้เท่ากันทั้งสองขานะครับ',
+};
+
+/** Natural Thai cue for a failed form check (posture fault) */
+export function compensationCue(checkId: string): string {
+  return COMPENSATION_PHRASES[checkId] ?? 'ระวังท่าทางนิดนึงนะครับ ค่อยๆ ทำ';
+}
