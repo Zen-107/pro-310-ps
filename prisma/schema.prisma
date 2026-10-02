@@ -70,7 +70,9 @@ enum ExerciseStatus {
   RETIRED
 }
 
-// Measurement keys produced by calculateAllAngles() (formulas in src/lib/joint-formulas.ts)
+// Measurement keys produced by calculateAllAngles() (formulas in src/lib/joint-formulas.ts).
+// LEGACY (no longer measured or seeded, kept so old rows stay valid):
+// left/right_shoulder_extension, left/right_ankle, neck, spine_flexion
 enum JointName {
   left_knee
   right_knee
@@ -89,6 +91,13 @@ enum JointName {
   right_ankle
   neck
   spine_flexion
+}
+
+// Form problems detected during a session
+enum FaultType {
+  INCOMPLETE_ROM // movement toward the target that never reached the range
+  COMPENSATION // a form check failed at the rep's best moment (e.g. knee bent in SLR)
+  LOW_ACCURACY // counted rep scored below the accuracy threshold
 }
 
 // Where a target angle came from — shown to clinicians for transparency
@@ -179,8 +188,10 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  clinician Clinician?
-  patient   Patient?
+  clinician    Clinician?
+  patient      Patient?
+  sentMessages CareMessage[]
+  threadReads  CareThreadRead[]
 
   @@map("users")
 }
@@ -195,12 +206,13 @@ model Clinician {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  careAssignments CareAssignment[]
-  prescriptions   Prescription[]
-  reviews         SessionReview[]
-  verifiedSources ExerciseSource[]
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  careAssignments    CareAssignment[]
+  prescriptions      Prescription[]
+  reviews            SessionReview[]
+  verifiedSources    ExerciseSource[]
+  prescribedSessions ExerciseSession[]
 
   @@index([organizationId])
   @@map("clinicians")
@@ -228,6 +240,8 @@ model Patient {
   prescriptions   Prescription[]
   quests          Quest[]
   sessions        ExerciseSession[]
+  messages        CareMessage[]
+  threadReads     CareThreadRead[]
 
   @@index([organizationId])
   @@map("patients")
@@ -265,6 +279,7 @@ model Exercise {
   icon               String           @default("Activity")
   status             ExerciseStatus   @default(DRAFT)
   statusNote         String? // why it is DRAFT/RETIRED
+  formChecks         Json             @default("[]") // compensation checks, see src/lib/form-checks.ts
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
@@ -378,6 +393,7 @@ model Prescription {
   patient   Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
   clinician Clinician          @relation(fields: [clinicianId], references: [id], onDelete: Restrict)
   items     PrescriptionItem[]
+  sessions  ExerciseSession[]
 
   @@index([patientId, status])
   @@index([clinicianId])
@@ -399,6 +415,7 @@ model PrescriptionItem {
   exercise        Exercise                     @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
   targetOverrides PrescriptionTargetOverride[]
   quests          Quest[]
+  sessions        ExerciseSession[]
 
   @@index([prescriptionId])
   @@map("prescription_items")
@@ -440,35 +457,45 @@ model Quest {
 // ─── Session results & clinician verification ───────────────────────
 
 model ExerciseSession {
-  id               String        @id @default(cuid())
-  patientId        String
-  exerciseId       String
-  questId          String? // null = free practice
-  startedAt        DateTime      @default(now())
-  endedAt          DateTime?
-  status           SessionStatus @default(IN_PROGRESS)
-  totalReps        Int           @default(0)
-  avgAccuracy      Float         @default(0)
-  romMinAngle      Float?
-  romMaxAngle      Float?
-  romDegrees       Float? // romMaxAngle − romMinAngle of the primary joint
-  primaryJoint     JointName?
-  targetSnapshot   Json // exact targets (incl. overrides + formulas) used at runtime
-  algorithmVersion String // e.g. "angle-utils@2", for reproducibility
-  notes            String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  id                 String        @id @default(cuid())
+  patientId          String
+  exerciseId         String
+  questId            String? // set for every new session (free practice is disabled)
+  // Denormalized from the quest at start, so clinician views need no joins
+  prescriptionId     String?
+  prescriptionItemId String?
+  clinicianId        String? // prescribing clinician
+  startedAt          DateTime      @default(now())
+  endedAt            DateTime?
+  status             SessionStatus @default(IN_PROGRESS)
+  totalReps          Int           @default(0)
+  avgAccuracy        Float         @default(0)
+  romMinAngle        Float?
+  romMaxAngle        Float?
+  romDegrees         Float? // romMaxAngle − romMinAngle of the primary joint
+  primaryJoint       JointName?
+  targetSnapshot     Json // exact targets (incl. overrides + formulas) used at runtime
+  algorithmVersion   String // e.g. "angle-utils@2", for reproducibility
+  notes              String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  patient  Patient          @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  exercise Exercise         @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
-  quest    Quest?           @relation(fields: [questId], references: [id], onDelete: SetNull)
-  reps     SessionRep[]
-  logs     JointAngleLog[]
-  review   SessionReview?
-  reports  ClinicalReport[]
+  patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  exercise         Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  quest            Quest?            @relation(fields: [questId], references: [id], onDelete: SetNull)
+  prescription     Prescription?     @relation(fields: [prescriptionId], references: [id], onDelete: SetNull)
+  prescriptionItem PrescriptionItem? @relation(fields: [prescriptionItemId], references: [id], onDelete: SetNull)
+  clinician        Clinician?        @relation(fields: [clinicianId], references: [id], onDelete: SetNull)
+  reps             SessionRep[]
+  logs             JointAngleLog[]
+  faults           SessionFault[]
+  review           SessionReview?
+  reports          ClinicalReport[]
 
   @@index([patientId, startedAt])
   @@index([questId])
+  @@index([prescriptionId])
+  @@index([clinicianId, status])
   @@map("exercise_sessions")
 }
 
@@ -481,12 +508,35 @@ model SessionRep {
   durationMs Int
   bestAngle  Float
   accuracy   Float
+  isCorrect  Boolean  @default(true) // false when the rep has COMPENSATION / LOW_ACCURACY faults
 
   session ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   logs    JointAngleLog[]
+  faults  SessionFault[]
 
   @@unique([sessionId, repNumber])
   @@map("session_reps")
+}
+
+model SessionFault {
+  id            String    @id @default(cuid())
+  sessionId     String
+  repId         String? // null for INCOMPLETE_ROM (no rep was counted)
+  type          FaultType
+  checkId       String? // form-check id for COMPENSATION
+  joint         JointName
+  measuredAngle Float
+  expectedMin   Float?
+  expectedMax   Float?
+  deficit       Float? // degrees short of / beyond the expected range
+  message       String
+  occurredAt    DateTime
+
+  session ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  rep     SessionRep?     @relation(fields: [repId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@map("session_faults")
 }
 
 model JointAngleLog {
@@ -536,4 +586,35 @@ model ClinicalReport {
 
   @@index([sessionId])
   @@map("clinical_reports")
+}
+
+// ─── Care-team chat ─────────────────────────────────────────────────
+// One thread per patient, shared by the patient and every clinician in
+// their care team (CareAssignment).
+
+model CareMessage {
+  id        String   @id @default(cuid())
+  patientId String // the thread
+  senderId  String // User (patient or clinician)
+  body      String
+  createdAt DateTime @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  sender  User    @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, createdAt])
+  @@map("care_messages")
+}
+
+// Per-user read position in a patient's thread (for unread counts)
+model CareThreadRead {
+  patientId  String
+  userId     String
+  lastReadAt DateTime
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([patientId, userId])
+  @@map("care_thread_reads")
 }

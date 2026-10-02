@@ -56,7 +56,7 @@ export async function GET(_req: Request, { params }: Params) {
       if (!latestRom.has(s.exerciseId)) {
         latestRom.set(s.exerciseId, {
           exercise: s.exercise.name,
-          exerciseTh: s.exercise.nameTh,
+          exerciseTh: s.exercise.name, // English display name (field kept for compatibility)
           rom: Math.round(s.romDegrees ?? 0),
           accuracy: Math.round(s.avgAccuracy),
           date: localDateString(s.startedAt),
@@ -103,7 +103,7 @@ export async function GET(_req: Request, { params }: Params) {
       },
       sessionDetails: sessions.slice(0, 20).map((s) => ({
         id: s.id,
-        exerciseName: s.exercise.nameTh,
+        exerciseName: s.exercise.name,
         exerciseCategory: s.exercise.category,
         startedAt: s.startedAt.toISOString(),
         endedAt: s.endedAt?.toISOString() ?? null,

@@ -15,6 +15,9 @@ const SCORING = {
   rep: 'rep = enter [min, max] → hold ≥ 300 ms → leave the range by ≥ 5°; left/right sides tracked separately, both sides within 800 ms count once',
   rom: 'ROM = max − min of the primary measurement over visible frames',
   sessionAccuracy: 'session accuracy = mean of per-rep accuracy',
+  incompleteRom: 'INCOMPLETE_ROM = moved ≥ 10° from rest toward the range but returned without reaching it; deficit = degrees short of the nearest range edge',
+  compensation: 'COMPENSATION = a form check failed at the rep’s best moment (e.g. lifted knee < 160° in a straight leg raise); deficit = degrees beyond the allowed value',
+  lowAccuracy: 'LOW_ACCURACY = counted rep with accuracy < 60%; a rep with COMPENSATION or LOW_ACCURACY is marked incorrect',
 };
 
 async function loadSession(user: SessionUser, id: string) {
@@ -25,6 +28,7 @@ async function loadSession(user: SessionUser, id: string) {
       patient: { select: { name: true } },
       reps: { orderBy: { repNumber: 'asc' } },
       logs: true,
+      faults: { orderBy: { occurredAt: 'asc' }, include: { rep: { select: { repNumber: true } } } },
       review: { include: { clinician: { select: { title: true, user: { select: { name: true } } } } } },
       reports: { orderBy: { generatedAt: 'desc' }, take: 1 },
     },
@@ -59,11 +63,24 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
     };
   });
 
+  const faultCounts = { INCOMPLETE_ROM: 0, COMPENSATION: 0, LOW_ACCURACY: 0 };
+  const byCheck = new Map<string, { checkId: string; message: string; count: number }>();
+  for (const f of s.faults) {
+    faultCounts[f.type]++;
+    if (f.type === 'COMPENSATION') {
+      const key = f.checkId ?? f.message;
+      const entry = byCheck.get(key) ?? { checkId: key, message: f.message, count: 0 };
+      entry.count++;
+      byCheck.set(key, entry);
+    }
+  }
+  const incompleteDeficits = s.faults.filter((f) => f.type === 'INCOMPLETE_ROM' && f.deficit !== null).map((f) => f.deficit as number);
+
   const stored = s.reports[0];
   return {
     sessionId: s.id,
     patientName: s.patient.name,
-    exerciseName: s.exercise.nameTh,
+    exerciseName: s.exercise.name,
     exerciseNameEn: s.exercise.name,
     category: s.exercise.category,
     status: s.status,
@@ -86,7 +103,26 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
       bestAngle: Math.round(r.bestAngle * 10) / 10,
       accuracy: Math.round(r.accuracy),
       durationMs: r.durationMs,
+      isCorrect: r.isCorrect,
     })),
+    faults: {
+      total: s.faults.length,
+      counts: faultCounts,
+      incorrectReps: s.reps.filter((r) => !r.isCorrect).length,
+      avgIncompleteDeficit: incompleteDeficits.length ? Math.round(mean(incompleteDeficits) * 10) / 10 : null,
+      compensations: [...byCheck.values()].sort((a, b) => b.count - a.count),
+      items: s.faults.map((f) => ({
+        type: f.type,
+        repNumber: f.rep?.repNumber ?? null,
+        joint: f.joint,
+        measuredAngle: f.measuredAngle,
+        expectedMin: f.expectedMin,
+        expectedMax: f.expectedMax,
+        deficit: f.deficit,
+        message: f.message,
+        occurredAt: f.occurredAt.toISOString(),
+      })),
+    },
     clinicalSummary: isClinician ? stored?.content ?? null : null,
     generatedAt: isClinician ? stored?.generatedAt.toISOString() ?? null : null,
     reportModel: isClinician ? stored?.model ?? null : null,
@@ -146,6 +182,12 @@ export async function POST(_req: Request, { params }: Params) {
 
 ข้อมูลข้อต่อแต่ละจุด:
 ${jointLines || '- ไม่มีข้อมูลข้อต่อ'}
+
+ข้อผิดพลาดของท่าทาง:
+- ครั้งที่ไม่ถูกต้อง: ${report.faults.incorrectReps} จาก ${report.totalReps}
+- ทำไม่สุดระยะ (INCOMPLETE_ROM): ${report.faults.counts.INCOMPLETE_ROM} ครั้ง${report.faults.avgIncompleteDeficit !== null ? ` (ขาดเฉลี่ย ${report.faults.avgIncompleteDeficit}°)` : ''}
+- ท่าชดเชย (COMPENSATION): ${report.faults.compensations.map((c) => `${c.message} ×${c.count}`).join(', ') || 'ไม่พบ'}
+- ความแม่นยำต่ำ (LOW_ACCURACY): ${report.faults.counts.LOW_ACCURACY} ครั้ง
 
 กรุณาสรุปเป็นรายงานคลินิกภาษาไทย 3-4 ย่อหน้า:
 1. สรุปผลการฝึก

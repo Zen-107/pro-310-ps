@@ -49,6 +49,7 @@ export const questInclude = {
           title: true,
           notes: true,
           status: true,
+          clinicianId: true,
           clinician: { select: { title: true, user: { select: { name: true } } } },
         },
       },

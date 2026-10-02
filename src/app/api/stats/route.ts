@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     const allCompleted = await db.exerciseSession.findMany({
       where: { patientId, status: 'COMPLETED' },
       orderBy: { startedAt: 'asc' },
-      include: { exercise: { select: { nameTh: true, category: true } } },
+      include: { exercise: { select: { name: true, category: true } } },
     });
     const since = Date.now() - days * DAY_MS;
     const inRange = allCompleted.filter((s) => s.startedAt.getTime() >= since);
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       d.accuracySum += s.avgAccuracy;
       d.reps += s.totalReps;
       d.minutes += s.endedAt ? (s.endedAt.getTime() - s.startedAt.getTime()) / 60000 : 0;
-      d.exercises.push(s.exercise.nameTh);
+      d.exercises.push(s.exercise.name);
       daily.set(date, d);
     }
     const dailyData = [...daily.values()].map(({ accuracySum, ...d }) => {
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       categoryData: [...categoryCounts.entries()].map(([category, count]) => ({ category, count })),
       romData: allCompleted.slice(-30).map((s) => ({
         date: localDateString(s.startedAt),
-        exercise: s.exercise.nameTh,
+        exercise: s.exercise.name,
         joint: s.primaryJoint,
         rom: Math.round(s.romDegrees ?? 0),
         accuracy: Math.round(s.avgAccuracy),

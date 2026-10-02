@@ -10,6 +10,7 @@ import type {
   PrescriptionTargetOverride,
 } from '@prisma/client';
 import { ageFromDob, localDateString } from '@/lib/dates';
+import { parseFormChecks } from '@/lib/form-checks';
 
 export const GENDER_LABEL_TH: Record<Gender, string> = {
   MALE: 'ชาย',
@@ -84,6 +85,7 @@ export function exerciseDTO(
     restSeconds: dose?.restSeconds ?? ex.defaultRestSeconds,
     icon: ex.icon,
     status: ex.status,
+    formChecks: parseFormChecks(ex.formChecks),
     targetJoints: mergeTargets(ex.targets, overrides),
     references: (ex.references ?? []).map((r) => ({
       title: r.source.title,
@@ -107,6 +109,7 @@ export const exerciseInclude = {
 type SessionWithExercise = ExerciseSession & {
   exercise?: Pick<Exercise, 'name' | 'nameTh' | 'category' | 'icon'> | null;
   review?: { status: string } | null;
+  _count?: { faults: number };
 };
 
 export function sessionDTO(s: SessionWithExercise) {
@@ -115,6 +118,8 @@ export function sessionDTO(s: SessionWithExercise) {
     patientId: s.patientId,
     exerciseId: s.exerciseId,
     questId: s.questId,
+    prescriptionId: s.prescriptionId,
+    clinicianId: s.clinicianId,
     startedAt: s.startedAt.toISOString(),
     endedAt: s.endedAt?.toISOString() ?? null,
     status: s.status,
@@ -126,6 +131,7 @@ export function sessionDTO(s: SessionWithExercise) {
     primaryJoint: s.primaryJoint,
     notes: s.notes,
     reviewStatus: s.review?.status ?? null,
+    faultCount: s._count?.faults ?? null,
     exercise: s.exercise
       ? { name: s.exercise.name, nameTh: s.exercise.nameTh, category: s.exercise.category, icon: s.exercise.icon }
       : undefined,

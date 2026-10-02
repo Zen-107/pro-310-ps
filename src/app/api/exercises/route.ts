@@ -9,7 +9,9 @@ const CATEGORIES: ExerciseCategory[] = ['knee', 'shoulder', 'hip', 'back', 'neck
 const BODY_PARTS: BodyPart[] = ['upper', 'lower', 'full'];
 const DIFFICULTIES: Difficulty[] = ['beginner', 'intermediate', 'advanced'];
 
-// Published exercise library (with targets, formulas and citations)
+// Published exercise library (with targets, formulas and citations).
+// Clinicians see the full library; patients see only the exercises in their
+// active prescriptions (no free choice of exercises).
 export async function GET(req: NextRequest) {
   const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
   if ('response' in auth) return auth.response;
@@ -24,6 +26,9 @@ export async function GET(req: NextRequest) {
     category: pick('category', CATEGORIES),
     bodyPart: pick('bodyPart', BODY_PARTS),
     difficulty: pick('difficulty', DIFFICULTIES),
+    ...(auth.user.role === 'PATIENT'
+      ? { prescriptionItems: { some: { prescription: { patientId: auth.user.patientId ?? '__none__', status: 'ACTIVE' } } } }
+      : {}),
   };
 
   try {
