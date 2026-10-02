@@ -3,35 +3,11 @@ import { db } from '@/lib/db';
 import { requireApiUser, type SessionUser } from '@/lib/auth-guard';
 import { canAccessPatient } from '@/lib/access';
 import { badRequest, notFound, readJson, serverError } from '@/lib/api-utils';
-
-const MAX_BODY = 2000;
-
-const senderSelect = {
-  id: true,
-  name: true,
-  role: true,
-  clinician: { select: { title: true } },
-} as const;
+import { graphemes, sanitizeText } from '@/lib/text-safe';
+import { MAX_MESSAGE_LENGTH, markThreadRead, messageDTO, senderSelect } from '@/lib/messages';
 
 function threadPatientId(user: SessionUser, requested: string | null | undefined) {
   return user.role === 'PATIENT' ? user.patientId : requested ?? null;
-}
-
-type MessageRow = {
-  id: string;
-  body: string;
-  createdAt: Date;
-  sender: { id: string; name: string; role: string; clinician: { title: string } | null };
-};
-
-function messageDTO(m: MessageRow, meId: string) {
-  return {
-    id: m.id,
-    body: m.body,
-    createdAt: m.createdAt.toISOString(),
-    mine: m.sender.id === meId,
-    sender: { id: m.sender.id, name: m.sender.name, role: m.sender.role, title: m.sender.clinician?.title ?? null },
-  };
 }
 
 // Messages in a patient's care-team thread. Patients get their own thread;
@@ -56,12 +32,7 @@ export async function GET(req: NextRequest) {
     });
     const messages = (afterDate ? rows : rows.reverse()).map((m) => messageDTO(m, auth.user.id));
 
-    const now = new Date();
-    await db.careThreadRead.upsert({
-      where: { patientId_userId: { patientId, userId: auth.user.id } },
-      create: { patientId, userId: auth.user.id, lastReadAt: now },
-      update: { lastReadAt: now },
-    });
+    await markThreadRead(patientId, auth.user.id, new Date());
     return NextResponse.json({ patientId, messages });
   } catch (error) {
     return serverError('Messages GET error', error);
@@ -76,9 +47,9 @@ export async function POST(req: Request) {
   if (!input) return badRequest('Invalid JSON body');
   const patientId = threadPatientId(auth.user, typeof input.patientId === 'string' ? input.patientId : null);
   if (!patientId) return badRequest('patientId is required');
-  const body = typeof input.body === 'string' ? input.body.trim() : '';
+  const body = typeof input.body === 'string' ? sanitizeText(input.body).trim() : '';
   if (!body) return badRequest('Message body is required');
-  if (body.length > MAX_BODY) return badRequest(`Message must be at most ${MAX_BODY} characters`);
+  if (graphemes(body).length > MAX_MESSAGE_LENGTH) return badRequest(`Message must be at most ${MAX_MESSAGE_LENGTH} characters`);
 
   try {
     if (!(await canAccessPatient(auth.user, patientId))) return notFound('Patient not found');
@@ -86,11 +57,7 @@ export async function POST(req: Request) {
       data: { patientId, senderId: auth.user.id, body },
       include: { sender: { select: senderSelect } },
     });
-    await db.careThreadRead.upsert({
-      where: { patientId_userId: { patientId, userId: auth.user.id } },
-      create: { patientId, userId: auth.user.id, lastReadAt: message.createdAt },
-      update: { lastReadAt: message.createdAt },
-    });
+    await markThreadRead(patientId, auth.user.id, message.createdAt);
     return NextResponse.json(messageDTO(message, auth.user.id), { status: 201 });
   } catch (error) {
     return serverError('Messages POST error', error);

@@ -1,12 +1,37 @@
 'use client';
 
-import { useState } from 'react';
-import { Calculator, CheckCircle2, AlertTriangle, ListOrdered, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  Calculator,
+  CheckCircle2,
+  AlertTriangle,
+  ListOrdered,
+  Loader2,
+  Film,
+  Pause,
+  Play,
+  SkipBack,
+  SkipForward,
+  StepBack,
+  StepForward,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { getAccuracyTextColor } from '@/lib/angle-utils';
+import { getAccuracyTextColor, getAngleStatus, LANDMARKS, SKELETON_CONNECTIONS, type AngleStatus } from '@/lib/angle-utils';
+import { safeTruncate } from '@/lib/text-safe';
+import {
+  arcGeometry,
+  frameIndexAt,
+  framePoints,
+  measurementLandmarks,
+  pointOf,
+  project,
+  MID_SHOULDER,
+  type P2,
+  type ReplayFrame,
+} from '@/lib/replay';
 
 export interface ReportTarget {
   name: string;
@@ -28,6 +53,7 @@ export interface ReportRep {
   accuracy: number;
   durationMs: number;
   isCorrect?: boolean;
+  enteredAt?: string;
 }
 
 export interface ReportReview {
@@ -106,7 +132,7 @@ export function ReportFormulas({
                 </td>
                 <td className="p-2.5 text-muted-foreground">
                   {BASIS_LABEL[t.angleBasis] ?? t.angleBasis}
-                  {t.rationale && !t.overridden && <div className="mt-0.5 text-[11px]">{t.rationale}</div>}
+                  {t.rationale && !t.overridden && <div className="mt-0.5 text-[11px]">{safeTruncate(t.rationale, 600)}</div>}
                 </td>
               </tr>
             ))}
@@ -205,7 +231,7 @@ export function ReviewPanel({
             {review.status === 'APPROVED' ? 'รับรองแล้ว' : 'ต้องติดตาม'} โดย {review.reviewer.name} ·{' '}
             {new Date(review.reviewedAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}
           </p>
-          {review.comment && <p className="mt-1 text-muted-foreground">{review.comment}</p>}
+          {review.comment && <p className="mt-1 text-muted-foreground">{safeTruncate(review.comment, 1000)}</p>}
         </div>
       )}
       <Textarea
@@ -293,7 +319,7 @@ export function ReportFaultsPanel({ faults, totalReps }: { faults: ReportFaults;
         <ul className="space-y-1 text-xs">
           {faults.compensations.map((c) => (
             <li key={c.checkId} className="flex justify-between rounded bg-amber-50 px-2.5 py-1.5 dark:bg-amber-950/30">
-              <span>{c.message}</span>
+              <span>{safeTruncate(c.message, 160)}</span>
               <span className="font-semibold tabular-nums">×{c.count}</span>
             </li>
           ))}
@@ -320,7 +346,7 @@ export function ReportFaultsPanel({ faults, totalReps }: { faults: ReportFaults;
                   <td className="p-2 tabular-nums">{f.repNumber ?? '—'}</td>
                   <td className="p-2">
                     <span className="font-medium">{FAULT_LABEL[f.type]}</span>
-                    <div className="text-muted-foreground">{f.message}</div>
+                    <div className="text-muted-foreground">{safeTruncate(f.message, 160)}</div>
                   </td>
                   <td className="p-2 font-mono text-muted-foreground">{f.joint}</td>
                   <td className="p-2 text-right tabular-nums">{Math.round(f.measuredAngle)}°</td>
@@ -330,6 +356,709 @@ export function ReportFaultsPanel({ faults, totalReps }: { faults: ReportFaults;
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Clinical session replay ──────────────────────────────────────────
+// Plays back the pose frames recorded during the session (10 fps) on a
+// skeleton rig, with the recorded joint angles, the target (ROM) band of the
+// selected measurement and the form faults at the moment they were logged.
+
+const SPEEDS = [0.5, 1, 2] as const;
+const FAULT_WINDOW_MS = 750; // a fault is shown this long around its timestamp
+const SCRUB_STEP_MS = 100; // one recorded frame
+const RIG_W = 360;
+const RIG_H = 300;
+const CHART_W = 640;
+const CHART_H = 120;
+const CHART_PAD = { l: 34, r: 8, t: 14, b: 22 };
+
+const STATUS_STROKE: Record<AngleStatus, string> = {
+  good: 'stroke-emerald-500',
+  warn: 'stroke-amber-500',
+  bad: 'stroke-red-500',
+};
+const STATUS_TEXT: Record<AngleStatus, string> = {
+  good: 'fill-emerald-700 dark:fill-emerald-300',
+  warn: 'fill-amber-600 dark:fill-amber-300',
+  bad: 'fill-red-600 dark:fill-red-400',
+};
+const FAULT_FILL: Record<ReportFaults['items'][number]['type'], string> = {
+  COMPENSATION: 'fill-red-500',
+  INCOMPLETE_ROM: 'fill-amber-500',
+  LOW_ACCURACY: 'fill-orange-400',
+};
+
+const VIEWS = [
+  { label: 'กล้อง', yaw: 0 },
+  { label: 'ด้านข้าง', yaw: 90 },
+  { label: '45°', yaw: 45 },
+] as const;
+
+function formatClock(ms: number): string {
+  const s = Math.max(0, ms) / 1000;
+  const m = Math.floor(s / 60);
+  return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+}
+
+const dirOf = (deg: number): P2 => ({ x: Math.cos((deg * Math.PI) / 180), y: Math.sin((deg * Math.PI) / 180) });
+const r2 = (v: number) => Math.round(v * 100) / 100;
+
+/** SVG arc around c from angle a0 sweeping `sweep` degrees; wedge closes it to the centre */
+function arc(c: P2, radius: number, a0: number, sweep: number, wedge = false): string {
+  const p0 = { x: c.x + dirOf(a0).x * radius, y: c.y + dirOf(a0).y * radius };
+  const p1 = { x: c.x + dirOf(a0 + sweep).x * radius, y: c.y + dirOf(a0 + sweep).y * radius };
+  const large = Math.abs(sweep) > 180 ? 1 : 0;
+  const flag = sweep > 0 ? 1 : 0;
+  const a = `A${radius},${radius} 0 ${large} ${flag} ${r2(p1.x)},${r2(p1.y)}`;
+  return wedge ? `M${r2(c.x)},${r2(c.y)} L${r2(p0.x)},${r2(p0.y)} ${a} Z` : `M${r2(p0.x)},${r2(p0.y)} ${a}`;
+}
+
+interface ReplayFault {
+  t: number;
+  type: ReportFaults['items'][number]['type'];
+  joint: string;
+  message: string;
+  repNumber: number | null;
+  measuredAngle: number;
+}
+
+export function ClinicalSessionReplay({
+  sessionId,
+  targets,
+  faults,
+  reps,
+  primaryJoint,
+}: {
+  sessionId: string;
+  targets: ReportTarget[];
+  faults: ReportFaults['items'];
+  reps: ReportRep[];
+  primaryJoint: string | null;
+}) {
+  const [frames, setFrames] = useState<ReplayFrame[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [time, setTime] = useState(0); // ms since the first frame
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
+  const [yaw, setYaw] = useState(0);
+  const [focus, setFocus] = useState<string>(primaryJoint ?? targets.find((t) => t.isPrimary)?.name ?? targets[0]?.name ?? '');
+  const timeRef = useRef(0);
+  const chartRef = useRef<SVGSVGElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/sessions/${sessionId}/frames`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => !cancelled && setFrames(d.frames ?? []))
+      .catch(() => !cancelled && setLoadError(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  const t0 = frames?.[0]?.t ?? 0;
+  const duration = frames && frames.length > 1 ? frames[frames.length - 1].t - t0 : 0;
+
+  const seek = useCallback(
+    (ms: number) => {
+      const clamped = Math.min(Math.max(ms, 0), duration);
+      timeRef.current = clamped;
+      setTime(clamped);
+    },
+    [duration]
+  );
+
+  // Playback clock (requestAnimationFrame, scaled by speed)
+  useEffect(() => {
+    if (!playing || !frames?.length) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const next = timeRef.current + (now - last) * speed;
+      last = now;
+      if (next >= duration) {
+        seek(duration);
+        setPlaying(false);
+        return;
+      }
+      timeRef.current = next;
+      setTime(next);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, speed, frames, duration, seek]);
+
+  const replayFaults: ReplayFault[] = useMemo(
+    () =>
+      faults
+        .map((f) => ({
+          t: new Date(f.occurredAt).getTime() - t0,
+          type: f.type,
+          joint: f.joint,
+          message: f.message,
+          repNumber: f.repNumber,
+          measuredAngle: f.measuredAngle,
+        }))
+        .filter((f) => Number.isFinite(f.t))
+        .sort((a, b) => a.t - b.t),
+    [faults, t0]
+  );
+
+  const repMarks = useMemo(
+    () =>
+      reps
+        .filter((r) => r.enteredAt)
+        .map((r) => ({ t: new Date(r.enteredAt!).getTime() - t0, repNumber: r.repNumber, isCorrect: r.isCorrect !== false })),
+    [reps, t0]
+  );
+
+  // Stable framing: bounds of every point over the whole recording for this view
+  const bounds = useMemo(() => {
+    if (!frames?.length) return null;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const step = Math.max(1, Math.floor(frames.length / 400));
+    for (let i = 0; i < frames.length; i += step) {
+      for (const p of framePoints(frames[i]).values()) {
+        const q = project(p, yaw);
+        minX = Math.min(minX, q.x);
+        maxX = Math.max(maxX, q.x);
+        minY = Math.min(minY, q.y);
+        maxY = Math.max(maxY, q.y);
+      }
+    }
+    if (!Number.isFinite(minX)) return null;
+    const span = Math.max(maxX - minX, maxY - minY, 1e-3);
+    const scale = (Math.min(RIG_W, RIG_H) - 48) / span;
+    return {
+      toSvg: (p: P2): P2 => ({
+        x: RIG_W / 2 + (p.x - (minX + maxX) / 2) * scale,
+        y: RIG_H / 2 + (p.y - (minY + maxY) / 2) * scale,
+      }),
+    };
+  }, [frames, yaw]);
+
+  const idx = frames?.length ? frameIndexAt(frames, t0 + time) : -1;
+  const frame = idx >= 0 ? frames![idx] : null;
+  const now = frame ? frame.t - t0 : 0;
+  const activeFaults = replayFaults.filter((f) => Math.abs(f.t - now) <= FAULT_WINDOW_MS);
+  const faultLandmarks = new Map<number, ReplayFault['type']>();
+  for (const f of activeFaults) {
+    for (const lm of measurementLandmarks(f.joint)) {
+      if (faultLandmarks.get(lm) !== 'COMPENSATION') faultLandmarks.set(lm, f.type);
+    }
+  }
+
+  const targetByName = new Map(targets.map((t) => [t.name, t]));
+  const focusTarget = targetByName.get(focus);
+  // Measurements offered in the picker: targets, then anything a fault refers to
+  const measurementOptions = [...new Set([...targets.map((t) => t.name), ...replayFaults.map((f) => f.joint)])];
+
+  // ─── Chart series for the focused measurement ─────────────────────
+  const chart = useMemo(() => {
+    if (!frames?.length || !focus) return null;
+    const values = frames.map((f) => f.a[focus]);
+    const present = values.filter((v): v is number => v !== undefined);
+    if (!present.length) return { segments: [] as string[], yOf: (v: number) => v, lo: 0, hi: 180 };
+    let lo = Math.min(...present);
+    let hi = Math.max(...present);
+    if (focusTarget) {
+      lo = Math.min(lo, focusTarget.minAngle);
+      hi = Math.max(hi, focusTarget.maxAngle);
+    }
+    lo = Math.floor((lo - 5) / 10) * 10;
+    hi = Math.ceil((hi + 5) / 10) * 10;
+    const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r;
+    const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b;
+    const xOf = (t: number) => CHART_PAD.l + (duration > 0 ? (t / duration) * innerW : 0);
+    const yOf = (v: number) => CHART_PAD.t + (1 - (v - lo) / (hi - lo || 1)) * innerH;
+    // Polyline segments, broken where the measurement was not visible
+    const segments: string[] = [];
+    let cur: string[] = [];
+    frames.forEach((f, i) => {
+      const v = values[i];
+      if (v === undefined) {
+        if (cur.length > 1) segments.push(cur.join(' '));
+        cur = [];
+        return;
+      }
+      cur.push(`${r2(xOf(f.t - t0))},${r2(yOf(v))}`);
+    });
+    if (cur.length > 1) segments.push(cur.join(' '));
+    return { segments, yOf, lo, hi };
+  }, [frames, focus, focusTarget, duration, t0]);
+
+  const xOfTime = (t: number) => CHART_PAD.l + (duration > 0 ? (t / duration) * (CHART_W - CHART_PAD.l - CHART_PAD.r) : 0);
+
+  const scrubFromPointer = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const svg = chartRef.current;
+    if (!svg || duration <= 0) return;
+    const rect = svg.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * CHART_W;
+    const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r;
+    seek(((x - CHART_PAD.l) / innerW) * duration);
+  };
+
+  const jumpToFault = (direction: 1 | -1) => {
+    const list = direction > 0 ? replayFaults.filter((f) => f.t > now + 1) : replayFaults.filter((f) => f.t < now - 1).reverse();
+    if (list[0]) {
+      setPlaying(false);
+      seek(list[0].t);
+    }
+  };
+
+  const stepFrame = (delta: number) => {
+    if (!frames?.length) return;
+    setPlaying(false);
+    const next = Math.min(Math.max(idx + delta, 0), frames.length - 1);
+    seek(frames[next].t - t0);
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────
+  const header = (
+    <h4 className="text-sm font-semibold flex items-center gap-2">
+      <Film className="h-4 w-4 text-emerald-600" />
+      Clinical Session Replay
+      <span className="font-normal text-muted-foreground">· ภาพซ้ำการเคลื่อนไหวจากข้อมูลที่บันทึก</span>
+    </h4>
+  );
+
+  if (loadError) {
+    return (
+      <div className="space-y-3">
+        {header}
+        <p className="text-xs text-muted-foreground">โหลดข้อมูลการเคลื่อนไหวไม่สำเร็จ</p>
+      </div>
+    );
+  }
+  if (!frames) {
+    return (
+      <div className="space-y-3">
+        {header}
+        <div className="flex h-40 items-center justify-center rounded-xl border">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
+  if (frames.length < 2 || !bounds || !frame) {
+    return (
+      <div className="space-y-3">
+        {header}
+        <p className="rounded-xl border border-dashed p-4 text-xs text-muted-foreground">
+          ไม่มีข้อมูลเฟรมสำหรับเซสชันนี้ (เซสชันที่บันทึกก่อนเปิดใช้ระบบ replay จะไม่มีข้อมูลนี้)
+        </p>
+      </div>
+    );
+  }
+
+  const points = framePoints(frame);
+  const svgPt = (idx: number) => {
+    const p = pointOf(points, idx);
+    return p ? bounds.toSvg(project(p, yaw)) : null;
+  };
+
+  // Measurements drawn on the rig: every target, focused one emphasised
+  const arcs = targets
+    .map((t) => {
+      const value = frame.a[t.name];
+      const g = arcGeometry(t.name, points, yaw);
+      if (value === undefined || !g) return null;
+      const vertex = bounds.toSvg(g.vertex);
+      return { t, value, g, vertex, status: getAngleStatus(value, t.minAngle, t.maxAngle) };
+    })
+    .filter((a): a is NonNullable<typeof a> => a !== null);
+
+  const focusArc = arcs.find((a) => a.t.name === focus);
+  const neck = svgPt(MID_SHOULDER);
+  const nose = svgPt(LANDMARKS.NOSE);
+
+  return (
+    <div
+      className="space-y-3 outline-none"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === ' ') {
+          e.preventDefault();
+          setPlaying((p) => !p);
+        } else if (e.key === 'ArrowRight') stepFrame(1);
+        else if (e.key === 'ArrowLeft') stepFrame(-1);
+      }}
+      aria-label="Clinical session replay. Space to play or pause, arrow keys to step frames."
+    >
+      {header}
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+        {/* Rig */}
+        <div className="relative rounded-xl border bg-gradient-to-b from-muted/30 to-muted/60">
+          <svg viewBox={`0 0 ${RIG_W} ${RIG_H}`} className="h-72 w-full" role="img" aria-label={`Replay frame at ${formatClock(now)}`}>
+            {/* vertical reference through the pelvis for trunk measures */}
+            {focusArc?.g && focus.startsWith('trunk_') && (
+              <line
+                x1={focusArc.vertex.x}
+                y1={focusArc.vertex.y}
+                x2={focusArc.vertex.x}
+                y2={focusArc.vertex.y - 90}
+                className="stroke-slate-400"
+                strokeDasharray="3 3"
+                strokeWidth={1}
+              />
+            )}
+
+            {/* ROM threshold band + min/max rays for the focused measurement */}
+            {focusArc && (
+              <g>
+                <path
+                  d={arc(focusArc.vertex, 46, focusArc.g.startDeg + focusArc.g.sign * focusArc.t.minAngle, focusArc.g.sign * (focusArc.t.maxAngle - focusArc.t.minAngle), true)}
+                  className="fill-emerald-500/15 stroke-none"
+                />
+                {[focusArc.t.minAngle, focusArc.t.maxAngle].map((deg, i) => {
+                  const d = dirOf(focusArc.g.startDeg + focusArc.g.sign * deg);
+                  return (
+                    <g key={i}>
+                      <line
+                        x1={focusArc.vertex.x}
+                        y1={focusArc.vertex.y}
+                        x2={r2(focusArc.vertex.x + d.x * 58)}
+                        y2={r2(focusArc.vertex.y + d.y * 58)}
+                        className="stroke-emerald-600/70 dark:stroke-emerald-400/70"
+                        strokeDasharray="4 3"
+                        strokeWidth={1.2}
+                      />
+                      <text
+                        x={r2(focusArc.vertex.x + d.x * 66)}
+                        y={r2(focusArc.vertex.y + d.y * 66)}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        className="fill-emerald-700 dark:fill-emerald-300 text-[8px]"
+                      >
+                        {i === 0 ? 'min' : 'max'} {deg}°
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            )}
+
+            {/* bones */}
+            {SKELETON_CONNECTIONS.map(([a, b]) => {
+              const p = svgPt(a);
+              const q = svgPt(b);
+              if (!p || !q) return null;
+              const flagged = faultLandmarks.has(a) && faultLandmarks.has(b);
+              return (
+                <line
+                  key={`${a}-${b}`}
+                  x1={r2(p.x)}
+                  y1={r2(p.y)}
+                  x2={r2(q.x)}
+                  y2={r2(q.y)}
+                  className={flagged ? 'stroke-red-500' : 'stroke-slate-500 dark:stroke-slate-300'}
+                  strokeWidth={flagged ? 4 : 3}
+                  strokeLinecap="round"
+                />
+              );
+            })}
+            {neck && nose && (
+              <>
+                <line x1={r2(neck.x)} y1={r2(neck.y)} x2={r2(nose.x)} y2={r2(nose.y)} className="stroke-slate-400" strokeWidth={2} strokeLinecap="round" />
+                <circle cx={r2(nose.x)} cy={r2(nose.y)} r={9} className="fill-slate-300/70 stroke-slate-500 dark:fill-slate-600/70" strokeWidth={1} />
+              </>
+            )}
+
+            {/* joints + compensation markers */}
+            {[...points.keys()].filter((i) => i !== LANDMARKS.NOSE).map((i) => {
+              const p = svgPt(i)!;
+              const fault = faultLandmarks.get(i);
+              return (
+                <g key={i}>
+                  {fault && (
+                    <circle cx={r2(p.x)} cy={r2(p.y)} r={11} className={`${fault === 'COMPENSATION' ? 'stroke-red-500' : 'stroke-amber-500'} fill-none animate-pulse`} strokeWidth={2.5} />
+                  )}
+                  <circle cx={r2(p.x)} cy={r2(p.y)} r={4} className="fill-white stroke-slate-600" strokeWidth={1.2} />
+                </g>
+              );
+            })}
+
+            {/* angle arcs + recorded values */}
+            {arcs.map((a) => {
+              const focused = a.t.name === focus;
+              const label = dirOf(a.g.startDeg + (a.g.sign * a.g.projectedDeg) / 2);
+              const rad = focused ? 24 : 16;
+              return (
+                <g key={a.t.name} opacity={focused ? 1 : 0.65}>
+                  <path
+                    d={arc(a.vertex, rad, a.g.startDeg, a.g.sign * a.g.projectedDeg)}
+                    fill="none"
+                    className={STATUS_STROKE[a.status]}
+                    strokeWidth={focused ? 2.5 : 1.5}
+                    strokeLinecap="round"
+                  />
+                  <text
+                    x={r2(a.vertex.x + label.x * (rad + 12))}
+                    y={r2(a.vertex.y + label.y * (rad + 12))}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    className={`${STATUS_TEXT[a.status]} ${focused ? 'text-[11px] font-bold' : 'text-[9px] font-semibold'}`}
+                  >
+                    {Math.round(a.value)}°
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+
+          {activeFaults.length > 0 && (
+            <div className="absolute inset-x-2 top-2 space-y-1" role="status">
+              {activeFaults.slice(0, 3).map((f, i) => (
+                <div
+                  key={i}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium shadow-sm ${
+                    f.type === 'COMPENSATION'
+                      ? 'bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300'
+                      : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                  }`}
+                >
+                  {FAULT_LABEL[f.type]}
+                  {f.repNumber !== null && ` · ครั้งที่ ${f.repNumber}`} — {safeTruncate(f.message, 90)}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="absolute bottom-2 left-2 rounded bg-background/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            {frame.s === 'w' ? '3D world' : '2D image'} · frame {idx + 1}/{frames.length}
+          </div>
+        </div>
+
+        {/* Live angle panel */}
+        <div className="space-y-2">
+          <label className="block text-[11px] text-muted-foreground">
+            ค่าที่ติดตาม
+            <select
+              value={focus}
+              onChange={(e) => setFocus(e.target.value)}
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1.5 text-xs"
+            >
+              {measurementOptions.map((m) => (
+                <option key={m} value={m}>
+                  {targetByName.get(m)?.nameTh ?? m}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="rounded-xl border divide-y text-xs">
+            {targets.map((t) => {
+              const v = frame.a[t.name];
+              const status = v === undefined ? null : getAngleStatus(v, t.minAngle, t.maxAngle);
+              return (
+                <button
+                  type="button"
+                  key={t.name}
+                  onClick={() => setFocus(t.name)}
+                  className={`flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left ${t.name === focus ? 'bg-muted/60' : ''}`}
+                >
+                  <span>
+                    <span className="font-medium">{t.nameTh}</span>
+                    <span className="block text-[10px] text-muted-foreground tabular-nums">
+                      {t.minAngle}°–{t.maxAngle}°
+                    </span>
+                  </span>
+                  <span
+                    className={`tabular-nums font-bold ${
+                      status === 'good' ? 'text-emerald-600' : status === 'warn' ? 'text-amber-600' : status === 'bad' ? 'text-red-600' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {v === undefined ? '—' : `${Math.round(v)}°`}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="View angle">
+            {VIEWS.map((v) => (
+              <Button key={v.yaw} size="sm" variant={yaw === v.yaw ? 'secondary' : 'outline'} className="h-7 px-2 text-[11px]" onClick={() => setYaw(v.yaw)}>
+                {v.label}
+              </Button>
+            ))}
+          </div>
+          <input
+            type="range"
+            min={-90}
+            max={90}
+            step={5}
+            value={yaw}
+            onChange={(e) => setYaw(Number(e.target.value))}
+            className="w-full accent-emerald-600"
+            aria-label="Rotate view"
+          />
+          <p className="text-[10px] leading-snug text-muted-foreground">
+            ตัวเลขคือมุมที่วัดจริงขณะฝึก (3D); เส้นโค้งและเส้น min/max วาดบนภาพฉาย 2D จึงอาจไม่ตรงกับตัวเลขเมื่อมองจากมุมอื่น
+          </p>
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="rounded-xl border p-2">
+        <svg
+          ref={chartRef}
+          viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+          className="h-32 w-full cursor-pointer touch-none select-none"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setPlaying(false);
+            scrubFromPointer(e);
+          }}
+          onPointerMove={(e) => {
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) scrubFromPointer(e);
+          }}
+          role="img"
+          aria-label={`${focus} over time with target range and fault markers`}
+        >
+          {chart && focusTarget && (
+            <>
+              <rect
+                x={CHART_PAD.l}
+                y={chart.yOf(focusTarget.maxAngle)}
+                width={CHART_W - CHART_PAD.l - CHART_PAD.r}
+                height={Math.max(0, chart.yOf(focusTarget.minAngle) - chart.yOf(focusTarget.maxAngle))}
+                className="fill-emerald-500/10"
+              />
+              {[focusTarget.minAngle, focusTarget.maxAngle].map((v) => (
+                <g key={v}>
+                  <line x1={CHART_PAD.l} x2={CHART_W - CHART_PAD.r} y1={chart.yOf(v)} y2={chart.yOf(v)} className="stroke-emerald-600/60" strokeDasharray="4 3" />
+                  <text x={CHART_PAD.l - 4} y={chart.yOf(v)} textAnchor="end" dominantBaseline="middle" className="fill-emerald-700 dark:fill-emerald-300 text-[9px]">
+                    {v}°
+                  </text>
+                </g>
+              ))}
+            </>
+          )}
+          {chart && (
+            <>
+              <text x={CHART_PAD.l - 4} y={CHART_PAD.t} textAnchor="end" dominantBaseline="middle" className="fill-muted-foreground text-[9px]">
+                {chart.hi}°
+              </text>
+              <text x={CHART_PAD.l - 4} y={CHART_H - CHART_PAD.b} textAnchor="end" dominantBaseline="middle" className="fill-muted-foreground text-[9px]">
+                {chart.lo}°
+              </text>
+              {chart.segments.map((pts, i) => (
+                <polyline key={i} points={pts} fill="none" className="stroke-sky-600 dark:stroke-sky-400" strokeWidth={1.5} strokeLinejoin="round" />
+              ))}
+            </>
+          )}
+          {/* rep ticks */}
+          {repMarks.map((r) => (
+            <g key={r.repNumber}>
+              <line x1={xOfTime(r.t)} x2={xOfTime(r.t)} y1={CHART_PAD.t - 6} y2={CHART_PAD.t} className={r.isCorrect ? 'stroke-emerald-600' : 'stroke-amber-500'} strokeWidth={1.5} />
+            </g>
+          ))}
+          {/* fault markers */}
+          {replayFaults.map((f, i) => {
+            const x = xOfTime(f.t);
+            const y = CHART_H - CHART_PAD.b + 4;
+            return (
+              <path
+                key={i}
+                d={`M${r2(x)},${y} l4,8 l-8,0 Z`}
+                className={`${FAULT_FILL[f.type]} cursor-pointer`}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setPlaying(false);
+                  seek(f.t);
+                }}
+              >
+                <title>{`${FAULT_LABEL[f.type]} ${formatClock(f.t)}: ${f.message}`}</title>
+              </path>
+            );
+          })}
+          {/* playhead */}
+          <line x1={xOfTime(now)} x2={xOfTime(now)} y1={CHART_PAD.t - 8} y2={CHART_H - CHART_PAD.b} className="stroke-foreground" strokeWidth={1.5} />
+        </svg>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 text-[10px] text-muted-foreground">
+          <span><span className="inline-block h-2 w-3 bg-emerald-500/20 align-middle" /> ช่วงเป้าหมาย</span>
+          <span><span className="text-red-500">▲</span> ท่าชดเชย</span>
+          <span><span className="text-amber-500">▲</span> ทำไม่สุดระยะ</span>
+          <span><span className="text-orange-400">▲</span> ความแม่นยำต่ำ</span>
+          <span>| ขีดบน = จุดเริ่มแต่ละครั้ง</span>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
+          if (!playing && now >= duration) seek(0);
+          setPlaying((p) => !p);
+        }} aria-label={playing ? 'Pause' : 'Play'}>
+          {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+          {playing ? 'หยุด' : 'เล่น'}
+        </Button>
+        <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => stepFrame(-1)} aria-label="Previous frame">
+          <StepBack className="h-3.5 w-3.5" />
+        </Button>
+        <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => stepFrame(1)} aria-label="Next frame">
+          <StepForward className="h-3.5 w-3.5" />
+        </Button>
+        <div className="flex rounded-md border" role="group" aria-label="Playback speed">
+          {SPEEDS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSpeed(s)}
+              className={`px-2 py-1 text-xs tabular-nums ${speed === s ? 'bg-muted font-semibold' : 'text-muted-foreground'}`}
+              aria-pressed={speed === s}
+            >
+              {s}x
+            </button>
+          ))}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => jumpToFault(-1)} disabled={!replayFaults.some((f) => f.t < now - 1)}>
+          <SkipBack className="h-3.5 w-3.5" /> ข้อผิดพลาดก่อนหน้า
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => jumpToFault(1)} disabled={!replayFaults.some((f) => f.t > now + 1)}>
+          ข้อผิดพลาดถัดไป <SkipForward className="h-3.5 w-3.5" />
+        </Button>
+        <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
+          {formatClock(now)} / {formatClock(duration)}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={Math.max(duration, 1)}
+        step={SCRUB_STEP_MS}
+        value={Math.min(time, duration)}
+        onChange={(e) => {
+          setPlaying(false);
+          seek(Number(e.target.value));
+        }}
+        className="w-full accent-emerald-600"
+        aria-label="Scrub timeline"
+      />
+
+      {replayFaults.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[11px] font-medium text-muted-foreground">ข้ามไปยังเหตุการณ์ ({replayFaults.length})</p>
+          <div className="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+            {replayFaults.map((f, i) => (
+              <button
+                type="button"
+                key={i}
+                onClick={() => {
+                  setPlaying(false);
+                  seek(f.t);
+                }}
+                className={`rounded-full border px-2 py-0.5 text-[11px] tabular-nums hover:bg-muted ${Math.abs(f.t - now) <= FAULT_WINDOW_MS ? 'border-red-400 bg-red-50 dark:bg-red-950/40' : ''}`}
+                title={f.message}
+              >
+                {formatClock(f.t)} · {FAULT_LABEL[f.type]}
+                {f.repNumber !== null && ` #${f.repNumber}`}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

@@ -44,6 +44,7 @@ import { RepCounter, REP_DEFAULTS, type IncompleteAttempt, type RepCompletion } 
 import { LandmarkSmoother } from '@/lib/landmark-smoother';
 import { evaluateFormChecks, type FormCheck } from '@/lib/form-checks';
 import { ExerciseDemo } from '@/components/physio/exercise-demo';
+import { encodeFrame, REPLAY_CHUNK_FRAMES, REPLAY_FRAME_MS, type ReplayFrame } from '@/lib/replay';
 import {
   calculateAllAngles,
   isAngleCorrect,
@@ -104,6 +105,7 @@ const LOG_FLUSH_SIZE = 20; // flush buffered joint logs at this many rows
 const LOG_FLUSH_INTERVAL_MS = 5000; // ...or this often
 const LOG_BATCH_MAX = 200; // rows per request (matches the API cap)
 const LOG_BUFFER_MAX = 500; // drop oldest rows beyond this if the API is down
+const FRAME_BUFFER_MAX = 1200; // replay frames kept while the API is down (~2 min)
 
 // Target joint name → landmark index used for coloring
 const JOINT_INDEX: Record<string, number> = {
@@ -122,12 +124,17 @@ const JOINT_INDEX: Record<string, number> = {
   left_shoulder_extension: LANDMARKS.LEFT_SHOULDER,
   right_shoulder_extension: LANDMARKS.RIGHT_SHOULDER,
   spine_flexion: LANDMARKS.LEFT_SHOULDER,
+  left_hip_abduction: LANDMARKS.LEFT_HIP,
+  right_hip_abduction: LANDMARKS.RIGHT_HIP,
 };
 
 // Measurements with no single vertex landmark are colored on several joints
 const JOINT_INDEX_EXTRA: Record<string, number[]> = {
   hip_opening: [LANDMARKS.LEFT_KNEE, LANDMARKS.RIGHT_KNEE],
   spine_flexion: [LANDMARKS.RIGHT_SHOULDER],
+  trunk_lateral_flexion: [LANDMARKS.LEFT_SHOULDER, LANDMARKS.RIGHT_SHOULDER, LANDMARKS.LEFT_HIP, LANDMARKS.RIGHT_HIP],
+  trunk_inclination: [LANDMARKS.LEFT_SHOULDER, LANDMARKS.RIGHT_SHOULDER, LANDMARKS.LEFT_HIP, LANDMARKS.RIGHT_HIP],
+  trunk_rotation: [LANDMARKS.LEFT_SHOULDER, LANDMARKS.RIGHT_SHOULDER],
 };
 
 const KEY_INDICES = [
@@ -344,6 +351,9 @@ export function LiveSessionView() {
   const pendingLogsRef = useRef<PendingLog[]>([]);
   const pendingRepsRef = useRef<PendingRep[]>([]);
   const pendingFaultsRef = useRef<PendingFault[]>([]);
+  const pendingFramesRef = useRef<ReplayFrame[]>([]); // pose frames for clinical replay
+  const frameSeqRef = useRef<number>(0); // next replay chunk number
+  const lastFrameRecRef = useRef<number>(0);
   const smootherRef = useRef(new LandmarkSmoother()); // One Euro + visibility hysteresis
   const formCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppingRef = useRef<boolean>(false); // finalize the session exactly once
@@ -436,9 +446,45 @@ export function LiveSessionView() {
     };
   }, []);
 
+  // Upload recorded pose frames for clinical replay, REPLAY_CHUNK_FRAMES per
+  // chunk. Each chunk has a sequence number, so a retried upload is idempotent.
+  const flushFrames = useCallback(async (keepalive = false) => {
+    const sessionId = useAppStore.getState().currentSessionId;
+    const frames = pendingFramesRef.current;
+    if (!sessionId || frames.length === 0) return;
+    pendingFramesRef.current = [];
+    const chunks: { seq: number; frames: ReplayFrame[] }[] = [];
+    for (let i = 0; i < frames.length; i += REPLAY_CHUNK_FRAMES) {
+      chunks.push({ seq: frameSeqRef.current++, frames: frames.slice(i, i + REPLAY_CHUNK_FRAMES) });
+    }
+    const send = (chunk: (typeof chunks)[number]) =>
+      fetch(`/api/sessions/${sessionId}/frames`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(chunk),
+        keepalive,
+      }).then((res) => {
+        if (!res.ok) throw new Error(`Frame upload failed: ${res.status}`);
+      });
+    if (keepalive) {
+      chunks.forEach((c) => send(c).catch(() => {}));
+      return;
+    }
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        await send(chunks[i]);
+      } catch {
+        // Requeue unsent frames; they get new sequence numbers next time
+        pendingFramesRef.current = [...chunks.slice(i).flatMap((c) => c.frames), ...pendingFramesRef.current].slice(-FRAME_BUFFER_MAX);
+        return;
+      }
+    }
+  }, []);
+
   // Send buffered SessionRep + JointAngleLog rows in batches (reps first, so
   // logs can be linked to them). keepalive lets it survive page unload.
   const flushLogs = useCallback(async (keepalive = false) => {
+    await flushFrames(keepalive);
     const sessionId = useAppStore.getState().currentSessionId;
     const reps = pendingRepsRef.current;
     const logs = pendingLogsRef.current;
@@ -489,7 +535,7 @@ export function LiveSessionView() {
         return;
       }
     }
-  }, []);
+  }, [flushFrames]);
 
   // Periodic log flush while a session is active
   useEffect(() => {
@@ -529,22 +575,20 @@ export function LiveSessionView() {
   }, [flushLogs, getSessionMetrics, releaseMedia]);
 
   // ─── TTS helper ─────────────────────────────────────────────────────
-  const speakText = useCallback(async (text: string) => {
-    if (!ttsEnabledRef.current) return;
+  // Speech uses the browser's built-in Web Speech API (free, offline-capable
+  // Thai voices on most systems) — no server TTS service.
+  const speakText = useCallback((text: string) => {
+    if (!ttsEnabledRef.current || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    // Don't start talking after the session has ended
+    if (!useAppStore.getState().isSessionActive) return;
     try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      // Don't start talking after the session has ended
-      if (!useAppStore.getState().isSessionActive) return;
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.onended = () => URL.revokeObjectURL(url);
-      audio.play().catch(() => URL.revokeObjectURL(url));
+      const synth = window.speechSynthesis;
+      const utterance = new SpeechSynthesisUtterance(text.slice(0, 1024));
+      utterance.lang = 'th-TH';
+      const thaiVoice = synth.getVoices().find((v) => v.lang.toLowerCase().startsWith('th'));
+      if (thaiVoice) utterance.voice = thaiVoice;
+      synth.cancel(); // newest feedback replaces any queued line
+      synth.speak(utterance);
     } catch {
       // Silently fail TTS
     }
@@ -637,6 +681,9 @@ export function LiveSessionView() {
       pendingLogsRef.current = [];
       pendingRepsRef.current = [];
       pendingFaultsRef.current = [];
+      pendingFramesRef.current = [];
+      frameSeqRef.current = 0;
+      lastFrameRecRef.current = 0;
       smootherRef.current.reset();
       setFormCue(null);
       lastCoachCallRef.current = 0;
@@ -942,6 +989,12 @@ export function LiveSessionView() {
       const aspect =
         video.videoWidth > 0 && video.videoHeight > 0 ? video.videoWidth / video.videoHeight : 1;
       const angles = calculateAllAngles(landmarks, { aspect, world: smoothed.world });
+
+      // Record a replay frame at REPLAY_FPS (skipped while paused)
+      if (!isPausedRef.current && now - lastFrameRecRef.current >= REPLAY_FRAME_MS) {
+        lastFrameRecRef.current = now;
+        pendingFramesRef.current.push(encodeFrame(now, landmarks, smoothed.world, aspect, angles));
+      }
 
       // Throttled UI update: one store write per ~100 ms
       if (now - lastAngleUiRef.current >= ANGLE_UI_INTERVAL_MS) {

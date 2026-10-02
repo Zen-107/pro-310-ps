@@ -24,6 +24,7 @@ import {
   ReportReps,
   ReviewPanel,
   ReportFaultsPanel,
+  ClinicalSessionReplay,
   type ReportFaults,
   type ReportRep,
   type ReportReview,
@@ -620,6 +621,15 @@ export function DoctorReports() {
                     <ReportReps reps={report.reps} />
 
                     <ReportFaultsPanel faults={report.faults} totalReps={report.totalReps} />
+
+                    <ClinicalSessionReplay
+                      key={`replay-${report.sessionId}`}
+                      sessionId={report.sessionId}
+                      targets={report.targets}
+                      faults={report.faults.items}
+                      reps={report.reps}
+                      primaryJoint={report.primaryJoint}
+                    />
 
                     <Separator />
 

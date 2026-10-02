@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Send, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, Bot, Loader2, Send, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 
 // Care-team thread for one patient (patient ↔ all clinicians in the care team).
 // Polls for new messages every POLL_MS.
@@ -15,9 +16,12 @@ const MAX_LENGTH = 2000;
 interface Message {
   id: string;
   body: string;
+  kind: 'CARE_TEAM' | 'ASSISTANT_QUESTION' | 'ASSISTANT_REPLY';
+  escalated: boolean;
   createdAt: string;
   mine: boolean;
-  sender: { id: string; name: string; role: string; title: string | null };
+  /** null for AI companion replies */
+  sender: { id: string; name: string; role: string; title: string | null } | null;
 }
 
 const TITLE_LABEL: Record<string, string> = { DOCTOR: 'แพทย์', PHYSIOTHERAPIST: 'นักกายภาพ' };
@@ -27,6 +31,7 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [askAi, setAskAi] = useState(false); // patient: send to the AI companion
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastAtRef = useRef<string | null>(null);
 
@@ -88,14 +93,21 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
     if (!body || sending) return;
     setSending(true);
     try {
-      const res = await fetch('/api/messages', {
+      const toAi = viewer === 'PATIENT' && askAi;
+      const res = await fetch(toAi ? '/api/messages/assistant' : '/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ patientId, body }),
       });
+      if (res.status === 429) {
+        toast.error('ถามผู้ช่วย AI บ่อยเกินไป กรุณาลองใหม่ภายหลัง หรือส่งข้อความถึงทีมผู้ดูแล');
+        return;
+      }
       if (!res.ok) throw new Error();
-      append([await res.json()]);
+      const data = await res.json();
+      append(toAi ? data.messages : [data]);
       setDraft('');
+      if (toAi && data.escalated) toast.warning('แจ้งทีมผู้ดูแลแล้ว — หากฉุกเฉินโทร 1669');
     } catch {
       toast.error('ส่งข้อความไม่สำเร็จ');
     } finally {
@@ -115,17 +127,41 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
             {viewer === 'PATIENT' ? 'ยังไม่มีข้อความ — ส่งคำถามถึงทีมผู้ดูแลของคุณได้เลย' : 'ยังไม่มีข้อความกับผู้ป่วยรายนี้'}
           </p>
         ) : (
-          messages.map((m) => (
+          messages.map((m) => {
+            const ai = m.kind === 'ASSISTANT_REPLY';
+            return (
             <div key={m.id} className={`flex ${m.mine ? 'justify-end' : 'justify-start'}`}>
               <div
                 className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${
-                  m.mine ? 'rounded-br-sm bg-emerald-600 text-white' : 'rounded-bl-sm bg-muted'
-                }`}
+                  m.mine
+                    ? 'rounded-br-sm bg-emerald-600 text-white'
+                    : ai
+                      ? 'rounded-bl-sm border border-violet-200 bg-violet-50 dark:border-violet-800 dark:bg-violet-950/40'
+                      : 'rounded-bl-sm bg-muted'
+                } ${m.escalated ? 'ring-2 ring-red-400' : ''}`}
               >
-                {!m.mine && (
-                  <p className="mb-0.5 text-[11px] font-semibold text-muted-foreground">
-                    {m.sender.name}
-                    {m.sender.title && ` · ${TITLE_LABEL[m.sender.title] ?? m.sender.title}`}
+                {ai ? (
+                  <p className="mb-0.5 flex items-center gap-1 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+                    <Bot className="h-3.5 w-3.5" /> ผู้ช่วย AI
+                    <span className="font-normal text-muted-foreground">· ไม่ใช่คำแนะนำจากแพทย์</span>
+                  </p>
+                ) : (
+                  !m.mine &&
+                  m.sender && (
+                    <p className="mb-0.5 text-[11px] font-semibold text-muted-foreground">
+                      {m.sender.name}
+                      {m.sender.title && ` · ${TITLE_LABEL[m.sender.title] ?? m.sender.title}`}
+                    </p>
+                  )
+                )}
+                {m.kind === 'ASSISTANT_QUESTION' && (
+                  <p className={`mb-0.5 flex items-center gap-1 text-[10px] ${m.mine ? 'text-emerald-100' : 'text-violet-700 dark:text-violet-300'}`}>
+                    <Bot className="h-3 w-3" /> ถามผู้ช่วย AI
+                  </p>
+                )}
+                {m.escalated && (
+                  <p className={`mb-0.5 flex items-center gap-1 text-[10px] font-semibold ${m.mine ? 'text-white' : 'text-red-600 dark:text-red-400'}`}>
+                    <AlertTriangle className="h-3 w-3" /> อาการที่ทีมผู้ดูแลควรติดตาม
                   </p>
                 )}
                 <p className="whitespace-pre-wrap break-words">{m.body}</p>
@@ -134,7 +170,13 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
                 </p>
               </div>
             </div>
-          ))
+            );
+          })
+        )}
+        {sending && askAi && viewer === 'PATIENT' && (
+          <p className="flex items-center gap-1.5 text-xs text-violet-700 dark:text-violet-300">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> ผู้ช่วย AI กำลังตอบ…
+          </p>
         )}
         <div ref={bottomRef} />
       </div>
@@ -144,6 +186,17 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
           <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
           ข้อความนี้ไม่ใช่ช่องทางฉุกเฉิน — หากมีอาการรุนแรงหรือฉุกเฉิน โทร 1669
         </p>
+      )}
+
+      {viewer === 'PATIENT' && (
+        <label className="flex items-center gap-2 border-t px-4 py-2 text-xs">
+          <Switch checked={askAi} onCheckedChange={setAskAi} aria-label="Ask the AI assistant" />
+          <Bot className="h-3.5 w-3.5 text-violet-600" />
+          <span>
+            ถามผู้ช่วย AI เรื่องการทำท่าฝึก
+            <span className="block text-[10px] text-muted-foreground">ทีมผู้ดูแลเห็นคำถามและคำตอบทั้งหมด</span>
+          </span>
+        </label>
       )}
 
       <form
@@ -162,7 +215,11 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
               send();
             }
           }}
-          placeholder="พิมพ์ข้อความ… (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัดใหม่)"
+          placeholder={
+            askAi && viewer === 'PATIENT'
+              ? 'ถามผู้ช่วย AI เช่น "ยกขาตรงต้องค้างไว้นานแค่ไหน"'
+              : 'พิมพ์ข้อความ… (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัดใหม่)'
+          }
           className="max-h-32 min-h-10 resize-none"
           aria-label="Message"
         />

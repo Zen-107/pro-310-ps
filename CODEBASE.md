@@ -26,7 +26,7 @@ project-root/
 │   │       ├── sessions/            # GET/POST · [id]/ GET/PATCH · [id]/logs/ · [id]/review/
 │   │       ├── reports/[sessionId]/ # GET metrics+formulas · POST AI summary (stored)
 │   │       ├── stats/               # GET progress statistics
-│   │       ├── coach/ · tts/        # AI coach + speech (patient)
+│   │       ├── coach/               # AI coach feedback (patient; speech via browser Web Speech API)
 │   │       └── route.ts             # Root API health check
 │   │
 │   ├── components/
@@ -83,7 +83,7 @@ project-root/
 | **Database** | PostgreSQL + Prisma ORM (migrations) | Persistent data storage |
 | **Computer Vision** | MediaPipe (Web) | Pose detection & skeleton tracking |
 | **Math** | Vector algebra (JavaScript) | Angle calculation & ROM validation |
-| **AI/LLM** | Z-AI Web SDK | Coach feedback & clinical reports |
+| **AI/LLM** | OpenAI-compatible Chat Completions via `fetch` (Gemini / Groq / OpenRouter free tiers, or any compatible server) — `src/lib/ai-agent.ts` | Coach feedback, clinical reports, trend analysis, patient companion |
 | **Charts** | Recharts | Time-series data visualization |
 | **Package Manager** | Bun | Fast dependency management |
 | **Runtime** | Node.js + Next.js standalone | Production deployment |
@@ -126,10 +126,17 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 - **PATCH /api/sessions/[id]** (owning PATIENT, once) — `{ status: COMPLETED|CANCELLED, totalReps, avgAccuracy, romMinAngle, romMaxAngle, primaryJoint }`; server sets `endedAt`, `romDegrees` and the quest status
 - **POST /api/sessions/[id]/logs** (owning PATIENT) — `{ reps: [...], logs: [...], faults: [...] }`, ≤ 200 rows/request; logs and faults link to reps by `repNumber`; locked after review
 - **POST /api/sessions/[id]/review** (CLINICIAN) — `{ status: APPROVED|NEEDS_ATTENTION, comment? }`
+- **POST /api/sessions/[id]/frames** (owning PATIENT) — `{ seq, frames: ReplayFrame[] }` (≤ 100 frames, ~5 s per chunk, idempotent per `seq`); pose frames at 10 fps for clinical replay, format in `src/lib/replay.ts`; locked after review
+- **GET /api/sessions/[id]/frames** — all recorded frames in time order (used by *Clinical Session Replay* in the report)
 
 ### Reports
 - **GET /api/reports/[sessionId]** — metrics with explicit formulas (`angleDefinition`, `scoring`), targets (basis + rationale), per-joint and per-rep results, stored AI summary, review (AI summary and review comment are clinician-only)
-- **POST /api/reports/[sessionId]** (CLINICIAN) — generate + store an AI clinical summary
+- **POST /api/reports/[sessionId]** (CLINICIAN) — generate + store an AI clinical summary (`summarizeSession` in `src/lib/ai-agent.ts`)
+
+### AI agent (`src/lib/ai-agent.ts`)
+- **GET /api/patients/[id]/ai-insights** (CLINICIAN, care team) — computed per-exercise trends over the last 20 completed sessions: accuracy/ROM slope, fault rate per rep (early vs recent half), top compensations, flags. No AI call
+- **POST /api/patients/[id]/ai-insights** (CLINICIAN) — same trends + AI clinical summary/recommendations (`aiError` set and trends still returned if the AI service fails)
+- **POST /api/messages/assistant** (PATIENT) — `{ body }` → AI companion answer; question (`ASSISTANT_QUESTION`) and reply (`ASSISTANT_REPLY`, no sender) are both stored in the care-team thread. Red-flag symptoms get a fixed escalation reply without calling the model (`escalated: true`). 20 questions/hour
 
 ### Stats
 - **GET /api/stats?patientId=&days=30** — `profile` (streak, totals), `dailyData`, `categoryData`, `romData`
@@ -141,7 +148,6 @@ Every route requires a signed-in user (next-auth session cookie). **Scope:** a P
 
 ### AI Coach (PATIENT)
 - **POST /api/coach** — feedback from current visible target angles
-- **POST /api/tts** — text-to-speech for coach feedback
 
 ---
 

@@ -1,11 +1,11 @@
-import ZAI from 'z-ai-web-dev-sdk';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireApiUser, type SessionUser } from '@/lib/auth-guard';
 import { sessionScope } from '@/lib/access';
 import { jsonError, notFound, serverError } from '@/lib/api-utils';
 import { ANGLE_DEFINITION, JOINT_FORMULAS } from '@/lib/joint-formulas';
-import type { TargetDTO } from '@/lib/presenters';
+import { summarizeSession } from '@/lib/ai-agent';
+import { displayText, TEXT_LIMITS, type TargetDTO } from '@/lib/presenters';
 
 type Params = { params: Promise<{ sessionId: string }> };
 
@@ -69,7 +69,7 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
     faultCounts[f.type]++;
     if (f.type === 'COMPENSATION') {
       const key = f.checkId ?? f.message;
-      const entry = byCheck.get(key) ?? { checkId: key, message: f.message, count: 0 };
+      const entry = byCheck.get(key) ?? { checkId: key, message: displayText(f.message, TEXT_LIMITS.faultMessage) ?? '', count: 0 };
       entry.count++;
       byCheck.set(key, entry);
     }
@@ -104,6 +104,7 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
       accuracy: Math.round(r.accuracy),
       durationMs: r.durationMs,
       isCorrect: r.isCorrect,
+      enteredAt: r.enteredAt.toISOString(),
     })),
     faults: {
       total: s.faults.length,
@@ -119,7 +120,7 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
         expectedMin: f.expectedMin,
         expectedMax: f.expectedMax,
         deficit: f.deficit,
-        message: f.message,
+        message: displayText(f.message, TEXT_LIMITS.faultMessage) ?? '',
         occurredAt: f.occurredAt.toISOString(),
       })),
     },
@@ -128,7 +129,7 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
     reportModel: isClinician ? stored?.model ?? null : null,
     review: s.review && {
       status: s.review.status,
-      comment: isClinician ? s.review.comment : null,
+      comment: isClinician ? displayText(s.review.comment, TEXT_LIMITS.notes) : null,
       reviewedAt: s.review.reviewedAt.toISOString(),
       reviewer: { name: s.review.clinician.user.name, title: s.review.clinician.title },
     },
@@ -160,56 +161,16 @@ export async function POST(_req: Request, { params }: Params) {
     if (s.status !== 'COMPLETED') return jsonError('Reports can only be generated for completed sessions', 409);
     const report = buildReport(s, true);
 
-    const jointLines = report.jointReport
-      .map((j) => {
-        const range = j.target ? `เป้าหมาย ${j.target.minAngle}–${j.target.maxAngle}° (ideal ${j.target.idealAngle}°)` : 'ไม่มีเป้าหมาย';
-        return `- ${j.nameTh} [${j.formula ?? '-'}]: เฉลี่ย ${j.avgAngle}° (ต่ำสุด ${j.minAngle}°, สูงสุด ${j.maxAngle}°), ${range}, ถูกต้อง ${j.accuracy}% จาก ${j.samples} ครั้ง`;
-      })
-      .join('\n');
-
-    const prompt = `สร้าง Clinical Summary Report สำหรับนักกายภาพบำบัด
-
-ข้อมูลเซสชัน:
-- ท่าทาง: ${report.exerciseName} (${report.exerciseNameEn}), หมวด ${report.category}
-- เวลา: ${s.startedAt.toLocaleString('th-TH')} – ${s.endedAt?.toLocaleString('th-TH') ?? '-'}
-- จำนวนครั้ง: ${report.totalReps}, ความแม่นยำเฉลี่ย ${report.avgAccuracy}%
-- ROM (${report.primaryJoint ?? '-'}): ${report.maxRom}° (ช่วง ${report.romMinAngle ?? '-'}° – ${report.romMaxAngle ?? '-'}°)
-
-วิธีคำนวณ:
-- มุม: ${report.angleDefinition}
-- ${report.scoring.accuracy}
-- ${report.scoring.rom}
-
-ข้อมูลข้อต่อแต่ละจุด:
-${jointLines || '- ไม่มีข้อมูลข้อต่อ'}
-
-ข้อผิดพลาดของท่าทาง:
-- ครั้งที่ไม่ถูกต้อง: ${report.faults.incorrectReps} จาก ${report.totalReps}
-- ทำไม่สุดระยะ (INCOMPLETE_ROM): ${report.faults.counts.INCOMPLETE_ROM} ครั้ง${report.faults.avgIncompleteDeficit !== null ? ` (ขาดเฉลี่ย ${report.faults.avgIncompleteDeficit}°)` : ''}
-- ท่าชดเชย (COMPENSATION): ${report.faults.compensations.map((c) => `${c.message} ×${c.count}`).join(', ') || 'ไม่พบ'}
-- ความแม่นยำต่ำ (LOW_ACCURACY): ${report.faults.counts.LOW_ACCURACY} ครั้ง
-
-กรุณาสรุปเป็นรายงานคลินิกภาษาไทย 3-4 ย่อหน้า:
-1. สรุปผลการฝึก
-2. การวิเคราะห์ข้อต่อแต่ละจุด (อ้างอิงตัวเลขด้านบน)
-3. คำแนะนำสำหรับครั้งต่อไป
-4. ระดับความเสี่ยง (ถ้ามี)
-
-หมายเหตุ: ข้อมูลมาจากการตรวจจับท่าทางด้วย AI แพทย์ควรพิจารณาร่วมกับการตรวจร่างกาย ห้ามเปลี่ยนแผนการรักษาเอง`;
-
-    const zai = await ZAI.create();
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'system', content: 'คุณคือนักกายภาพบำบัดที่เขียนรายงานคลินิก ใช้ภาษาไทยที่เป็นมืออาชีพ แต่อ่านง่าย' },
-        { role: 'user', content: prompt },
-      ],
-      thinking: { type: 'disabled' },
-    });
-    const content = completion.choices[0]?.message?.content;
-    if (!content) return jsonError('The AI service returned no report', 502);
+    let summary;
+    try {
+      summary = await summarizeSession({ ...report, startedAt: s.startedAt, endedAt: s.endedAt });
+    } catch (error) {
+      console.error('AI report error:', error);
+      return jsonError('The AI service returned no report', 502);
+    }
 
     const stored = await db.clinicalReport.create({
-      data: { sessionId, content, model: (completion as { model?: string }).model ?? 'z-ai' },
+      data: { sessionId, content: summary.content, model: summary.model },
     });
     return NextResponse.json({
       ...report,

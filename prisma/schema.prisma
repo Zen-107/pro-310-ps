@@ -91,6 +91,11 @@ enum JointName {
   right_ankle
   neck
   spine_flexion
+  left_hip_abduction
+  right_hip_abduction
+  trunk_lateral_flexion
+  trunk_inclination
+  trunk_rotation
 }
 
 // Form problems detected during a session
@@ -491,6 +496,7 @@ model ExerciseSession {
   faults           SessionFault[]
   review           SessionReview?
   reports          ClinicalReport[]
+  frameChunks      SessionFrameChunk[]
 
   @@index([patientId, startedAt])
   @@index([questId])
@@ -559,6 +565,21 @@ model JointAngleLog {
   @@map("joint_angle_logs")
 }
 
+// Recorded pose landmarks for clinical session replay, uploaded in chunks
+// of ~5 s. `frames` is ReplayFrame[] (format in src/lib/replay.ts).
+model SessionFrameChunk {
+  id        String   @id @default(cuid())
+  sessionId String
+  seq       Int // client chunk sequence number (idempotent re-upload)
+  startedAt DateTime // first frame time
+  frames    Json
+
+  session ExerciseSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, seq])
+  @@map("session_frame_chunks")
+}
+
 model SessionReview {
   id          String       @id @default(cuid())
   sessionId   String       @unique
@@ -592,15 +613,27 @@ model ClinicalReport {
 // One thread per patient, shared by the patient and every clinician in
 // their care team (CareAssignment).
 
+// CARE_TEAM = normal message; ASSISTANT_QUESTION = patient asked the AI companion;
+// ASSISTANT_REPLY = AI companion answer (no sender). All kinds stay in the
+// thread so the care team can see what the assistant told the patient.
+enum MessageKind {
+  CARE_TEAM
+  ASSISTANT_QUESTION
+  ASSISTANT_REPLY
+}
+
 model CareMessage {
-  id        String   @id @default(cuid())
+  id        String      @id @default(cuid())
   patientId String // the thread
-  senderId  String // User (patient or clinician)
+  senderId  String? // User (patient or clinician); null for ASSISTANT_REPLY
+  kind      MessageKind @default(CARE_TEAM)
+  escalated Boolean     @default(false) // assistant detected red-flag symptoms
+  model     String? // AI model for ASSISTANT_REPLY
   body      String
-  createdAt DateTime @default(now())
+  createdAt DateTime    @default(now())
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  sender  User    @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  sender  User?   @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([patientId, createdAt])
   @@map("care_messages")

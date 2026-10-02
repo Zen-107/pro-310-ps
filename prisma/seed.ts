@@ -58,9 +58,27 @@ const SOURCES = {
     institution: 'Cambridge University Hospitals NHS Foundation Trust',
     authors: null,
   },
+  // Telerehabilitation datasets: they describe the movements, not target angles.
+  // Seeded PENDING (see UNVERIFIED_SOURCES) until a developer or clinician checks them.
+  kimore: {
+    title: 'The KIMORE Dataset: KInematic Assessment of MOvement and Clinical Scores for Remote Monitoring of Physical REhabilitation (IEEE TNSRE, 2019)',
+    url: 'https://vrai.dii.univpm.it/content/kimore-dataset',
+    institution: 'Università Politecnica delle Marche — VRAI Lab',
+    authors: 'Capecci M., Ceravolo M. G., Ferracuti F., Iarlori S., Monteriù A., Romeo L., Verdini F.',
+  },
+  rehab24: {
+    title: 'REHAB24-6: A multi-modal dataset of physical rehabilitation exercises',
+    url: 'https://zenodo.org/records/13305826',
+    institution: 'Masaryk University — Faculty of Informatics',
+    authors: 'Černek A., Sedmidubsky J., Budikova P., Jánošová M., Katzer L., Procházka M.',
+  },
 } as const;
 
 type SourceKey = keyof typeof SOURCES;
+
+// Sources not yet opened and checked by a person: seeded PENDING, so they
+// never make an exercise PUBLISHED on their own.
+const UNVERIFIED_SOURCES = new Set<SourceKey>(['kimore', 'rehab24']);
 
 interface Citation {
   source: SourceKey;
@@ -95,12 +113,28 @@ const CITATIONS: Record<string, Citation[]> = {
     { source: 'nhsAaaShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Pendular Exercises', note: 'Pendulum circles with the arm hanging.' },
   ],
   ex_clamshell: [{ source: 'aaosHip', relevance: 'EXACT', sourceExerciseName: 'Clamshell' }],
+  ex_trunk_lateral_flexion: [
+    { source: 'kimore', relevance: 'CLOSE', sourceExerciseName: 'Lateral tilt of the trunk with the arms in extension (Ex2)' },
+  ],
+  ex_trunk_rotation: [{ source: 'kimore', relevance: 'CLOSE', sourceExerciseName: 'Trunk rotation (Ex3)' }],
+  ex_squat: [
+    { source: 'kimore', relevance: 'CLOSE', sourceExerciseName: 'Squatting (Ex5)' },
+    { source: 'rehab24', relevance: 'EXACT', sourceExerciseName: 'Squats (Ex6)' },
+    { source: 'aaosKnee', relevance: 'CLOSE', sourceExerciseName: 'Half Squats', note: 'Partial-depth squat; the app allows up to a parallel squat.' },
+  ],
+  ex_forward_lunge: [{ source: 'rehab24', relevance: 'CLOSE', sourceExerciseName: 'Leg lunge (Ex5)' }],
+  ex_side_lunge: [
+    { source: 'rehab24', relevance: 'PARTIAL', sourceExerciseName: 'Leg lunge (Ex5)', note: 'Lateral variation of the dataset lunge.' },
+  ],
+  ex_standing_hip_abduction: [{ source: 'rehab24', relevance: 'CLOSE', sourceExerciseName: 'Leg abduction (Ex4)' }],
 };
 
 // An exercise is PUBLISHED only if it has a verified citation AND every target
 // joint has a formula in the angle engine; otherwise it is seeded as DRAFT.
 function draftReason(slug: string, joints: string[]): string | null {
-  if (!CITATIONS[slug]?.length) return 'No verified source cited.';
+  if (!CITATIONS[slug]?.some((c) => !UNVERIFIED_SOURCES.has(c.source))) {
+    return CITATIONS[slug]?.length ? 'Cited sources are pending verification.' : 'No verified source cited.';
+  }
   const unmeasurable = joints.filter((j) => !JOINT_FORMULAS[j]);
   if (unmeasurable.length) return `No angle formula for: ${unmeasurable.join(', ')}.`;
   return null;
@@ -119,19 +153,27 @@ async function main() {
   // ─── Sources ──────────────────────────────────────────────────────
   const sourceIds = {} as Record<SourceKey, string>;
   for (const [key, s] of Object.entries(SOURCES) as [SourceKey, (typeof SOURCES)[SourceKey]][]) {
+    const verified = !UNVERIFIED_SOURCES.has(key);
     const created = await db.exerciseSource.create({
       data: {
-        sourceType: 'PATIENT_EDUCATION',
+        sourceType: verified ? 'PATIENT_EDUCATION' : 'JOURNAL_ARTICLE',
         title: s.title,
         url: s.url,
         institution: s.institution,
         authors: s.authors,
         accessedAt: ACCESSED_AT,
-        verificationStatus: 'VERIFIED',
-        verifiedByType: 'DEVELOPER',
-        verifiedByName: VERIFIER_NAME,
-        verifiedAt: ACCESSED_AT,
-        notes: 'Developer-verified citation (not clinically reviewed). Source does not specify target angles.',
+        ...(verified
+          ? {
+              verificationStatus: 'VERIFIED' as const,
+              verifiedByType: 'DEVELOPER' as const,
+              verifiedByName: VERIFIER_NAME,
+              verifiedAt: ACCESSED_AT,
+              notes: 'Developer-verified citation (not clinically reviewed). Source does not specify target angles.',
+            }
+          : {
+              verificationStatus: 'PENDING' as const,
+              notes: 'Research dataset: describes the exercise movements, not target angles. Pending verification.',
+            }),
       },
     });
     sourceIds[key] = created.id;

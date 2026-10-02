@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
 import { badRequest, isFiniteNumber, isIntInRange, jsonError, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
 import { JOINT_FORMULAS } from '@/lib/joint-formulas';
+import { cleanText } from '@/lib/text-safe';
 
 const MAX_ROWS_PER_REQUEST = 200;
 const FAULT_TYPES: FaultType[] = ['INCOMPLETE_ROM', 'COMPENSATION', 'LOW_ACCURACY'];
@@ -173,7 +174,7 @@ export async function POST(req: Request, { params }: Params) {
           expectedMin: (f.expectedMin as number | null | undefined) ?? null,
           expectedMax: (f.expectedMax as number | null | undefined) ?? null,
           deficit: (f.deficit as number | null | undefined) ?? null,
-          message: (f.message as string).trim().slice(0, 300),
+          message: cleanText(f.message, 300) ?? 'Form fault',
           occurredAt: new Date(f.occurredAt as number),
         })),
       });

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope } from '@/lib/access';
 import { serverError } from '@/lib/api-utils';
+import { safeTruncate } from '@/lib/text-safe';
 
 // Threads visible to the caller with last message and unread count
 // (clinician: every care-team patient; patient: their own thread).
@@ -35,7 +36,7 @@ export async function GET() {
           patientName: p.name,
           unread,
           lastMessage: last
-            ? { body: last.body.slice(0, 120), createdAt: last.createdAt.toISOString(), mine: last.senderId === me }
+            ? { body: safeTruncate(last.body, 120), createdAt: last.createdAt.toISOString(), mine: last.senderId === me }
             : null,
         };
       })

@@ -2,7 +2,7 @@
 // in angle-utils.ts. Stored on ExerciseJointTarget.formula and shown in
 // clinician reports. Keep in sync with angle-utils.ts and landmark-smoother.ts.
 
-export const ANGLE_ALGORITHM_VERSION = 'angle-utils@4';
+export const ANGLE_ALGORITHM_VERSION = 'angle-utils@5';
 
 // How angle(A, B, C) is computed (B = vertex)
 export const ANGLE_DEFINITION =
@@ -24,4 +24,9 @@ export const JOINT_FORMULAS: Record<string, string | null> = {
   right_shoulder: 'angle(right_hip, right_shoulder, right_elbow)',
   left_elbow: 'angle(left_shoulder, left_elbow, left_wrist)',
   right_elbow: 'angle(right_shoulder, right_elbow, right_wrist)',
+  left_hip_abduction: 'angle(right_hip, left_hip, left_knee) − 90',
+  right_hip_abduction: 'angle(left_hip, right_hip, right_knee) − 90',
+  trunk_lateral_flexion: 'angle between (mid_shoulder − mid_hip) projected on the frontal x–y plane and vertical (assumes a level camera)',
+  trunk_inclination: 'angle between (mid_shoulder − mid_hip) and vertical in 3D (assumes a level camera)',
+  trunk_rotation: 'angle between (right_shoulder − left_shoulder) and (right_hip − left_hip) projected on the transverse x–z plane (world landmarks only)',
 };

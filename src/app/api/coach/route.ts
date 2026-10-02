@@ -1,6 +1,6 @@
-import ZAI from 'z-ai-web-dev-sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiUser } from '@/lib/auth-guard';
+import { complete } from '@/lib/ai-agent';
 
 const SYSTEM_PROMPT = `คุณคือ AI Physio Coach — นักกายภาพบำบัด AI ที่เป็นมิตรและเป็นกันเอง
 คุณมีหน้าที่:
@@ -23,15 +23,6 @@ const SYSTEM_PROMPT = `คุณคือ AI Physio Coach — นักกาย
 - "ไหล่ซ้ายยกสูงเกินไปนิดหน่อย ลองลดลงประมาณ 10 องศาครับ"
 - "สม่ำเสมอดีมากเลย! อีก 3 ครั้งก็ครบเซ็ตแล้ว"`;
 
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
-
-async function getZAI() {
-  if (!zaiInstance) {
-    zaiInstance = await ZAI.create();
-  }
-  return zaiInstance;
-}
-
 export async function POST(req: NextRequest) {
   // Paid AI service: only signed-in patients during a session
   const auth = await requireApiUser(['PATIENT']);
@@ -39,8 +30,6 @@ export async function POST(req: NextRequest) {
 
   try {
     const { exerciseName, currentAngles, targetJoints, repCount, setCount } = await req.json();
-
-    const zai = await getZAI();
 
     const angleInfo = Object.entries(currentAngles || {})
       .map(([joint, angle]) => {
@@ -61,15 +50,8 @@ ${angleInfo || 'ไม่มีข้อมูลมุมข้อต่อ'}
 
 กรุณาวิเคราะห์และให้ feedback สั้นๆ`;
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userMessage },
-      ],
-      thinking: { type: 'disabled' },
-    });
-
-    const feedback = completion.choices[0]?.message?.content || 'ทำดีมากครับ! ทำต่อไปเลย';
+    const { content } = await complete(SYSTEM_PROMPT, userMessage);
+    const feedback = content || 'ทำดีมากครับ! ทำต่อไปเลย';
 
     return NextResponse.json({ feedback });
   } catch (error) {

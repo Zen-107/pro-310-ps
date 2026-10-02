@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
+import { AiInsightsPanel } from '@/components/physio/ai-insights-panel';
 import { categoryLabel } from '@/lib/exercises-data';
 import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
 
@@ -502,6 +503,11 @@ export function DoctorPatients() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* ── AI agent: fault trends & recommendations ── */}
+          <motion.div variants={FADE_UP}>
+            <AiInsightsPanel key={patient.id} patientId={patient.id} />
+          </motion.div>
 
           {/* ── 6. Category Breakdown ── */}
           {Object.keys(catStats).length > 0 && (

@@ -171,9 +171,9 @@ export const EXERCISES: ExerciseData[] = [
       },
       {
         "id": "trunk_upright",
-        "type": "min",
-        "measurement": "{side}_hip",
-        "threshold": 160,
+        "type": "max",
+        "measurement": "trunk_inclination",
+        "threshold": 15,
         "message": "Keep your trunk upright — do not lean back"
       }
     ],
@@ -224,9 +224,9 @@ export const EXERCISES: ExerciseData[] = [
       },
       {
         "id": "trunk_upright",
-        "type": "min",
-        "measurement": "{side}_hip",
-        "threshold": 165,
+        "type": "max",
+        "measurement": "trunk_lateral_flexion",
+        "threshold": 10,
         "message": "Keep your trunk upright — do not lean sideways"
       }
     ],
@@ -405,6 +405,341 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 20,
     icon: "Copy",
     bodyPart: "lower",
+  },
+
+  // ─── Telerehabilitation set (movements from the KIMORE and REHAB24-6 datasets) ───
+  // KIMORE (Capecci et al., IEEE TNSRE 2019): lifting of the arms, lateral tilt
+  // of the trunk, trunk rotation, pelvis rotation, squatting.
+  // REHAB24-6 (Černek et al., 2024): arm abduction, arm VW, push-ups, leg
+  // abduction, leg lunge, squats.
+  // Neither dataset publishes angle thresholds: the targets below are developer
+  // estimates bounded by normative active ROM (AAOS), reasoning in `rationale`.
+  {
+    name: "Trunk Lateral Flexion",
+    nameTh: "เอียงลำตัวด้านข้าง",
+    category: "back",
+    description: "ยืนแขนเหยียดเหนือศีรษะแล้วเอียงลำตัวไปด้านข้าง เพิ่มความยืดหยุ่นของลำตัวด้านข้าง",
+    instructions: [
+      "ยืนตรง เท้ากว้างเท่าสะโพก หันหน้าเข้ากล้อง",
+      "ยกแขนทั้งสองข้างเหยียดตรงเหนือศีรษะ",
+      "ค่อยๆ เอียงลำตัวไปด้านข้าง สะโพกอยู่กับที่",
+      "ค้างไว้ 2-3 วินาที แล้วกลับมาตรง",
+      "สลับทำอีกข้าง",
+    ],
+    targetJoints: [
+      {
+        name: "trunk_lateral_flexion",
+        nameTh: "เอียงลำตัวด้านข้าง",
+        idealAngle: 25,
+        minAngle: 15,
+        maxAngle: 35,
+        unit: "°",
+        rationale:
+          "KIMORE Ex2 (lateral tilt of the trunk with the arms extended). Developer estimate bounded by normal thoracolumbar lateral flexion ≈35° (AAOS). Unsigned, so bending to either side counts.",
+      },
+    ],
+    difficulty: "beginner",
+    sets: 2,
+    repsPerSet: 10,
+    restSeconds: 30,
+    icon: "StretchHorizontal",
+    bodyPart: "upper",
+    formChecks: [
+      {
+        "id": "knees_even",
+        "type": "symmetry",
+        "measurement": "left_knee",
+        "other": "right_knee",
+        "maxDiff": 15,
+        "message": "Keep both knees straight — bend from the trunk, not the legs"
+      },
+      {
+        "id": "left_arm_overhead",
+        "type": "min",
+        "measurement": "left_shoulder",
+        "threshold": 140,
+        "message": "Keep your arms extended overhead"
+      },
+      {
+        "id": "right_arm_overhead",
+        "type": "min",
+        "measurement": "right_shoulder",
+        "threshold": 140,
+        "message": "Keep your arms extended overhead"
+      }
+    ],
+  },
+  {
+    name: "Trunk Rotation",
+    nameTh: "บิดลำตัว",
+    category: "back",
+    description: "บิดลำตัวส่วนบนไปทางซ้ายและขวาโดยสะโพกอยู่กับที่ เพิ่มการเคลื่อนไหวของกระดูกสันหลังส่วนอก",
+    instructions: [
+      "นั่งหรือยืนตรง หันหน้าเข้ากล้อง",
+      "กอดอกหรือยกแขนระดับไหล่",
+      "ค่อยๆ บิดลำตัวส่วนบนไปด้านข้าง สะโพกหันหน้าตรง",
+      "ค้างไว้ 2 วินาที แล้วกลับมาตรงกลาง",
+      "สลับทำอีกข้าง",
+    ],
+    targetJoints: [
+      {
+        name: "trunk_rotation",
+        nameTh: "บิดลำตัว (ไหล่เทียบสะโพก)",
+        idealAngle: 35,
+        minAngle: 25,
+        maxAngle: 45,
+        unit: "°",
+        rationale:
+          "KIMORE Ex3 (trunk rotation). Developer estimate bounded by normal thoracolumbar rotation ≈45° (AAOS). Needs depth (world landmarks); camera depth is noisy, so the range is wide.",
+      },
+    ],
+    difficulty: "intermediate",
+    sets: 2,
+    repsPerSet: 10,
+    restSeconds: 30,
+    icon: "RefreshCw",
+    bodyPart: "upper",
+    formChecks: [
+      {
+        "id": "no_side_bend",
+        "type": "max",
+        "measurement": "trunk_lateral_flexion",
+        "threshold": 10,
+        "message": "Rotate without bending sideways"
+      }
+    ],
+  },
+  {
+    name: "Squat",
+    nameTh: "สควอท",
+    category: "knee",
+    description: "ย่อตัวลงโดยไม่พิงผนัง เสริมกล้ามเนื้อต้นขาและสะโพก",
+    instructions: [
+      "ยืนเท้ากว้างเท่าไหล่ ปลายเท้าชี้ไปด้านหน้า หันด้านข้างเข้ากล้อง",
+      "ยื่นแขนไปด้านหน้าเพื่อทรงตัว",
+      "ย่อเข่าและดันสะโพกไปด้านหลัง เหมือนนั่งเก้าอี้",
+      "ลงจนเข่างอประมาณ 90 องศา หลังตรง",
+      "ดันส้นเท้ากลับขึ้นมายืนตรง",
+    ],
+    targetJoints: [
+      {
+        name: "left_knee",
+        nameTh: "เข่าซ้าย",
+        idealAngle: 95,
+        minAngle: 80,
+        maxAngle: 110,
+        unit: "°",
+        rationale:
+          "KIMORE Ex5 / REHAB24-6 Ex6. Developer estimate: a parallel-depth squat ≈90° interior knee angle; the upper bound allows a partial squat for rehabilitation.",
+      },
+      {
+        name: "right_knee",
+        nameTh: "เข่าขวา",
+        idealAngle: 95,
+        minAngle: 80,
+        maxAngle: 110,
+        unit: "°",
+        rationale: "Same as left side.",
+      },
+    ],
+    difficulty: "intermediate",
+    sets: 3,
+    repsPerSet: 10,
+    restSeconds: 45,
+    icon: "PersonStanding",
+    bodyPart: "lower",
+    formChecks: [
+      {
+        "id": "weight_even",
+        "type": "symmetry",
+        "measurement": "left_knee",
+        "other": "right_knee",
+        "maxDiff": 15,
+        "message": "Keep your weight even on both legs"
+      },
+      {
+        "id": "trunk_lean",
+        "type": "max",
+        "measurement": "trunk_inclination",
+        "threshold": 45,
+        "message": "Keep your chest up — avoid leaning too far forward"
+      },
+      {
+        "id": "trunk_shift",
+        "type": "max",
+        "measurement": "trunk_lateral_flexion",
+        "threshold": 10,
+        "message": "Keep your trunk centred — do not shift to one side"
+      }
+    ],
+  },
+  {
+    name: "Forward Lunge",
+    nameTh: "ก้าวย่อขาด้านหน้า",
+    category: "knee",
+    description: "ก้าวขาไปด้านหน้าแล้วย่อตัวลง เสริมกล้ามเนื้อขาและการทรงตัว",
+    instructions: [
+      "ยืนตรง หันด้านข้างเข้ากล้อง",
+      "ก้าวขาข้างหนึ่งไปด้านหน้าหนึ่งก้าวยาว",
+      "ย่อตัวลงจนเข่าทั้งสองข้างงอประมาณ 90 องศา",
+      "ลำตัวตั้งตรง เข่าหน้าอยู่เหนือข้อเท้า",
+      "ดันเท้าหน้ากลับสู่ท่ายืน แล้วสลับข้าง",
+    ],
+    targetJoints: [
+      {
+        name: "left_knee",
+        nameTh: "เข่าซ้าย",
+        idealAngle: 90,
+        minAngle: 80,
+        maxAngle: 110,
+        unit: "°",
+        rationale:
+          "REHAB24-6 Ex5 (leg lunge). Developer estimate: front and back knee ≈90° at the bottom of a full lunge; up to 110° allowed for a shallower rehab lunge.",
+      },
+      {
+        name: "right_knee",
+        nameTh: "เข่าขวา",
+        idealAngle: 90,
+        minAngle: 80,
+        maxAngle: 110,
+        unit: "°",
+        rationale: "Same as left side.",
+      },
+    ],
+    difficulty: "intermediate",
+    sets: 3,
+    repsPerSet: 8,
+    restSeconds: 45,
+    icon: "Footprints",
+    bodyPart: "lower",
+    formChecks: [
+      {
+        "id": "trunk_upright",
+        "type": "max",
+        "measurement": "trunk_inclination",
+        "threshold": 20,
+        "message": "Keep your trunk upright during the lunge"
+      },
+      {
+        "id": "trunk_level",
+        "type": "max",
+        "measurement": "trunk_lateral_flexion",
+        "threshold": 10,
+        "message": "Keep your pelvis and trunk level"
+      }
+    ],
+  },
+  {
+    name: "Side Lunge",
+    nameTh: "ก้าวย่อขาด้านข้าง",
+    category: "knee",
+    description: "ก้าวขาออกด้านข้างแล้วย่อเข่าข้างนั้น อีกขาเหยียดตรง เสริมกล้ามเนื้อต้นขาด้านในและสะโพก",
+    instructions: [
+      "ยืนตรง หันหน้าเข้ากล้อง",
+      "ก้าวขาข้างหนึ่งออกด้านข้างให้กว้าง",
+      "ย่อเข่าข้างที่ก้าว ดันสะโพกไปด้านหลัง",
+      "ขาอีกข้างเหยียดตรง เท้าวางราบ",
+      "ดันกลับสู่ท่ายืน แล้วสลับข้าง",
+    ],
+    targetJoints: [
+      {
+        name: "left_knee",
+        nameTh: "เข่าซ้าย",
+        idealAngle: 100,
+        minAngle: 85,
+        maxAngle: 120,
+        unit: "°",
+        rationale:
+          "Lunge variation (REHAB24-6 Ex5 family). Developer estimate: lunging knee ≈90–120° in a lateral lunge, shallower than a forward lunge.",
+      },
+      {
+        name: "right_knee",
+        nameTh: "เข่าขวา",
+        idealAngle: 100,
+        minAngle: 85,
+        maxAngle: 120,
+        unit: "°",
+        rationale: "Same as left side.",
+      },
+    ],
+    difficulty: "advanced",
+    sets: 2,
+    repsPerSet: 8,
+    restSeconds: 45,
+    icon: "MoveHorizontal",
+    bodyPart: "lower",
+    formChecks: [
+      {
+        "id": "other_leg_straight",
+        "type": "min",
+        "measurement": "{other}_knee",
+        "threshold": 160,
+        "message": "Keep the other leg straight"
+      },
+      {
+        "id": "trunk_lean",
+        "type": "max",
+        "measurement": "trunk_inclination",
+        "threshold": 40,
+        "message": "Keep your chest up — avoid leaning too far forward"
+      }
+    ],
+  },
+  {
+    name: "Standing Hip Abduction",
+    nameTh: "ยืนกางขาออกด้านข้าง",
+    category: "hip",
+    description: "ยืนแล้วกางขาออกด้านข้างโดยขาเหยียดตรง เสริมกล้ามเนื้อ Gluteus Medius",
+    instructions: [
+      "ยืนตรง หันหน้าเข้ากล้อง จับพนักเก้าอี้เพื่อทรงตัวได้",
+      "เหยียดเข่าข้างที่ฝึกให้ตรง ปลายเท้าชี้ไปด้านหน้า",
+      "ค่อยๆ กางขาออกด้านข้าง",
+      "ลำตัวตั้งตรง ไม่เอียงไปฝั่งตรงข้าม",
+      "ค้างไว้ 2 วินาที แล้วค่อยลง",
+    ],
+    targetJoints: [
+      {
+        name: "left_hip_abduction",
+        nameTh: "กางสะโพกซ้าย",
+        idealAngle: 25,
+        minAngle: 20,
+        maxAngle: 35,
+        unit: "°",
+        rationale:
+          "REHAB24-6 Ex4 (leg abduction). Developer estimate bounded by normal hip abduction ≈40–45° (AAOS); beyond ~35° standing usually needs trunk lean (compensation).",
+      },
+      {
+        name: "right_hip_abduction",
+        nameTh: "กางสะโพกขวา",
+        idealAngle: 25,
+        minAngle: 20,
+        maxAngle: 35,
+        unit: "°",
+        rationale: "Same as left side.",
+      },
+    ],
+    difficulty: "beginner",
+    sets: 3,
+    repsPerSet: 10,
+    restSeconds: 30,
+    icon: "MoveHorizontal",
+    bodyPart: "lower",
+    formChecks: [
+      {
+        "id": "trunk_upright",
+        "type": "max",
+        "measurement": "trunk_lateral_flexion",
+        "threshold": 10,
+        "message": "Keep your trunk upright — do not lean to the other side"
+      },
+      {
+        "id": "lifted_knee_straight",
+        "type": "min",
+        "measurement": "{side}_knee",
+        "threshold": 160,
+        "message": "Keep the lifted knee straight"
+      }
+    ],
   },
 ];
 

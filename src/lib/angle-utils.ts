@@ -138,6 +138,36 @@ export function calculateAllAngles(image: Landmark[], opts: AngleOptions = {}): 
     set('hip_opening', angleAt(p(L.LEFT_KNEE), mid(p(L.LEFT_HIP), p(L.RIGHT_HIP)), p(L.RIGHT_KNEE)));
   }
 
+  // Hip abduction: angle(other_hip, hip, knee) − 90 — 0 = thigh perpendicular to the pelvis line
+  if (visible(L.RIGHT_HIP, L.LEFT_HIP, L.LEFT_KNEE)) {
+    const a = angleAt(p(L.RIGHT_HIP), p(L.LEFT_HIP), p(L.LEFT_KNEE));
+    if (a !== null) set('left_hip_abduction', a - 90);
+  }
+  if (visible(L.LEFT_HIP, L.RIGHT_HIP, L.RIGHT_KNEE)) {
+    const a = angleAt(p(L.LEFT_HIP), p(L.RIGHT_HIP), p(L.RIGHT_KNEE));
+    if (a !== null) set('right_hip_abduction', a - 90);
+  }
+
+  // Trunk measures use the trunk vector mid_hip → mid_shoulder against
+  // vertical (camera y axis, which points down in image and world space,
+  // so this assumes a level camera)
+  if (visible(L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP)) {
+    const trunk = sub(mid(p(L.LEFT_SHOULDER), p(L.RIGHT_SHOULDER)), mid(p(L.LEFT_HIP), p(L.RIGHT_HIP)));
+    const up = { x: 0, y: -1, z: 0 };
+    // Lateral flexion: frontal plane (x–y) only, 0 = upright
+    set('trunk_lateral_flexion', angleAt({ x: trunk.x, y: trunk.y, z: 0 }, { x: 0, y: 0, z: 0 }, up));
+    // Inclination: 3D lean in any direction (forward lean in squats/lunges)
+    set('trunk_inclination', angleAt(trunk, { x: 0, y: 0, z: 0 }, up));
+
+    // Rotation: shoulder line vs hip line in the transverse (x–z) plane.
+    // Needs depth, so world landmarks only.
+    if (world) {
+      const sh = sub(p(L.RIGHT_SHOULDER), p(L.LEFT_SHOULDER));
+      const hp = sub(p(L.RIGHT_HIP), p(L.LEFT_HIP));
+      set('trunk_rotation', angleAt({ x: sh.x, y: 0, z: sh.z }, { x: 0, y: 0, z: 0 }, { x: hp.x, y: 0, z: hp.z }));
+    }
+  }
+
   return angles;
 }
 

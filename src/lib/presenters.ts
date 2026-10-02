@@ -11,6 +11,15 @@ import type {
 } from '@prisma/client';
 import { ageFromDob, localDateString } from '@/lib/dates';
 import { parseFormChecks } from '@/lib/form-checks';
+import { safeTruncate, sanitizeText } from '@/lib/text-safe';
+
+// Display limits (grapheme clusters) for free text that reaches report screens
+export const TEXT_LIMITS = { notes: 1000, condition: 300, faultMessage: 300, rationale: 600 } as const;
+
+/** Thai-safe display text: sanitized, cut on grapheme boundaries; null stays null */
+export function displayText(value: string | null | undefined, max: number): string | null {
+  return value == null ? null : safeTruncate(value, max);
+}
 
 export const GENDER_LABEL_TH: Record<Gender, string> = {
   MALE: 'ชาย',
@@ -46,7 +55,7 @@ export function mergeTargets(
       const o = byJoint.get(t.joint);
       return {
         name: t.joint,
-        nameTh: t.nameTh,
+        nameTh: sanitizeText(t.nameTh),
         idealAngle: o?.idealAngle ?? t.idealAngle,
         minAngle: o?.minAngle ?? t.minAngle,
         maxAngle: o?.maxAngle ?? t.maxAngle,
@@ -54,7 +63,7 @@ export function mergeTargets(
         isPrimary: t.isPrimary,
         formula: t.formula,
         angleBasis: o ? 'CLINICIAN_SET' : t.angleBasis,
-        rationale: t.rationale,
+        rationale: displayText(t.rationale, TEXT_LIMITS.rationale),
         overridden: !!o,
       };
     });
@@ -129,7 +138,7 @@ export function sessionDTO(s: SessionWithExercise) {
     romMinAngle: s.romMinAngle,
     romMaxAngle: s.romMaxAngle,
     primaryJoint: s.primaryJoint,
-    notes: s.notes,
+    notes: displayText(s.notes, TEXT_LIMITS.notes),
     reviewStatus: s.review?.status ?? null,
     faultCount: s._count?.faults ?? null,
     exercise: s.exercise
@@ -181,7 +190,7 @@ export function patientBasics(p: {
     dateOfBirth: p.dateOfBirth?.toISOString().slice(0, 10) ?? null,
     gender: GENDER_LABEL_TH[p.gender],
     genderCode: p.gender,
-    condition: p.condition ?? '',
+    condition: displayText(p.condition, TEXT_LIMITS.condition) ?? '',
     phone: p.phone ?? '',
   };
 }
