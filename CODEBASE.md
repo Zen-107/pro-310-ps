@@ -52,7 +52,8 @@ project-root/
 │   │       ├── doctor-overview.tsx       # Clinician: summary cards, alerts, review queue, patient cards
 │   │       ├── review-queue.tsx          # Completed sessions awaiting sign-off
 │   │       ├── doctor-patients.tsx       # Clinician: patient list/detail, HN, notes
-│   │       ├── ai-insights-panel.tsx     # Clinician: multi-session trends + AI analysis
+│   │       ├── ai-insights-panel.tsx     # Clinician: recovery forecasts, multi-session trends + AI analysis
+│   │       ├── recovery-forecast-card.tsx # Clinician: forecast chart + status per exercise
 │   │       ├── doctor-plans.tsx          # Clinician: prescriptions and target overrides
 │   │       ├── doctor-reports.tsx        # Clinician: tabbed session report, print, PDF download
 │   │       ├── report-transparency.tsx   # Formulas, reps, faults, review panel, ClinicalSessionReplay
@@ -68,7 +69,8 @@ project-root/
 │   │   ├── rep-counter.ts, form-checks.ts                   # Reps, incomplete attempts, movement phase; compensation checks
 │   │   ├── cue-gate.ts, coach-cues.ts                       # When a cue may be spoken; natural Thai phrases (no numbers)
 │   │   ├── speech.ts, tts-server.ts                         # Client voice (server TTS → Web Speech → chime); server TTS
-│   │   ├── ai-agent.ts, clinical-markdown.ts                # LLM providers + agents; AI-summary cleanup
+│   │   ├── ai-agent.ts, clinical-markdown.ts                # LLM providers + agents (+ forecast data loading); AI-summary cleanup
+│   │   ├── recovery-forecast.ts                             # Recovery forecast statistics (pure, no DB)
 │   │   ├── replay.ts                                        # Replay frame format and rig geometry
 │   │   ├── session-video-recorder.ts, video-storage.ts      # Consented recording (client); chunk storage (server)
 │   │   ├── report-pdf.ts                                    # One-click PDF of the print document
@@ -81,7 +83,8 @@ project-root/
 ├── prisma/
 │   ├── schema.prisma
 │   ├── migrations/                   # Apply with `bun run db:migrate:deploy`
-│   └── seed.ts                       # Demo organizations, users, exercises + citations (WIPES data)
+│   ├── seed.ts                       # Demo organizations, users, exercises + citations (WIPES data)
+│   └── demo-history.ts               # Simulated 6-week training history for the demo seed
 ├── scripts/copy-standalone-assets.mjs  # Post-build copy for the standalone server (cross-platform)
 ├── storage/                          # Runtime data: consented session videos (git-ignored, not in build output)
 ├── docker-compose.yml                # Local PostgreSQL
@@ -113,9 +116,9 @@ Every route requires a signed-in user (next-auth session cookie) **and acceptanc
 - **DELETE /api/patients/[id]** — archive (never hard-deleted)
 
 ### Clinician dashboard & AI analysis (CLINICIAN, care team)
-- **GET /api/clinician/summary** — summary cards: sessions completed today, completed sessions awaiting review, red flags (patient-assistant escalations in the last 7 days, latest per patient)
-- **GET /api/patients/[id]/ai-insights** — computed per-exercise trends over the last 20 completed sessions: accuracy/ROM slope, fault rate per rep (early vs recent half), top compensations, flags. No AI call
-- **POST /api/patients/[id]/ai-insights** — same trends + AI clinical summary/recommendations (`aiError` set and trends still returned if the AI service fails)
+- **GET /api/clinician/summary** — summary cards: sessions completed today, completed sessions awaiting review, red flags (patient-assistant escalations in the last 7 days, latest per patient), `recoveryAlerts` (exercises whose forecast status is `plateau` or `declining`)
+- **GET /api/patients/[id]/ai-insights** — computed per-exercise trends over the last 20 completed sessions (accuracy/ROM slope, fault rate per rep early vs recent half, top compensations, flags) and `forecasts` (recovery forecast per exercise, last 90 days — see *Recovery forecast*). No AI call
+- **POST /api/patients/[id]/ai-insights** — same trends and forecasts + AI clinical summary/recommendations; the prompt passes forecast statuses and ranges and forbids inventing new numbers (`aiError` set and computed data still returned if the AI service fails)
 
 ### Prescriptions (CLINICIAN writes; PATIENT reads own)
 - **GET /api/prescriptions?patientId=** — with items and merged targets
@@ -267,6 +270,45 @@ All joint angles use the vector dot product with the vertex at B:
 
 ---
 
+## 📈 Recovery forecast (`src/lib/recovery-forecast.ts`)
+
+Clinician-only estimate of **when the primary joint will reach its target range**, per exercise, from that patient's own trend. It is **not** a population prediction model: the system has no recovery-outcome labels to train or validate one, and the public datasets (KIMORE, REHAB24-6) are cross-sectional exercise-quality data, not longitudinal recovery data.
+
+**Measure.** *Deficit* = degrees still short of the target range on a day (best of the day; 0 = reached), from each session's `romMinAngle`/`romMaxAngle` against that session's own `targetSnapshot`. The ROM extreme farther from the range is the rest position, the other is the peak; overshooting through the range counts as reached. This works for targets below the resting angle (knee flexion) and above it (shoulder flexion).
+
+**Method** (`computeRecoveryForecasts` in `ai-agent.ts` → `forecastRecovery`): completed sessions of the last 90 days → daily best deficit → Theil–Sen slope (median of pairwise slopes, robust to odd sessions) → residual bootstrap (400 resamples, deterministic seed) for the slope's 10th–90th percentile and the time to reach the range. The ETA range spans two recovery shapes: **linear** (progress continues at the current rate, the optimistic end) and **saturating** (exponential approach fit on ln(deficit + 1°), the conservative end). Adherence = completed / due quests of the exercise in the last 28 days (reported, not used in the estimate).
+
+| Status | Rule |
+|---|---|
+| `goal_reached` | last 2 days with data within 3° of the range |
+| `insufficient` | < 6 days with data or < 14-day span (`daysNeeded` says how many more), or no trend beyond noise |
+| `declining` | whole slope interval > 0 and the estimated worsening ≥ 10° |
+| `plateau` | still short of the range, and even the most optimistic plausible rate over the last 14 days (bootstrap 10th percentile) would improve < 10° (equivalence-style test) |
+| `on_track` | whole slope interval < 0, total improvement ≥ 10°, and the last 14 days still improving ≥ 5° |
+
+10° is the **minimal detectable change** used throughout: markerless pose estimation is typically 5–10°+ off a goniometer, so smaller changes are treated as noise.
+
+**Validation (simulation, `bun` script, 200 synthetic patients per scenario, ±8° noise, ~70% of days practised):**
+
+| Scenario | Result |
+|---|---|
+| Steady improvement (linear) | on_track 55–84%; ETA range contained the true date 86–95% of the time (median error 25–42 days). Very slow progress (< 10° per 2 weeks) is reported as plateau by design (33% at 0.5°/day) |
+| Saturating improvement (exponential) | on_track 64–90%; range contained the true date 63–70% (it tends to be optimistic; median error 25–27 days) |
+| No progress (flat) | wrongly on_track 3%, wrongly declining 5% |
+| Improved, then stalled for the last 2 weeks | detected as plateau 57%; still shown on_track 33% |
+| Getting worse | declining 98% |
+| 4 days of data | insufficient 100% |
+
+**Reading it:** the estimate is useful at the scale of *weeks*, not days; the UI shows ranges ("3 วัน – 6 สัปดาห์"), never a single date, and states the assumptions. Clinically, the **plateau / declining** flags are the most actionable output; they also appear in the clinician overview alerts (`/api/clinician/summary` → `recoveryAlerts`).
+
+**Not implemented on purpose:** "risk of re-injury" as a probability (no labels); the rule-based warnings (declining ROM, rising compensations, red-flag chat escalations) cover that need.
+
+**Next step when real data exists** (dozens of patients × several weeks): a linear mixed-effects model (random intercept/slope per patient, grouped by condition) for partial pooling, plus a recorded outcome (date the clinician confirms the goal) to calibrate and backtest the ranges.
+
+**Demo data:** `bun run db:seed` adds a **simulated** 6-week history (`prisma/demo-history.ts`, every session's `notes` marks it as simulated) so each status can be shown: คุณวิชัย → on_track, คุณสมหญิง → plateau, คุณสมชาย → insufficient. All simulated sessions fall short of their target, so they record incomplete-range faults rather than counted reps, as the live counter would.
+
+---
+
 ## 🤖 AI agent (`src/lib/ai-agent.ts`)
 
 - **Providers:** configured by API keys in `.env`; `AI_PROVIDER` picks the first to try, the rest are fallbacks. Defaults: Groq `openai/gpt-oss-120b`, Gemini `gemini-3.8-flash`, OpenRouter `openrouter/free`, OpenAI-compatible `gpt-4o-mini` (`OPENAI_BASE_URL` for Ollama/vLLM etc.). `complete()` throws `AiUnavailableError` when all fail; every caller has a non-AI fallback.
@@ -310,7 +352,7 @@ bun run db:seed             # demo data — WIPES the database
 bun run dev                 # http://localhost:3000
 ```
 
-Demo accounts (password = `SEED_DEMO_PASSWORD`, default `physio-demo-2026`): `admin@`, `doctor@`, `pt@`, `pt2@`, `patient1@`, `patient2@`, `patient3@` + `demo.aiphysio.local`. Each user must accept the terms popup on first entry.
+Demo accounts (password = `SEED_DEMO_PASSWORD`, default `physio-demo-2026`): `admin@`, `doctor@`, `pt@`, `pt2@`, `patient1@`, `patient2@`, `patient3@` + `demo.aiphysio.local`. Each user must accept the terms popup on first entry. The seed also creates a **simulated** 6-week training history (marked in each session's `notes`) for the recovery-forecast demo.
 
 ### Checks & production build
 ```bash
@@ -363,10 +405,11 @@ There is no automated test suite yet. The angle engine, smoother, rep counter an
 | 6. Voice & consent | `85c8c433` | Server Thai TTS; blocking terms/PDPA gate (page + API); one-click PDF; standing/sitting-only catalogue; Squat demo |
 | 7. Cue timing | `868c982c` | Movement-phase gating, cooldowns, faster non-stacking speech |
 | 8. UI/UX | `89e42ffa` | Focus Mode HUD, clinician summary cards, tabbed report, slate/teal theme, touch targets |
+| 9. Recovery forecast | (this change) | Per-patient forecast (Theil–Sen + bootstrap, linear vs saturating range), plateau/declining detection with overview alerts, simulation-validated; simulated demo history in the seed |
 
 ### Known limitations / next steps
 - **Clinical validation:** target angles, compensation thresholds, coaching phrases and the consent text need review by a physiotherapist; KIMORE / REHAB24-6 sources need verification before those exercises can be published.
-- **Predictive analytics** (recovery forecast, plateau alerts) — not implemented; trends are descriptive only.
+- **Recovery forecast** is per-patient trend extrapolation, not a validated predictive model: ranges are wide (weeks), optimistic when recovery saturates, and fresh plateaus are missed about a third of the time (see *Recovery forecast*). Needs real longitudinal data and recorded outcomes for calibration; a mixed-effects model is the next step.
 - **TTS dependency:** the server voice uses Google's unofficial Translate TTS endpoint (may be blocked or change). Consider an official TTS API for production.
 - **PDF download** is rasterised (not selectable text).
 - **No automated tests**; no admin screens; no offline mode; mobile packaging (PWA/Capacitor) and Play Store preparation not started.
@@ -391,4 +434,4 @@ There is no automated test suite yet. The angle engine, smoother, rep counter an
 
 ---
 
-**Last updated:** 2026-10-05 · **Version:** 0.3.0-dev · **Branch:** `ai-physio`
+**Last updated:** 2026-10-05 · **Version:** 0.4.0-dev · **Branch:** `ai-physio`

@@ -4,10 +4,12 @@ import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope, sessionScope } from '@/lib/access';
 import { serverError } from '@/lib/api-utils';
 import { safeTruncate } from '@/lib/text-safe';
+import { computeRecoveryForecasts } from '@/lib/ai-agent';
 
 // Clinician dashboard headline numbers, scoped to the caller's care team:
-// sessions completed today, sessions awaiting review, and red flags
-// (symptoms the patient assistant escalated in the last 7 days).
+// sessions completed today, sessions awaiting review, red flags (symptoms
+// the patient assistant escalated in the last 7 days) and recovery alerts
+// (exercises whose progress has plateaued or is declining).
 const RED_FLAG_WINDOW_DAYS = 7;
 
 export async function GET() {
@@ -46,7 +48,28 @@ export async function GET() {
         });
     }
 
-    return NextResponse.json({ completedToday, pendingReviews, redFlags: [...redFlags.values()], redFlagWindowDays: RED_FLAG_WINDOW_DAYS });
+    // Recovery alerts: patients in scope who trained in the forecast window
+    const active = await db.patient.findMany({
+      where: { AND: [patientScope(auth.user), { sessions: { some: { status: 'COMPLETED', startedAt: { gte: new Date(Date.now() - 90 * 86_400_000) } } } }] },
+      select: { id: true, name: true },
+    });
+    const recoveryAlerts = (
+      await Promise.all(
+        active.map(async (p) =>
+          (await computeRecoveryForecasts(p.id))
+            .filter((f) => f.forecast.status === 'plateau' || f.forecast.status === 'declining')
+            .map((f) => ({ patientId: p.id, patientName: p.name, exerciseTh: f.exerciseTh, status: f.forecast.status, currentDeficit: f.forecast.currentDeficit }))
+        )
+      )
+    ).flat();
+
+    return NextResponse.json({
+      completedToday,
+      pendingReviews,
+      redFlags: [...redFlags.values()],
+      redFlagWindowDays: RED_FLAG_WINDOW_DAYS,
+      recoveryAlerts,
+    });
   } catch (error) {
     return serverError('Clinician summary error', error);
   }

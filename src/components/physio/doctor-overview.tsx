@@ -41,6 +41,8 @@ interface ClinicianSummary {
   pendingReviews: number;
   redFlags: { patientId: string; patientName: string; message: string; at: string; count: number }[];
   redFlagWindowDays: number;
+  /** Exercises whose recovery has plateaued or is declining (lib/recovery-forecast.ts) */
+  recoveryAlerts?: { patientId: string; patientName: string; exerciseTh: string; status: 'plateau' | 'declining'; currentDeficit: number | null }[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -151,6 +153,15 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
         message: `แจ้งอาการที่ต้องประเมิน${f.count > 1 ? ` (${f.count} ครั้ง)` : ''}: “${f.message}”`,
         patientName: f.patientName,
         patientId: f.patientId,
+      });
+    }
+    for (const r of summary?.recoveryAlerts ?? []) {
+      const short = r.currentDeficit !== null ? ` (ยังขาดเป้าหมาย ≈${r.currentDeficit}°)` : '';
+      result.push({
+        level: 'warning',
+        message: r.status === 'declining' ? `${r.exerciseTh}: มุมที่ทำได้แย่ลง${short}` : `${r.exerciseTh}: พัฒนาการหยุดนิ่ง 14 วัน${short} — พิจารณาปรับแผน`,
+        patientName: r.patientName,
+        patientId: r.patientId,
       });
     }
     for (const p of patients) {

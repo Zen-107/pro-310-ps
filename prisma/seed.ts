@@ -1,6 +1,7 @@
 /**
  * Development seed: wipes ALL data and creates demo organizations, users,
- * the exercise library with cited sources, and sample prescriptions.
+ * the exercise library with cited sources, sample prescriptions and a
+ * SIMULATED training history (prisma/demo-history.ts) for the forecast demo.
  *
  *   bun run db:seed        (runs `prisma db seed` → this file)
  *
@@ -12,8 +13,11 @@
  */
 import { PrismaClient, type JointName, type Patient, type ReferenceRelevance } from '@prisma/client';
 import { EXERCISES, exerciseIdFromName } from '../src/lib/exercises-data';
-import { JOINT_FORMULAS } from '../src/lib/joint-formulas';
+import { ANGLE_ALGORITHM_VERSION, ANGLE_DEFINITION, JOINT_FORMULAS } from '../src/lib/joint-formulas';
 import { hashPassword } from '../src/lib/password';
+import { mergeTargets } from '../src/lib/presenters';
+import { addDays, dateOnly, localDateString } from '../src/lib/dates';
+import { DEMO_NOTE, DEMO_SCENARIOS, generateDemoDays, type DemoScenario } from './demo-history';
 
 const db = new PrismaClient();
 
@@ -316,7 +320,6 @@ async function main() {
   });
 
   // ─── Prescriptions (published exercises only) ─────────────────────
-  const today = new Date(new Date().toISOString().slice(0, 10));
   const item = (slug: string, sets: number, reps: number, rest: number, daysOfWeek: number[] = [], sortOrder = 0) => {
     if (!exerciseIds[slug]) throw new Error(`Unknown exercise ${slug}`);
     return { exerciseId: exerciseIds[slug], sets, repsPerSet: reps, restSeconds: rest, daysOfWeek, sortOrder };
@@ -326,7 +329,7 @@ async function main() {
     data: {
       title: 'โปรแกรมฟื้นฟูเข่า OA ระยะที่ 1',
       notes: 'ทำทุกวัน หยุดถ้าปวดเกินระดับ 5/10',
-      startDate: today,
+      startDate: dateOnly(addDays(localDateString(), -DEMO_SCENARIOS.newPatient.daysBack - 1)),
       patient: { connect: { id: somchai.id } },
       clinician: { connect: { id: doctor.id } },
       items: {
@@ -342,7 +345,7 @@ async function main() {
   await db.prescription.create({
     data: {
       title: 'โปรแกรมเพิ่มองศาการเคลื่อนไหวไหล่',
-      startDate: today,
+      startDate: dateOnly(addDays(localDateString(), -DEMO_SCENARIOS.plateau.daysBack)),
       patient: { connect: { id: somying.id } },
       clinician: { connect: { id: physio.id } },
       items: {
@@ -360,7 +363,7 @@ async function main() {
     data: {
       title: 'ฟื้นฟูหลังผ่าตัดเข่า — สัปดาห์ที่ 2–4',
       notes: 'จำกัดการงอเข่าไม่เกิน 90° ในช่วงนี้',
-      startDate: today,
+      startDate: dateOnly(addDays(localDateString(), -DEMO_SCENARIOS.improving.daysBack)),
       patient: { connect: { id: wichai.id } },
       clinician: { connect: { id: doctor.id } },
       items: {
@@ -379,6 +382,17 @@ async function main() {
     },
   });
 
+  // ─── Simulated history (demo only) ─────────────────────────────────
+  await seedDemoHistory({ patientId: wichai.id, slug: 'ex_knee_flexion', scenario: DEMO_SCENARIOS.improving, reviewerId: doctor.id });
+  await seedDemoHistory({ patientId: somying.id, slug: 'ex_shoulder_flexion', scenario: DEMO_SCENARIOS.plateau, reviewerId: physio.id });
+  await seedDemoHistory({ patientId: somchai.id, slug: 'ex_knee_flexion', scenario: DEMO_SCENARIOS.newPatient, reviewerId: doctor.id });
+  for (const p of [somchai, somying, wichai]) {
+    await db.patient.update({
+      where: { id: p.id },
+      data: { clinicalNotes: `${DEMO_NOTE}: ประวัติการฝึกย้อนหลังสร้างขึ้นเพื่อสาธิตการประมาณการระยะฟื้นตัว` },
+    });
+  }
+
   // ─── Summary ──────────────────────────────────────────────────────
   const [published, draft] = await Promise.all([
     db.exercise.count({ where: { status: 'PUBLISHED' } }),
@@ -386,8 +400,125 @@ async function main() {
   ]);
   console.log(`Seeded: 2 organizations, 3 clinicians, 3 patients, ${Object.keys(SOURCES).length} sources`);
   console.log(`Exercises: ${published} published, ${draft} draft (see statusNote)`);
+  console.log(`Simulated history: ${await db.exerciseSession.count({ where: { notes: DEMO_NOTE } })} sessions (marked "${DEMO_NOTE}")`);
   console.log(`Demo password for all accounts: ${password}`);
   console.log('Accounts: admin@ / doctor@ / pt@ / pt2@ / patient1@ / patient2@ / patient3@ demo.aiphysio.local');
+}
+
+// ─── Simulated training history (prisma/demo-history.ts) ──────────────
+// Past quests + completed sessions so the recovery forecast, trends and
+// reports have data in a fresh demo database. Every session is marked with
+// DEMO_NOTE; sessions older than 3 days are already reviewed.
+async function seedDemoHistory(opts: { patientId: string; slug: string; scenario: DemoScenario; reviewerId: string }) {
+  const item = await db.prescriptionItem.findFirst({
+    where: { prescription: { patientId: opts.patientId }, exercise: { slug: opts.slug } },
+    include: { exercise: { include: { targets: true } }, targetOverrides: true, prescription: true },
+  });
+  if (!item) throw new Error(`No prescription item for ${opts.slug}`);
+
+  const targets = mergeTargets(item.exercise.targets, item.targetOverrides);
+  const primary = targets[0];
+  const snapshot = {
+    exerciseSlug: item.exercise.slug,
+    exerciseName: item.exercise.name,
+    sets: item.sets,
+    repsPerSet: item.repsPerSet,
+    restSeconds: item.restSeconds,
+    angleDefinition: ANGLE_DEFINITION,
+    targets,
+    formChecks: item.exercise.formChecks,
+  };
+  const today = localDateString();
+  const recentCutoff = addDays(today, -3);
+
+  for (const d of generateDemoDays(opts.scenario, primary, today)) {
+    const quest = await db.quest.create({
+      data: {
+        prescriptionItemId: item.id,
+        patientId: opts.patientId,
+        dueDate: dateOnly(d.day),
+        status: d.done ? 'COMPLETED' : 'MISSED',
+        completedAt: d.done ? new Date(d.startedAt!.getTime() + 5 * 60_000) : null,
+      },
+    });
+    if (!d.done) continue;
+
+    const reps = d.reps!;
+    const startedAt = d.startedAt!;
+    const session = await db.exerciseSession.create({
+      data: {
+        patientId: opts.patientId,
+        exerciseId: item.exerciseId,
+        questId: quest.id,
+        prescriptionId: item.prescriptionId,
+        prescriptionItemId: item.id,
+        clinicianId: item.prescription.clinicianId,
+        startedAt,
+        endedAt: new Date(startedAt.getTime() + 5 * 60_000),
+        status: 'COMPLETED',
+        totalReps: reps.length,
+        avgAccuracy: reps.length ? Math.round(reps.reduce((a, r) => a + r.accuracy, 0) / reps.length) : 0,
+        romMinAngle: d.romMinAngle,
+        romMaxAngle: d.romMaxAngle,
+        romDegrees: Math.round((d.romMaxAngle! - d.romMinAngle!) * 10) / 10,
+        primaryJoint: primary.name as JointName,
+        targetSnapshot: snapshot as never,
+        algorithmVersion: ANGLE_ALGORITHM_VERSION,
+        notes: DEMO_NOTE,
+      },
+    });
+
+    const createdReps = reps.length
+      ? await db.sessionRep.createManyAndReturn({
+          data: reps.map((r, i) => ({
+            sessionId: session.id,
+            setNumber: Math.floor(i / item.repsPerSet) + 1,
+            repNumber: i + 1,
+            enteredAt: new Date(startedAt.getTime() + (i + 1) * 15_000),
+            durationMs: 1200,
+            bestAngle: r.bestAngle,
+            accuracy: r.accuracy,
+            isCorrect: r.accuracy >= 60,
+          })),
+        })
+      : [];
+    if (createdReps.length) {
+      await db.jointAngleLog.createMany({
+        data: createdReps.map((r) => ({
+          sessionId: session.id,
+          repId: r.id,
+          joint: primary.name as JointName,
+          angle: r.bestAngle,
+          idealAngle: primary.idealAngle,
+          minAngle: primary.minAngle,
+          maxAngle: primary.maxAngle,
+          deviation: Math.round(Math.abs(r.bestAngle - primary.idealAngle) * 10) / 10,
+          isCorrect: r.accuracy >= 60,
+          timestamp: r.enteredAt,
+        })),
+      });
+    }
+    if (d.incomplete!.length) {
+      await db.sessionFault.createMany({
+        data: d.incomplete!.map((f, i) => ({
+          sessionId: session.id,
+          type: 'INCOMPLETE_ROM' as const,
+          joint: primary.name as JointName,
+          measuredAngle: f.measuredAngle,
+          expectedMin: primary.minAngle,
+          expectedMax: primary.maxAngle,
+          deficit: f.deficit,
+          message: `Range not reached — ${f.deficit}° short of the target`,
+          occurredAt: new Date(startedAt.getTime() + (i + 1) * 15_000),
+        })),
+      });
+    }
+    if (d.day < recentCutoff) {
+      await db.sessionReview.create({
+        data: { sessionId: session.id, clinicianId: opts.reviewerId, status: 'APPROVED', reviewedAt: new Date(startedAt.getTime() + 86_400_000) },
+      });
+    }
+  }
 }
 
 main()

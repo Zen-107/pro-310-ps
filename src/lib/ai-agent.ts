@@ -17,6 +17,8 @@ import { parseFormChecks } from '@/lib/form-checks';
 import { mergeTargets } from '@/lib/presenters';
 import { cleanText, safeTruncate } from '@/lib/text-safe';
 import { cleanClinicalSummary, thaiMeasurementName } from '@/lib/clinical-markdown';
+import { addDays, dateOnly, localDateString } from '@/lib/dates';
+import { forecastRecovery, type ForecastStatus, type RangeTarget, type RecoveryForecast, type SessionPoint } from '@/lib/recovery-forecast';
 
 // ─── Model access ────────────────────────────────────────────────────
 // Every supported provider exposes an OpenAI-compatible Chat Completions
@@ -273,6 +275,7 @@ export interface PatientTrendAnalysis {
   generatedAt: string;
   sessionsAnalysed: number;
   trends: ExerciseTrend[];
+  forecasts: ExerciseForecast[];
   summary: string | null;
   model: string | null;
   aiError: string | null;
@@ -393,12 +396,107 @@ const ANALYST_SYSTEM = `คุณคือผู้ช่วยวิเคร�
 - ข้อมูลมาจากการตรวจจับท่าทางด้วยกล้อง (ความคลาดเคลื่อนได้) ให้ระบุข้อจำกัดเมื่อมีข้อมูลน้อย
 - ข้อเสนอแนะเป็นเพียงประเด็นให้ผู้ดูแลพิจารณา ไม่ใช่คำสั่งการรักษา และห้ามวินิจฉัยโรค`;
 
+// ─── Recovery forecast (see lib/recovery-forecast.ts) ────────────────
+
+const FORECAST_LOOKBACK_DAYS = 90;
+const ADHERENCE_DAYS = 28;
+
+export interface ExerciseForecast {
+  exerciseId: string;
+  exercise: string;
+  exerciseTh: string;
+  /** Target of the primary joint in the latest session */
+  target: { joint: string; jointTh: string; minAngle: number; maxAngle: number } | null;
+  /** Share of due quests completed in the last 28 days (null = none due) */
+  adherence: number | null;
+  forecast: RecoveryForecast;
+}
+
+type SnapshotTarget = RangeTarget & { nameTh?: string };
+
+/** Target of the session's measured joint (its primary joint, else the exercise's primary target) */
+function sessionTarget(snapshot: unknown, primaryJoint: string | null): SnapshotTarget | null {
+  const targets = ((snapshot ?? {}) as { targets?: SnapshotTarget[] }).targets ?? [];
+  return targets.find((t) => t.name === primaryJoint) ?? targets.find((t) => t.isPrimary) ?? targets[0] ?? null;
+}
+
+/** Per-exercise recovery forecasts from the patient's completed sessions (last 90 days) */
+export async function computeRecoveryForecasts(patientId: string): Promise<ExerciseForecast[]> {
+  const since = new Date(Date.now() - FORECAST_LOOKBACK_DAYS * 86_400_000);
+  const adherenceFrom = dateOnly(addDays(localDateString(), -ADHERENCE_DAYS));
+  const today = dateOnly(localDateString());
+  const [sessions, quests] = await Promise.all([
+    db.exerciseSession.findMany({
+      where: { patientId, status: 'COMPLETED', startedAt: { gte: since } },
+      orderBy: { startedAt: 'asc' },
+      select: {
+        exerciseId: true,
+        startedAt: true,
+        romMinAngle: true,
+        romMaxAngle: true,
+        primaryJoint: true,
+        targetSnapshot: true,
+        exercise: { select: { name: true, nameTh: true } },
+      },
+    }),
+    db.quest.findMany({
+      where: { patientId, dueDate: { gte: adherenceFrom, lt: today }, status: { in: ['COMPLETED', 'MISSED'] } },
+      select: { status: true, prescriptionItem: { select: { exerciseId: true } } },
+    }),
+  ]);
+
+  const byExercise = new Map<string, typeof sessions>();
+  for (const s of sessions) byExercise.set(s.exerciseId, [...(byExercise.get(s.exerciseId) ?? []), s]);
+
+  return [...byExercise.entries()].map(([exerciseId, list]) => {
+    const points: SessionPoint[] = list.map((s) => ({
+      day: localDateString(s.startedAt),
+      romMinAngle: s.romMinAngle,
+      romMaxAngle: s.romMaxAngle,
+      target: sessionTarget(s.targetSnapshot, s.primaryJoint),
+    }));
+    const latest = sessionTarget(list[list.length - 1].targetSnapshot, list[list.length - 1].primaryJoint);
+    const due = quests.filter((q) => q.prescriptionItem.exerciseId === exerciseId);
+    return {
+      exerciseId,
+      exercise: list[0].exercise.name,
+      exerciseTh: list[0].exercise.nameTh,
+      target: latest
+        ? { joint: latest.name, jointTh: latest.nameTh ?? latest.name, minAngle: latest.minAngle, maxAngle: latest.maxAngle }
+        : null,
+      adherence: due.length ? Math.round((due.filter((q) => q.status === 'COMPLETED').length / due.length) * 100) : null,
+      forecast: forecastRecovery(points),
+    };
+  });
+}
+
+const STATUS_TH: Record<ForecastStatus, string> = {
+  goal_reached: 'ถึงช่วงเป้าหมายแล้ว',
+  on_track: 'กำลังดีขึ้นอย่างมีนัย',
+  plateau: 'พัฒนาการหยุดนิ่ง (plateau)',
+  declining: 'แย่ลง',
+  insufficient: 'ข้อมูลยังไม่พอประมาณการ',
+};
+
+/** One prompt line per exercise; numbers are ranges with their caveats */
+function forecastLine(f: ExerciseForecast): string {
+  const r = f.forecast;
+  const parts = [`${f.exerciseTh}: ${STATUS_TH[r.status]}`];
+  if (r.currentDeficit !== null) parts.push(`ยังขาดจากช่วงเป้าหมายประมาณ ${r.currentDeficit}°`);
+  if (r.slopePerWeek !== null && r.slopeInterval) parts.push(`แนวโน้ม ${r.slopePerWeek}°/สัปดาห์ (ช่วง 80%: ${r.slopeInterval[0]} ถึง ${r.slopeInterval[1]})`);
+  if (r.etaDays) parts.push(`ประมาณการถึงเป้าหมายใน ${r.etaDays[0]}–${r.etaDays[2]}${r.etaCapped ? '+' : ''} วัน`);
+  if (r.status === 'insufficient' && r.daysNeeded) parts.push(`ต้องฝึกเพิ่มอีกอย่างน้อย ${r.daysNeeded} วัน`);
+  if (f.adherence !== null) parts.push(`การฝึกตามแผน 28 วัน ${f.adherence}%`);
+  return `- ${parts.join(' · ')}`;
+}
+
 export async function analyzePatientTrends(patientId: string): Promise<PatientTrendAnalysis> {
-  const [{ trends, sessions }, patient] = await Promise.all([
+  const [{ trends, sessions }, forecasts, patient] = await Promise.all([
     computeFaultTrends(patientId),
+    computeRecoveryForecasts(patientId),
     db.patient.findUnique({ where: { id: patientId }, select: { condition: true } }),
   ]);
-  const base = { patientId, generatedAt: new Date().toISOString(), sessionsAnalysed: sessions, trends };
+  const base = { patientId, generatedAt: new Date().toISOString(), sessionsAnalysed: sessions, trends, forecasts };
   if (trends.length === 0) return { ...base, summary: null, model: null, aiError: null };
 
   const lines = trends
@@ -419,11 +517,15 @@ export async function analyzePatientTrends(patientId: string): Promise<PatientTr
 
 ${lines}
 
+### ประมาณการระยะฟื้นตัว (คำนวณทางสถิติจากแนวโน้มของผู้ป่วยเอง ย้อนหลัง 90 วัน)
+${forecasts.map(forecastLine).join('\n') || '- ไม่มีข้อมูล'}
+
 กรุณาเขียน:
 1. **สรุปภาพรวม** (2-3 ประโยค)
 2. **แนวโน้มข้อผิดพลาด** แยกตามท่า — ดีขึ้น/แย่ลง/คงที่ พร้อมตัวเลขอ้างอิง
 3. **ท่าชดเชยที่ควรติดตาม** และความหมายทางคลินิกที่เป็นไปได้
-4. **ประเด็นให้ผู้ดูแลพิจารณา** (เช่น ปรับช่วงเป้าหมาย ทบทวนท่าทางกับผู้ป่วย ดู Clinical Session Replay ของเซสชันที่มีปัญหา) — ไม่เกิน 4 ข้อ`;
+4. **ระยะฟื้นตัว** — อ้างอิงเฉพาะสถานะและช่วงประมาณการที่ให้ไว้ ห้ามสร้างตัวเลขใหม่ ใช้คำว่า "ประมาณการ" ระบุเป็นช่วงเสมอ และบอกว่าขึ้นกับการฝึกสม่ำเสมอ; ถ้าข้อมูลยังไม่พอให้บอกตรง ๆ
+5. **ประเด็นให้ผู้ดูแลพิจารณา** (เช่น ปรับแผนเมื่อ plateau ทบทวนท่าทางกับผู้ป่วย ดู Clinical Session Replay ของเซสชันที่มีปัญหา) — ไม่เกิน 4 ข้อ`;
 
   try {
     const { content, model } = await complete(ANALYST_SYSTEM, prompt);
