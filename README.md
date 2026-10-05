@@ -1,4 +1,10 @@
-# 🏋️ AI-Driven Home Rehabilitation & Physical Therapy Tracker
+# 🏋️ AI Physio — AI-Driven Home Rehabilitation & Physical Therapy Tracker
+
+ระบบกายภาพบำบัดทางไกล (Telerehabilitation) ที่ใช้กล้องเว็บแคมหรือมือถือตรวจจับท่าทางของผู้ป่วยด้วย AI วัดมุมข้อต่อแบบเรียลไทม์ ให้โค้ชเสียงภาษาไทยแนะนำระหว่างฝึก และส่งรายงานทางคลินิกให้แพทย์/นักกายภาพบำบัดตรวจสอบผ่าน Web Dashboard
+
+> **สถานะ:** ต้นแบบที่ใช้งานได้ครบวงจร (ผู้ป่วยฝึก → ระบบวัดผล → แพทย์ตรวจรายงาน) บน branch `ai-physio` · ค่ามุมเป้าหมายเป็นค่าประมาณของทีมพัฒนา **ยังไม่ผ่านการรับรองโดยนักกายภาพบำบัด** และระบบนี้ **ไม่ใช่เครื่องมือวินิจฉัย**
+
+---
 
 ## 🎯 Pain Points ในวงการกายภาพบำบัดที่บ้าน
 ### 1. คนไข้ทำท่าผิดหรือทำไม่สุดระยะ (Poor Form & Limited ROM)
@@ -6,7 +12,7 @@
 > เมื่อคนไข้กลับไปทำกายภาพที่บ้าน มักทำท่าผิดๆ ถูกๆ หรือขยับไม่สุดระยะ (Range of Motion - ROM) ทำให้ฟื้นฟูช้า หรือร้ายแรงกว่านั้นคือ บาดเจ็บซ้ำ (Re-injury) เนื่องจากไม่มีผู้เชี่ยวชาญคอยประกบ
 
 > [!solution] โอกาส Data/AI
-> - **Data Capture:** ใช้กล้อง Smartphone
+> - **Data Capture:** ใช้กล้องเว็บแคม/สมาร์ทโฟน
 > - **AI Analytics:** ใช้ `Pose Estimation` ตรวจจับข้อต่อ (Joints) และคำนวณมุม (Kinematics) เพื่อเช็คว่าท่าถูกต้องและสุดระยะหรือไม่
 
 ### 2. ขาดแรงจูงใจและการติดตามผลระยะยาว (Lack of Motivation & Long-term Tracking)
@@ -14,83 +20,84 @@
 > การทำกายภาพเป็นเรื่องน่าเบื่อ คนไข้มักขาดแรงจูงใจ และแพทย์ไม่สามารถเห็นกราฟพัฒนาการที่ต่อเนื่องระหว่างคาบการรักษาได้
 
 > [!solution] โอกาส Data/AI
-> - **Integration (Gamification):** นำคะแนนความถูกต้อง (Accuracy Score) มาทำเป็นเกม เช่น ทำท่าถูกตัวละครถึงจะกระโดดข้ามสิ่งกีดขวางได้
-> - **Time-Series & Predictive:** ใช้ `Time-Series Analysis` พล็อตกราฟพัฒนาการ และใช้ `Predictive Analytics` พยากรณ์ระยะเวลาฟื้นตัว (Recovery Forecast) หรือแจ้งเตือนเมื่อกราฟพัฒนาการ "แบนราบ" (Plateau)
+> - **Gamification:** ภารกิจรายวัน (Quests), Streak และ Badge จากคะแนนความถูกต้อง
+> - **Time-Series & Predictive:** พล็อตกราฟพัฒนาการ ROM/ความแม่นยำ วิเคราะห์แนวโน้ม และ (แผนต่อไป) พยากรณ์ระยะเวลาฟื้นตัวหรือแจ้งเตือนเมื่อพัฒนาการ "แบนราบ" (Plateau)
+
+---
+
+## ✨ ความสามารถของระบบ (ที่ทำเสร็จแล้ว)
+
+### 🧑‍🦯 ฝั่งผู้ป่วย
+- **ภารกิจรายวันตามแผนที่แพทย์สั่ง** — ฝึกได้เฉพาะท่าที่ได้รับมอบหมาย (ไม่มี free practice) พร้อมภาพสาธิตท่าแบบเคลื่อนไหว
+- **กล้อง + AI วัดมุมข้อต่อแบบเรียลไทม์** — MediaPipe Pose ประมวลผลบนเครื่องผู้ใช้ คำนวณมุมแบบ 3D, กรองสัญญาณสั่น (One Euro filter), แก้ปัญหาซ้าย/ขวาสลับกัน
+- **นับครั้ง / เซ็ต และตรวจท่าทางอัตโนมัติ** — ตรวจท่าชดเชย (compensation), ทำไม่สุดระยะ, ความแม่นยำต่ำ
+- **Focus Mode** — HUD ตัวใหญ่ (จำนวนครั้ง, เซ็ต, เกจช่วงมุมเป้าหมาย) อ่านได้จากระยะ 2–3 เมตร, เส้นโครงกระดูกเปลี่ยนสีตามสถานะ (เขียว/เหลือง/แดง)
+- **โค้ชเสียงภาษาไทย** — พูดเป็นธรรมชาติแบบนักกายภาพ ไม่อ่านตัวเลของศา, เตือนท่าทางเฉพาะช่วงที่กำลังทำท่า (ไม่พูดตอนกลับท่าเริ่มต้น), ไม่พูดซ้อนกัน, ใช้ได้แม้เครื่องไม่มีเสียงภาษาไทย (สังเคราะห์เสียงที่เซิร์ฟเวอร์)
+- **บันทึกวิดีโอเฉพาะเมื่อยินยอม** (PDPA, แยกจากความยินยอมทั่วไป ถอนได้ตลอด)
+- **แชทกับทีมผู้ดูแล + ผู้ช่วย AI** ที่ตอบตามหลักกายภาพบำบัด และส่งต่อทันทีเมื่อพบอาการอันตราย (แนะนำโทร 1669)
+- **Dashboard พัฒนาการ** — กราฟแนวโน้ม, Streak, Badge, ประวัติการฝึก
+
+### 👨‍⚕️ ฝั่งแพทย์ / นักกายภาพบำบัด
+- **ภาพรวม** — การ์ดสรุป: ฝึกเสร็จวันนี้, รอตรวจสอบ, ความเสี่ยงสูง/Red flags + คิวรายงานรอรับรอง
+- **จัดการผู้ป่วย** — HN อัตโนมัติ, ข้อมูลคลินิก, วิเคราะห์แนวโน้มด้วย AI
+- **แผนการรักษา (Prescription)** — กำหนดท่า, จำนวนเซ็ต/ครั้ง, วันที่ต้องฝึก และปรับมุมเป้าหมายรายบุคคลได้
+- **รายงานคลินิกแบบแท็บ** — สรุปทางคลินิกโดย AI + รับรองผล / ข้อมูลเซสชันดิบ / กราฟมุมข้อต่อ / วิดีโอและรีเพลย์การเคลื่อนไหว (เล่น-หยุด, ปรับความเร็ว, กระโดดไปจุดที่ผิด)
+- **ดาวน์โหลด PDF คลิกเดียว** — รูปแบบเอกสารราชการไทย A4 (หัวกระดาษ, เลขที่เอกสาร, HN, ช่องลงนาม) ชื่อไฟล์ `printresult_[รหัสเซสชัน]_[ชื่อผู้ป่วย].pdf`
+
+### 🔐 ระบบและความปลอดภัย
+- เข้าสู่ระบบด้วยอีเมล/รหัสผ่าน แยกสิทธิ์ ผู้ป่วย / บุคลากรการแพทย์ และเห็นข้อมูลเฉพาะผู้ป่วยในความดูแล
+- **Popup ยินยอมข้อตกลงและ PDPA บังคับ** ก่อนใช้งานทุกฟีเจอร์ (บังคับที่ API ด้วย)
+- AI ใช้ผู้ให้บริการฟรี (Groq / Gemini / OpenRouter) สลับอัตโนมัติเมื่อตัวใดล่ม · API key เก็บใน `.env` เท่านั้น
 
 ---
 
 ## 🧠 Technical Strategy & CPE310 Alignment
 ### 💡 Dataset Strategy: "ไม่ต้องหา Dataset ภาพเยอะ"
-- ใช้ MediaPipe (Pre-trained) ดึง Joint จากวิดีโอ YouTube แนวกายภาพบำบัดฟรีๆ
-- **Ground Truth:** ดึงเฟรมวิดีโอ -> รัน MediaPipe -> คำนวณมุมข้อต่อมาตรฐาน (Ideal Angles) -> บันทึกเป็น JSON Baseline
-- **จุดแข็ง:** ลดเวลา Data Labeling 90% ใช้ Logic ทางเรขาคณิต (Geometry) แทน Deep Learning แบบ Train เอง
+- ใช้ MediaPipe Pose (pre-trained) ดึงพิกัดข้อต่อ แล้วใช้ **เรขาคณิตเวกเตอร์** คำนวณมุม แทนการ train โมเดลเอง — ลดเวลา Data Labeling เกือบทั้งหมด
+- ค่ามุมเป้าหมายอ้างอิงช่วง ROM ปกติ (Physiopedia, Soucie et al. 2011) และคำแนะนำท่าจาก AAOS / NHS / CUH; ท่าจากชุดข้อมูลวิจัย **KIMORE** และ **REHAB24-6** ถูกเพิ่มเป็นแบบร่าง (รอตรวจสอบแหล่งอ้างอิง)
+- ทุกเซสชันเก็บ snapshot ของสูตรและเป้าหมายที่ใช้ (`algorithmVersion`) ทำให้รายงานย้อนหลังตรวจสอบได้ (Explainable)
 
 ### 📊 Phase 1: Core ML/DL & Analytics
-1. **Computer Vision (MediaPipe):** ตรวจจับ Skeleton tracking และคำนวณมุมข้อต่อแบบ Real-time
-2. **Time-Series Analysis:** เก็บค่า ROM และ Accuracy Score รายวัน พล็อตเป็นกราฟแนวโน้มพัฒนาการ (Progression Curve)
-3. **Predictive Analytics:** สร้างโมเดลถดถอย (Regression) หรือ Classification เพื่อพยากรณ์ว่า "หากคนไข้ทำท่านี้ครบ X ครั้งต่อสัปดาห์ จะใช้เวลากี่สัปดาห์ถึงจะกลับมาเดินได้ปกติ" หรือแจ้งเตือน "Risk of Re-injury"
+1. **Computer Vision (MediaPipe):** Skeleton tracking + มุมข้อต่อ 3D แบบเรียลไทม์ ✅
+2. **Time-Series Analysis:** เก็บ ROM และคะแนนความแม่นยำทุกครั้ง พล็อตกราฟแนวโน้ม + วิเคราะห์ slope ✅
+3. **Predictive Analytics:** โมเดลพยากรณ์ระยะฟื้นตัว / Risk of Re-injury ⏳ (ยังไม่ทำ — ปัจจุบันเป็นการวิเคราะห์แนวโน้มเชิงสถิติ)
 
 ### 🤖 Phase 2: Agentic AI Architecture (Multi-Agent System)
-ระบบใช้ Multi-Agent System เพื่อแบ่งแยกหน้าที่ (Separation of Concerns):
-
-- 📷 **Agent 1: Vision Tracker (The Eyes)**
-  - **หน้าที่:** รับเฟรมจากกล้อง รัน MediaPipe ดึงพิกัด (x, y, z) ของข้อต่อ
-  - **Output:** ส่งค่า Coordinates และคำนวณ Angle/Distance แบบ Real-time
-- 🗣️ **Agent 2: AI Coach (The Brain)**
-  - **หน้าที่:** LLM ที่รับค่ามุมข้อต่อ (JSON) เปรียบเทียบกับทฤษฎีกายภาพบำบัด (ดึงจาก RAG)
-  - **Action:** Generate ข้อความ/เสียง (TTS) แบบ Real-time เช่น "งอเข่าอีกนิดครับ ขาดอีกประมาณ 1 คืบ"
-  - **XAI Feature:** แสดงผลบน UI ว่า "ข้อผิดพลาด: มุมเข่า 120° (เป้าหมาย: 90°)"
-- 📄 **Agent 3: Clinical Reporter (The Scribe)**
-  - **หน้าที่:** เมื่อจบเซสชัน ดึง Log ความถูกต้อง, จำนวนครั้ง (Reps), และ ROM
-  - **Output:** Generate เป็น Clinical Summary Report (PDF/JSON) ส่งให้แพทย์ผ่าน Web Dashboard
+- 📷 **Agent 1: Vision Tracker (The Eyes)** — MediaPipe บนเครื่องผู้ใช้ → พิกัด (x, y, z) → มุมข้อต่อ, นับครั้ง, ตรวจท่าชดเชย ✅
+- 🗣️ **Agent 2: AI Coach (The Brain)** — LLM รับ "สถานะเชิงคุณภาพ" ของข้อต่อ (ไม่เห็นตัวเลข) แล้วพูดคำแนะนำภาษาไทยแบบนักกายภาพ ผ่าน TTS ✅ · RAG จากตำรากายภาพ ⏳ (ปัจจุบันใช้หลัก Kisner & Colby ใน prompt)
+- 📄 **Agent 3: Clinical Reporter (The Scribe)** — สรุปเซสชันเป็นรายงานคลินิกภาษาไทย + วิเคราะห์แนวโน้มหลายเซสชัน + PDF ✅
+- 💬 **Agent 4: Patient Companion** — ผู้ช่วยตอบคำถามผู้ป่วยในแชท พร้อมตรวจจับอาการอันตราย ✅
 
 ---
 
-## 📱 Mobile & Play Store Strategy
-> [!tip] การเตรียมแอปเพื่อลง Play Store
-> เนื่องจาก Core เป็น Web-based (Tailwind + FastAPI) จะใช้กลยุทธ์ดังนี้:
-
-1. **App Wrapper:** ใช้ **Capacitor** หรือ **PWA (Progressive Web App)** Wrap หน้าเว็บให้เป็น Native Android App เพื่ออัปโหลดขึ้น Play Store ได้
-2. **On-Device Processing (สำคัญมาก):** รัน MediaPipe ผ่าน TensorFlow.js / MediaPipe JS ใน WebView ของมือถือ เพื่อไม่ให้ส่งภาพวิดีโอขึ้น Cloud (ลด Latency และแก้ปัญหา PDPA) ส่งขึ้น Server แค่ค่า JSON Coordinates
-3. **Offline Mode:** รองรับการทำกายภาพแบบไม่มีอินเทอร์เน็ต โดยซิงค์ข้อมูลขึ้น Cloud เมื่อมีเครือข่าย (Sync Queue)
-4. **App Store Optimization (ASO):** ตั้งชื่อแอปให้ค้นหาง่าย เช่น "AI Physio: กายภาพบำบัดที่บ้าน"
-
----
-
-## 🎨 UI/UX Strategy: "Minimalist & Tech/Geek"
-- **หน้า Live Camera:** แสดง Live Webcam + เส้น Skeleton ทับ + กราฟมุมข้อต่อแบบ Real-time (สไตล์ Oscilloscope)
-- **Dashboard ผู้ป่วย:** แสดงกราฟ Time-Series พัฒนาการ, Streak (จำนวนวันที่ทำติดต่อกัน), และ Badge ความสำเร็จ
-- **Dashboard แพทย์ (Web):** ใช้ Tailwind CSS + DaisyUI จัด Layout ให้ดูเป็น Professional Tool สำหรับดูรายงานจาก Agent 3
-
----
 ## Flowchart
 ```mermaid
 %%{init: {"flowchart":{"nodeSpacing":30,"rankSpacing":40}}}%%
 flowchart BT
     subgraph Patient ["🧑‍🦯 ผู้ป่วย (ที่บ้าน)"]
-        A["เปิดแอป"]
-        B["เลือกท่ากายภาพตามแผนที่หมอสั่ง"]
-        C["วางมือถือให้กล้องเห็นตัว"]
+        A["เปิดแอป + ยอมรับข้อตกลง"]
+        B["เลือกภารกิจตามแผนที่หมอสั่ง"]
+        C["วางกล้องให้เห็นทั้งตัว"]
         D["ทำท่ากายภาพ"]
         E{"ผลลัพธ์จาก AI"}
-        F["✅ ได้คะแนน + เสียงชม"]
+        F["✅ นับครั้ง + เสียงชม"]
         G["⚠️ เสียงเตือนจาก AI Coach"]
         H["ทำครบเซสชัน"]
         I["ดูกราฟพัฒนาการบน Dashboard"]
     end
     subgraph System ["🤖 ระบบ AI (Multi-Agent)"]
         P["Agent 1: Vision Tracker - ตรวจจับท่าและมุม"]
-        Q["Agent 2: AI Coach - ให้ Feedback เรียลไทม์"]
-        R["Agent 3: Clinical Reporter - สรุปภาพรวมการรักษา"]
+        Q["Agent 2: AI Coach - Feedback เสียงภาษาไทย"]
+        R["Agent 3: Clinical Reporter - สรุปรายงานคลินิก"]
     end
     subgraph Doctor ["👨‍⚕️ แพทย์ (คลินิก)"]
         J["Login Web Dashboard"]
-        K["ดูรายงานคนไข้ Clinical Report"]
+        K["ดูรายงาน + รีเพลย์ + PDF"]
         L["ดูวิเคราะห์แนวโน้ม ROM + Progression"]
         M{"ประเมินพัฒนาการ"}
         N["เพิ่มระดับความยาก"]
         O["ปรับแผนการรักษา"]
-        S["อัปเดตระบบ Prescription Sync"]
+        S["อัปเดต Prescription"]
     end
     A --> B
     B --> C
@@ -100,7 +107,7 @@ flowchart BT
     F --> H
     G --> D
     H --> I
-    D -.->|"ส่งวิดีโอเฟรม/พิกัด"| P
+    D -.->|"พิกัดข้อต่อ (ไม่ส่งภาพ)"| P
     P -->|"วิเคราะห์มุมข้อต่อ"| Q
     Q -.->|"ส่งคำแนะนำ/คะแนน"| E
     H -.->|"ส่งข้อมูลสรุปเซสชัน"| R
@@ -112,66 +119,66 @@ flowchart BT
     M -->|"ทรงตัว/แย่ลง"| O
     N --> S
     O --> S
-    S -.->|"ซิงค์เกณฑ์และท่าใหม่"| B
+    S -.->|"ภารกิจและเป้าหมายใหม่"| B
     classDef patientStyle fill:#e1f5ff,stroke:#0288d1,color:#01579b,stroke-width:2px
     classDef systemStyle fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c,stroke-width:2px
     classDef doctorStyle fill:#ffebee,stroke:#d32f2f,color:#b71c1c,stroke-width:2px
-    %% mermaid-flow:pos A=426,1335 B=426,1251 C=493,1167 D=493,1083 E=601,817 F=611,719 G=237,719 H=611,635 I=888,551 P=1318,1070 Q=1318,986 R=1318,622 J=1937,1065 K=1782,981 L=1782,897 M=1782,799 N=1887,701 O=1723,701 S=1737,625
 ```
 
+---
+
+## 🚀 Project Roadmap / สถานะงานรายเฟส
+
+| เฟส | งานที่ทำ | สถานะ |
+|---|---|---|
+| **0. ต้นแบบ** | ตรวจจับท่าด้วย MediaPipe, แก้เส้นโครงกระดูกไม่ตรง, เครื่องคำนวณมุม 3D | ✅ |
+| **1. Backend & ข้อมูล** | PostgreSQL + Prisma migrations, ระบบล็อกอินตามบทบาท, API ที่จำกัดสิทธิ์ตามทีมผู้ดูแล, แผนการรักษา → ภารกิจรายวัน, ท่าพร้อมแหล่งอ้างอิง | ✅ |
+| **2. คุณภาพการวัด** | ลดท่าเหลือข้อต่อหลักที่วัดได้แม่น, กรองสัญญาณ, ตรวจท่าชดเชย, คิวรีวิว, แชททีมผู้ดูแล, ภาพสาธิตท่า | ✅ |
+| **3. หลักฐานทางคลินิก & AI** | Clinical Session Replay, ท่าจาก KIMORE/REHAB24-6, AI agent (สรุปเซสชัน/แนวโน้ม/ผู้ช่วยผู้ป่วย) บนผู้ให้บริการฟรี, ป้องกันข้อความภาษาไทยเสีย | ✅ |
+| **4. ประสบการณ์ฝึก & รายงาน** | โค้ชพูดเป็นธรรมชาติ (ไม่อ่านตัวเลข), พิมพ์รายงาน, บันทึกวิดีโอตามความยินยอม | ✅ |
+| **5. ความแม่นยำ & เอกสาร** | แก้ซ้าย/ขวาสลับ + One Euro filter + render loop, รายงาน PDF แบบราชการไทยพร้อม HN | ✅ |
+| **6. เสียง & ความยินยอม** | เสียงไทยจากเซิร์ฟเวอร์, Popup ยินยอมบังคับ, ดาวน์โหลด PDF คลิกเดียว, เหลือเฉพาะท่ายืน/นั่ง | ✅ |
+| **7. จังหวะการเตือน** | เตือนเฉพาะช่วงทำท่า (ไม่เตือนตอนกลับท่า), cooldown, เสียงเร็วขึ้นและไม่ซ้อนกัน | ✅ |
+| **8. UI/UX** | Focus Mode HUD, Dashboard การ์ดสรุป, รายงานแบบแท็บ, ธีมคลินิก slate/teal, ปุ่มรองรับจอสัมผัส | ✅ |
+| **9. Predictive Analytics** | พยากรณ์ระยะฟื้นตัว / แจ้งเตือน Plateau | ⏳ |
+| **10. ตรวจสอบทางคลินิก** | นักกายภาพรับรองมุมเป้าหมาย, ข้อความยินยอม, ประโยคโค้ช และแหล่งอ้างอิง KIMORE/REHAB24-6 | ⏳ |
+| **11. Mobile & Play Store** | PWA/Capacitor, Offline sync, ทดสอบเครื่องจริง, หน้าจัดการสำหรับ Admin | ⏳ |
+
+✅ เสร็จแล้ว · ⏳ ยังไม่ได้ทำ — รายละเอียดเชิงเทคนิคของแต่ละเฟสอยู่ใน [CODEBASE.md](./CODEBASE.md#-development-history)
+
+### 📱 แผน Mobile & Play Store (ยังไม่ได้ทำ)
+1. **App Wrapper:** PWA หรือ Capacitor ห่อเว็บ Next.js เป็นแอป Android
+2. **On-Device Processing:** MediaPipe รันบนเครื่องอยู่แล้ว ส่งขึ้นเซิร์ฟเวอร์เฉพาะพิกัดข้อต่อ (ลด latency และสอดคล้อง PDPA)
+3. **Offline Mode:** คิวซิงค์ข้อมูลเมื่อกลับมาออนไลน์
+4. **Play Store:** ขอสิทธิ์กล้อง/ไมโครโฟนตาม Android Guideline, Privacy Policy, ภาพหน้าจอและคำอธิบายแอป
 
 ---
 
+## 🛠️ Quick Start
 
-## 🚀 Project Roadmap
-### Step 1: Backend, Database & Mobile Setup
-- ✅ ออกแบบ Database Schema (Users → Exercise Plans → Session Logs → Joint_Angle_Records)
-- ✅ สร้าง FastAPI Endpoint สำหรับ Auth, Sync Data, และดึง Exercise Plans
-- ✅ Setup โครงสร้าง Mobile App ด้วย Capacitor (Wrap Tailwind Frontend)
+ต้องมี **Bun**, **Docker Desktop** (สำหรับ PostgreSQL) และเบราว์เซอร์ที่มีกล้อง (Chrome / Edge)
 
-### Step 2: Computer Vision & Logic Module (Phase 1 Core)
-- ✅ เขียน Python Script ดึงวิดีโอ YouTube -> Extract Ideal Angles (Ground Truth)
-- ✅ เขียน Logic คำนวณมุมข้อต่อ (Angle Calculation using Vector Math) บน Frontend (JS)
-- ⚠️ เช็คว่าทำท่าถูกไหม (Form Check) และสุดระยะไหม (ROM Check) — ยังต้อง test live camera flow
-- ⚠️ Implement Time-Series Dashboard (กราฟพัฒนาการ) — dashboard มี แต่ยังต้อง test data flow
+```bash
+bun install                  # ติดตั้ง dependencies (+ prisma generate)
+cp .env.example .env         # ตั้งค่า NEXTAUTH_SECRET และ API key ของ AI (ดูคำอธิบายในไฟล์)
 
-### Step 3: Agentic AI & Predictive Integration (Phase 2 Core)
-- ⚠️ เชื่อมต่อ Tracker Agent กับ Coach Agent (ใช้ Z-AI SDK Endpoint) — foundation มี แต่ยังต้อง test real-time feedback
-- ⚠️ สร้าง Reporter Agent ให้สรุปผลเป็น Clinical Note — endpoint มี แต่ยังต้อง test generation quality
-- ⏳ สร้างโมเดล Predictive Analytics ง่ายๆ (เช่น Linear Regression) เพื่อพยากรณ์วันฟื้นตัว
+bun run db:up                # เปิด PostgreSQL ด้วย docker compose
+bun run db:migrate:deploy    # สร้างตาราง
+bun run db:seed              # ข้อมูลตัวอย่าง (⚠️ ล้างข้อมูลเดิมทั้งหมด)
 
-### Step 4: Play Store Preparation & Launch
-- ⏳ ทำระบบ Sign-up / Login และหน้า **Privacy Policy / Terms of Service** (บังคับโดย Google Play)
-- ⏳ ขอ Permission กล้อง และ Microphone (สำหรับ TTS) อย่างถูกต้องตาม Android Guideline
-- ⏳ Build APK/AAB และทดสอบบนเครื่องจริง (Real-device Testing)
-- ⏳ อัปโหลดขึ้น Google Play Console (เตรียมรูป Screenshot, คำอธิบายแอป)
+bun run dev                  # เปิด http://localhost:3000
+```
+
+**บัญชีทดลอง** (รหัสผ่าน = `SEED_DEMO_PASSWORD` ใน `.env`, ค่าเริ่มต้น `physio-demo-2026`)
+- แพทย์ / นักกายภาพ: `doctor@`, `pt@`, `pt2@` + `demo.aiphysio.local`
+- ผู้ป่วย: `patient1@`, `patient2@`, `patient3@` + `demo.aiphysio.local`
+
+**ตรวจสอบก่อน commit / deploy:** `bun run typecheck` · `bun run lint` · `bun run build`
 
 ---
+
+## 🧰 Tech Stack
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS 4 + shadcn/ui · Zustand · PostgreSQL + Prisma 6 · next-auth · MediaPipe Pose (Web) · Recharts · LLM ผ่าน OpenAI-compatible API (Groq / Gemini / OpenRouter) · Thai TTS · jsPDF · Bun
 
 ## 📚 Developer Documentation
-
-> 👉 **สำหรับ developers ที่จะทำต่อ** — อ่าน [CODEBASE.md](./CODEBASE.md) สำหรับคำอธิบายโครงสร้างโค้ด, API endpoints, database schema, วิธีการรันเว็บ, และ data flow ทั้งหมด
-
-### Quick Start
-```bash
-# Install dependencies
-bun install
-
-# Setup database
-bun run db:push && bun run db:generate
-
-# Run development server
-bun run dev
-
-# Open browser to http://localhost:3000
-```
-
-### Key Files Reference
-- **Core Logic:** `src/lib/angle-utils.ts` (angle calculation, ROM check)
-- **State Management:** `src/lib/store.ts` (Zustand global state)
-- **Live Camera:** `src/components/physio/live-session-view.tsx` (main session component)
-- **AI Coach:** `src/app/api/coach/route.ts` (Z-AI LLM endpoint)
-- **Reports:** `src/app/api/reports/[sessionId]/route.ts` (clinical summary generator)
-- **Exercise Library:** `src/lib/exercises-data.ts` (all exercises with target angles)
-- **Database:** `prisma/schema.prisma` (Exercise, Patient, Session, JointAngleLog models)
-
+> 👉 **สำหรับ developers ที่จะทำต่อ** — อ่าน [CODEBASE.md](./CODEBASE.md): โครงสร้างโค้ด, API endpoints, database schema, สูตรคำนวณมุม, pipeline ของหน้าฝึก, การตั้งค่า และประวัติการพัฒนา
