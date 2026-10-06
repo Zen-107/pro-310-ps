@@ -1,5 +1,10 @@
 # Local PostgreSQL for development. Matches DATABASE_URL in .env.example.
 #   docker compose up -d db
+# The project name is fixed so the container and data volume
+# (pro-310-ps-db-1 / pro-310-ps_pgdata) are the same whatever the checkout
+# folder is called; otherwise a renamed folder starts a new, empty database.
+name: pro-310-ps
+
 services:
   db:
     image: postgres:16-alpine

@@ -389,6 +389,7 @@ There is no automated test suite yet. The angle engine, smoother, rep counter an
 | Every API call returns 403 `TERMS_REQUIRED` | The user hasn't accepted the current `TERMS_VERSION` |
 | `prisma generate` EPERM on Windows | The running dev server locks the query engine DLL — stop `bun run dev`, regenerate, restart |
 | Exercise missing from quests | Only `PUBLISHED` exercises appear; check `status` / `statusNote` |
+| `db:seed` fails / "table … does not exist" | Connected to an empty database. `docker ps`: the data lives in `pro-310-ps-db-1` (volume `pro-310-ps_pgdata`); the project name is pinned in `docker-compose.yml` so `bun run db:up` always uses it. On a brand-new database run `bun run db:migrate:deploy` before seeding |
 
 ---
 
