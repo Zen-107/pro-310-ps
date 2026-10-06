@@ -7,7 +7,7 @@
     "build": "next build && node scripts/copy-standalone-assets.mjs",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests/tsconfig.json",
     "postinstall": "prisma generate",
     "db:up": "docker compose up -d db",
     "db:generate": "prisma generate",
@@ -15,7 +15,9 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test": "bun test tests/unit",
+    "test:integration": "bun test --preload ./tests/integration/preload.ts tests/integration"
   },
   "prisma": {
     "seed": "bun prisma/seed.ts"

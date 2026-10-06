@@ -182,7 +182,9 @@ bun run dev                  # เปิด http://localhost:3000
 - แพทย์ / นักกายภาพ: `doctor@`, `pt@`, `pt2@` + `demo.aiphysio.local`
 - ผู้ป่วย: `patient1@`, `patient2@`, `patient3@` + `demo.aiphysio.local`
 
-**ตรวจสอบก่อน commit / deploy:** `bun run typecheck` · `bun run lint` · `bun run build`
+**ตรวจสอบก่อน commit / deploy:** `bun run typecheck` · `bun run lint` · `bun run test` · `bun run build`
+
+**ชุดทดสอบอัตโนมัติ:** `bun run test` (unit tests ส่วนคำนวณทั้งหมด ไม่ใช้ฐานข้อมูล) · `bun run test:integration` (ทดสอบ API กับฐานข้อมูลทดสอบแยก ต้องตั้ง `TEST_DATABASE_URL`) · GitHub Actions รันให้อัตโนมัติทุกครั้งที่ push — รายละเอียดใน [CODEBASE.md](./CODEBASE.md#automated-tests-bun-test)
 
 ---
 

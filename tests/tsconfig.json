@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun-types"],
+    "incremental": false,
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "../src/types/**/*.d.ts"],
+  "exclude": []
+}

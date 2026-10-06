@@ -85,6 +85,8 @@ project-root/
 │   ├── migrations/                   # Apply with `bun run db:migrate:deploy`
 │   ├── seed.ts                       # Demo organizations, users, exercises + citations (WIPES data)
 │   └── demo-history.ts               # Simulated 6-week training history for the demo seed
+├── tests/                            # bun test: unit/ (no DB), integration/ (API + test DB), helpers/
+├── .github/workflows/ci.yml          # CI: typecheck, lint, tests, build
 ├── scripts/copy-standalone-assets.mjs  # Post-build copy for the standalone server (cross-platform)
 ├── storage/                          # Runtime data: consented session videos (git-ignored, not in build output)
 ├── docker-compose.yml                # Local PostgreSQL
@@ -376,9 +378,31 @@ bun run db:studio          # browse data
 
 ## 🧪 Testing & troubleshooting
 
-**Manual end-to-end check:** sign in as `patient3@…` → accept terms → เริ่มฝึก → start a quest → stand back so the whole body is visible → complete reps (listen for the coach) → sign in as `doctor@…` → รายงาน → pick the patient and session → check each tab → ดาวน์โหลด PDF.
+### Automated tests (`bun test`)
 
-There is no automated test suite yet. The angle engine, smoother, rep counter and cue gate are framework-free and can be exercised directly with `bun` scripts (feed synthetic landmark/angle sequences).
+```bash
+bun run test               # unit tests: no database, < 1 s
+bun run test:integration   # API + database: needs TEST_DATABASE_URL (see .env.example)
+bun run typecheck          # app + tests (tests have their own tsconfig with Bun types)
+```
+
+| Suite | Covers |
+|---|---|
+| `tests/unit/angle-utils` | dot-product angles (2D/3D, aspect ratio), hidden landmarks omitted, world landmarks preferred, scoring & status thresholds |
+| `tests/unit/rep-counter` | rep = enter → hold → leave, too-short holds, incomplete attempts + deficit, warm-up, both sides count once, movement phases, ROM summary |
+| `tests/unit/landmark-smoother` | One Euro jitter reduction and low lag, left/right label-swap correction, out-of-frame and visibility hysteresis |
+| `tests/unit/form-checks` | min / max / symmetry faults, `{side}` / `{other}` templates, JSON validation |
+| `tests/unit/catalogue` | every exercise: min ≤ ideal ≤ max, measurable formulas, valid form checks, standing/sitting only; every demo's end pose lies in its target range |
+| `tests/unit/coaching` | cue gate (phases, cooldowns, after-rep block), fault persistence, every phrase speakable with no numbers |
+| `tests/unit/recovery-forecast` | deficit in both directions, best-of-day, Theil–Sen robustness, each status, determinism, the demo scenarios' statuses |
+| `tests/unit/text-and-dates` | Thai-safe truncation, sanitising, AI-summary cleanup, TTS chunking + rate limit, Bangkok dates, PDF file name, terms versioning |
+| `tests/integration/api` | 401 / terms gate (403 `TERMS_REQUIRED`, 409 old version), care-team scoping (404 for other teams), role checks, quest-only sessions + target snapshot, video consent enforcement, red-flag escalation without AI, TTS off, forecasts in insights and clinician summary |
+
+**Integration test safety:** they run only through `bun run test:integration` (preload `tests/integration/preload.ts`), only against `TEST_DATABASE_URL`, and refuse any database whose name does not contain `test`. Login is stubbed by replacing `getServerSession`; guards, scoping and queries run for real. AI keys are removed and server TTS is off, so no network calls are made.
+
+**CI** (`.github/workflows/ci.yml`): on every push to `main` / `ai-physio` and on pull requests — typecheck, lint, unit tests, migrations on a fresh Postgres service, integration tests, production build.
+
+**Manual end-to-end check:** sign in as `patient3@…` → accept terms → เริ่มฝึก → start a quest → stand back so the whole body is visible → complete reps (listen for the coach) → sign in as `doctor@…` → รายงาน → pick the patient and session → check each tab → ดาวน์โหลด PDF. Camera, speech and the canvas overlay are not covered by automated tests.
 
 | Issue | Check |
 |---|---|
@@ -413,7 +437,7 @@ There is no automated test suite yet. The angle engine, smoother, rep counter an
 - **Recovery forecast** is per-patient trend extrapolation, not a validated predictive model: ranges are wide (weeks), optimistic when recovery saturates, and fresh plateaus are missed about a third of the time (see *Recovery forecast*). Needs real longitudinal data and recorded outcomes for calibration; a mixed-effects model is the next step.
 - **TTS dependency:** the server voice uses Google's unofficial Translate TTS endpoint (may be blocked or change). Consider an official TTS API for production.
 - **PDF download** is rasterised (not selectable text).
-- **No automated tests**; no admin screens; no offline mode; mobile packaging (PWA/Capacitor) and Play Store preparation not started.
+- **Not covered by automated tests:** camera, speech and canvas rendering (manual check); no admin screens; no offline mode; mobile packaging (PWA/Capacitor) and Play Store preparation not started.
 - **Production:** set up encrypted, backed-up storage and a retention policy for videos (`VIDEO_STORAGE_DIR`); move the in-memory TTS cache and rate limits to shared storage if running more than one server instance.
 
 ---

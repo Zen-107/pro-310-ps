@@ -15,6 +15,10 @@ import {
   videoPath,
 } from '@/lib/video-storage';
 
+// Node's web-stream type and the DOM ReadableStream are the same object at
+// runtime but distinct types (they clash when Bun's types are loaded)
+const webStream = (s: Readable) => Readable.toWeb(s) as unknown as ReadableStream<Uint8Array>;
+
 type Params = { params: Promise<{ id: string }> };
 
 type Pause = { at: number; resumedAt: number };
@@ -148,13 +152,13 @@ export async function GET(req: NextRequest, { params }: Params) {
       if (start > end || start >= size) {
         return new NextResponse(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
       }
-      const stream = Readable.toWeb(createReadStream(file, { start, end })) as ReadableStream;
+      const stream = webStream(createReadStream(file, { start, end }));
       return new NextResponse(stream, {
         status: 206,
         headers: { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) },
       });
     }
-    const stream = Readable.toWeb(createReadStream(file)) as ReadableStream;
+    const stream = webStream(createReadStream(file));
     return new NextResponse(stream, { status: 200, headers: { ...headers, 'Content-Length': String(size) } });
   } catch (error) {
     return serverError('Session video GET error', error);
