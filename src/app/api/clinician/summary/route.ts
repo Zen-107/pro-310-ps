@@ -4,12 +4,13 @@ import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope, sessionScope } from '@/lib/access';
 import { serverError } from '@/lib/api-utils';
 import { safeTruncate } from '@/lib/text-safe';
-import { computeRecoveryForecasts } from '@/lib/ai-agent';
+import { predictPatients } from '@/lib/predictive';
 
 // Clinician dashboard headline numbers, scoped to the caller's care team:
 // sessions completed today, sessions awaiting review, red flags (symptoms
-// the patient assistant escalated in the last 7 days) and recovery alerts
-// (exercises whose progress has plateaued or is declining).
+// the patient assistant escalated in the last 7 days), recovery alerts
+// (exercises whose progress has plateaued or is declining) and the
+// early-warning risk score of every patient in the care team (lib/risk-score.ts).
 const RED_FLAG_WINDOW_DAYS = 7;
 
 export async function GET() {
@@ -48,20 +49,18 @@ export async function GET() {
         });
     }
 
-    // Recovery alerts: patients in scope who trained in the forecast window
-    const active = await db.patient.findMany({
-      where: { AND: [patientScope(auth.user), { sessions: { some: { status: 'COMPLETED', startedAt: { gte: new Date(Date.now() - 90 * 86_400_000) } } } }] },
-      select: { id: true, name: true },
-    });
-    const recoveryAlerts = (
-      await Promise.all(
-        active.map(async (p) =>
-          (await computeRecoveryForecasts(p.id))
-            .filter((f) => f.forecast.status === 'plateau' || f.forecast.status === 'declining')
-            .map((f) => ({ patientId: p.id, patientName: p.name, exerciseTh: f.exerciseTh, status: f.forecast.status, currentDeficit: f.forecast.currentDeficit }))
-        )
-      )
-    ).flat();
+    // Forecasts + risk for every patient in the care team (reference rates loaded once per organization)
+    const inScope = await db.patient.findMany({ where: patientScope(auth.user), select: { id: true, name: true, organizationId: true } });
+    const predictions = await predictPatients(inScope);
+    const recoveryAlerts = inScope.flatMap((p) =>
+      (predictions.get(p.id)?.forecasts ?? [])
+        .filter((f) => f.forecast.status === 'plateau' || f.forecast.status === 'declining')
+        .map((f) => ({ patientId: p.id, patientName: p.name, exerciseTh: f.exerciseTh, status: f.forecast.status, currentDeficit: f.forecast.currentDeficit }))
+    );
+    const risks = inScope
+      .map((p) => ({ patientId: p.id, patientName: p.name, ...predictions.get(p.id)!.risk }))
+      .filter((r) => r.level !== 'low')
+      .sort((a, b) => b.score - a.score);
 
     return NextResponse.json({
       completedToday,
@@ -69,6 +68,7 @@ export async function GET() {
       redFlags: [...redFlags.values()],
       redFlagWindowDays: RED_FLAG_WINDOW_DAYS,
       recoveryAlerts,
+      risks,
     });
   } catch (error) {
     return serverError('Clinician summary error', error);

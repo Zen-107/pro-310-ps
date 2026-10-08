@@ -8,6 +8,7 @@ import { dateOnlyString, localDateString } from '@/lib/dates';
 import { ANGLE_ALGORITHM_VERSION, ANGLE_DEFINITION } from '@/lib/joint-formulas';
 import { sessionDTO } from '@/lib/presenters';
 import { questDTO, questInclude } from '@/lib/quests';
+import { isSide, targetsForSide } from '@/lib/exercises-data';
 
 const STATUSES: SessionStatus[] = ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
 
@@ -52,7 +53,9 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// Start a session (patient) for one of today's prescribed quests: { questId }.
+// Start a session (patient) for one of today's prescribed quests: { questId, side? }.
+// One-side-at-a-time exercises (exercise.unilateral) need side 'left' | 'right':
+// the session then measures that side only and records it in the snapshot.
 // Free practice is disabled — patients only perform exercises their care team
 // assigned. The session records the prescription, item and prescribing
 // clinician so it shows up on the clinician side immediately.
@@ -78,7 +81,10 @@ export async function POST(req: Request) {
     }
     const prescription = quest.prescriptionItem.prescription;
     if (prescription.status !== 'ACTIVE') return jsonError('This prescription is not active', 409);
-    const exercise = questDTO(quest).exercise;
+    const full = questDTO(quest).exercise;
+    const side = full.unilateral ? body.side : null;
+    if (full.unilateral && !isSide(side)) return badRequest("side must be 'left' or 'right' for this exercise");
+    const exercise = isSide(side) ? { ...full, targetJoints: targetsForSide(full.targetJoints, side) } : full;
 
     const session = await db.$transaction(async (tx) => {
       const created = await tx.exerciseSession.create({
@@ -96,6 +102,8 @@ export async function POST(req: Request) {
             sets: exercise.sets,
             repsPerSet: exercise.repsPerSet,
             restSeconds: exercise.restSeconds,
+            holdSeconds: exercise.holdSeconds,
+            side,
             angleDefinition: ANGLE_DEFINITION,
             targets: exercise.targetJoints,
             formChecks: exercise.formChecks,
@@ -106,7 +114,7 @@ export async function POST(req: Request) {
       return created;
     });
 
-    return NextResponse.json({ id: session.id, questId, startedAt: session.startedAt.toISOString(), exercise }, { status: 201 });
+    return NextResponse.json({ id: session.id, questId, side, startedAt: session.startedAt.toISOString(), exercise }, { status: 201 });
   } catch (error) {
     return serverError('Sessions POST error', error);
   }

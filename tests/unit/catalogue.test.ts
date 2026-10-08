@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { EXERCISES, exerciseIdFromName } from '@/lib/exercises-data';
+import { EXERCISES, exerciseIdFromName, exerciseMeta, targetsForSide } from '@/lib/exercises-data';
 import { JOINT_FORMULAS } from '@/lib/joint-formulas';
 import { parseFormChecks } from '@/lib/form-checks';
 import { EXERCISE_DEMOS, buildSkeleton, measure, demoProgress, type DemoMeasurement } from '@/lib/exercise-poses';
@@ -37,10 +37,28 @@ describe('exercise catalogue', () => {
     });
   }
 
-  test('only standing or sitting exercises (no floor / lying exercises)', () => {
+  // Floor exercises are hard for one webcam to see. Static Quads is the one
+  // deliberate exception (requested by the clinical team; camera at floor level).
+  const LYING_ALLOWED = new Set(['ex_static_quads']);
+  test('only standing or sitting exercises, except the allowed lying ones', () => {
     const lying = /นอน|lying|supine|prone|side-lying|bridge|clamshell|straight leg raise/i;
     for (const ex of EXERCISES) {
+      if (LYING_ALLOWED.has(exerciseIdFromName(ex.name))) continue;
       expect(`${ex.name} ${ex.instructions.join(' ')}`).not.toMatch(lying);
+    }
+  });
+
+  test('one-side-at-a-time exercises have a left and a right target', () => {
+    for (const ex of EXERCISES.filter((e) => e.unilateral)) {
+      const names = ex.targetJoints.map((t) => t.name);
+      expect(names.some((n) => n.startsWith('left_'))).toBe(true);
+      expect(names.some((n) => n.startsWith('right_'))).toBe(true);
+    }
+  });
+
+  test('hold exercises state the hold time in their instructions', () => {
+    for (const ex of EXERCISES.filter((e) => e.holdSeconds)) {
+      expect(ex.instructions.join(' ')).toContain(`${ex.holdSeconds} วินาที`);
     }
   });
 });
@@ -75,5 +93,32 @@ describe('exercise demos', () => {
     const demo = EXERCISE_DEMOS.ex_squat;
     expect(demoProgress(demo, 0.1)).toBe(0);
     expect(demoProgress(demo, 0.7 + 1.5 + 0.5)).toBe(1);
+  });
+});
+
+describe('one side at a time', () => {
+  test('targetsForSide keeps the chosen side as the only primary target', () => {
+    const targets = [
+      { name: 'left_shoulder', isPrimary: true },
+      { name: 'right_shoulder', isPrimary: false },
+      { name: 'trunk_lateral_flexion', isPrimary: false },
+    ];
+    const right = targetsForSide(targets, 'right');
+    expect(right.map((t) => t.name)).toEqual(['right_shoulder', 'trunk_lateral_flexion']);
+    expect(right.filter((t) => t.isPrimary).map((t) => t.name)).toEqual(['right_shoulder']);
+  });
+
+  test('catalogue metadata: hold times and sides', () => {
+    expect(exerciseMeta('ex_static_quads')).toMatchObject({ holdSeconds: 5, isometric: true, unilateral: false });
+    expect(exerciseMeta('ex_static_quads').posture?.measurement).toBe('trunk_inclination');
+    expect(exerciseMeta('ex_cross_body_shoulder_stretch')).toMatchObject({ holdSeconds: 10, unilateral: true });
+    expect(exerciseMeta('ex_shoulder_abduction').unilateral).toBe(true);
+    expect(exerciseMeta('ex_unknown')).toEqual({ holdSeconds: null, isometric: false, unilateral: false, posture: null });
+  });
+
+  test('arm circles demo draws the circle the hands trace', () => {
+    const guides = EXERCISE_DEMOS.ex_arm_circles.guides!(0.25);
+    expect(guides).toHaveLength(2);
+    expect(guides[0].radius).toBeGreaterThan(4);
   });
 });

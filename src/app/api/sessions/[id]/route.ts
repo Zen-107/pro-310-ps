@@ -6,6 +6,7 @@ import { sessionScope } from '@/lib/access';
 import { badRequest, isFiniteNumber, isIntInRange, jsonError, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
 import { JOINT_FORMULAS } from '@/lib/joint-formulas';
 import { sessionDTO } from '@/lib/presenters';
+import { snapshotSide } from '@/lib/exercises-data';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -92,7 +93,14 @@ export async function PATCH(req: Request, { params }: Params) {
 
       if (s.questId) {
         if (status === 'COMPLETED') {
-          await tx.quest.update({ where: { id: s.questId }, data: { status: 'COMPLETED', completedAt: new Date() } });
+          // One side at a time: the quest is done once both sides have a completed session
+          let done = true;
+          if (snapshotSide(s.targetSnapshot)) {
+            const finished = await tx.exerciseSession.findMany({ where: { questId: s.questId, status: 'COMPLETED' }, select: { targetSnapshot: true } });
+            const sides = new Set(finished.map((f) => snapshotSide(f.targetSnapshot)));
+            done = sides.has('left') && sides.has('right');
+          }
+          if (done) await tx.quest.update({ where: { id: s.questId }, data: { status: 'COMPLETED', completedAt: new Date() } });
         } else {
           // Cancelled attempt: back to PENDING unless another session completed it
           await tx.quest.updateMany({ where: { id: s.questId, status: 'IN_PROGRESS' }, data: { status: 'PENDING' } });

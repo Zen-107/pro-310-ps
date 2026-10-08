@@ -227,16 +227,21 @@ All joint angles use the vector dot product with the vertex at B:
 
 | Measurement | Formula | Used by |
 |---|---|---|
-| `left/right_knee` | angle(hip, knee, ankle) | Knee Flexion, Wall Squat, Squat, Forward/Side Lunge |
-| `left/right_shoulder` | angle(hip, shoulder, elbow) | Shoulder Flexion/Abduction, Arm Circles |
+| `left/right_knee` | angle(hip, knee, ankle) | Static Quads, Wall Squat, Squat, Forward/Side Lunge |
+| `left/right_shoulder` | angle(hip, shoulder, elbow) | Cross-Body Shoulder Stretch, Shoulder Abduction, Arm Circles |
 | `left/right_elbow` | angle(shoulder, elbow, wrist) | form checks |
 | `left/right_hip_abduction` | angle(other hip, hip, knee) − 90 | Standing Hip Abduction |
 | `trunk_lateral_flexion` | trunk vector vs vertical, frontal plane | Trunk Lateral Flexion, form checks |
 | `trunk_inclination` | trunk vector vs vertical, 3D | form checks (lean) |
 | `trunk_rotation` | shoulder line vs hip line, transverse plane (world landmarks only) | Trunk Rotation |
-| `left/right_hip`, `left/right_hip_flexion`, `hip_opening` | see `joint-formulas.ts` | none (lying exercises were retired); kept for old sessions |
+| `left/right_hip`, `left/right_hip_flexion`, `hip_opening` | see `joint-formulas.ts` | none; kept for old sessions |
 
-**Catalogue** (`src/lib/exercises-data.ts`, seeded by `prisma/seed.ts`): standing or sitting exercises a single webcam can see. Published: Knee Flexion, Wall Squat, Squat, Shoulder Flexion, Shoulder Abduction, Arm Circles. Draft (pending source verification): Trunk Lateral Flexion, Trunk Rotation, Forward Lunge, Side Lunge, Standing Hip Abduction. Floor/lying exercises (straight leg raise, hip bridge, clamshell) were removed and are `RETIRED` in existing databases.
+**Catalogue** (`src/lib/exercises-data.ts`, seeded by `prisma/seed.ts`): exercises a single webcam can see. Published: Static Quads, Wall Squat, Squat, Cross-Body Shoulder Stretch, Shoulder Abduction, Arm Circles. Draft (pending source verification): Trunk Lateral Flexion, Trunk Rotation, Forward Lunge, Side Lunge, Standing Hip Abduction. Floor exercises are avoided; Static Quads (lying, camera at floor level, CUH) is the one deliberate exception. Knee Flexion and Shoulder Flexion were replaced in the 2026-10 revision by Static Quads and the Cross-Body Shoulder Stretch; re-run `bun run db:seed` to get the new catalogue.
+
+**Per-exercise behaviour** (code-defined per slug, `exerciseMeta()`, exposed on the exercise DTO):
+- `holdSeconds`: the rep counts once the target range has been held this long (Static Quads 5 s, Cross-Body Stretch 10 s); leaving earlier is a `short_hold` event with a spoken reminder. The live HUD shows a hold timer.
+- `isometric` (Static Quads): the knee barely moves, so after a counted hold and a 3 s relax the next hold starts in place. The camera verifies a straight knee and the hold time, not the muscle tension.
+- `unilateral` (Cross-Body Stretch, Shoulder Abduction): the patient picks left or right on the quest card; the session measures that side only and records `side` in `targetSnapshot`. The quest completes once both sides have a completed session. Recovery forecasts and population references treat each side as its own series. The demo is drawn as a mirror image and flipped for the right side.
 
 **Scoring:** in range = correct; accuracy = max(0, 100 − deviation/tolerance × 50), tolerance = (max − min)/2. **ROM** = max − min of the side that moved most.
 
@@ -276,7 +281,7 @@ All joint angles use the vector dot product with the vertex at B:
 
 Clinician-only estimate of **when the primary joint will reach its target range**, per exercise, from that patient's own trend. It is **not** a population prediction model: the system has no recovery-outcome labels to train or validate one, and the public datasets (KIMORE, REHAB24-6) are cross-sectional exercise-quality data, not longitudinal recovery data.
 
-**Measure.** *Deficit* = degrees still short of the target range on a day (best of the day; 0 = reached), from each session's `romMinAngle`/`romMaxAngle` against that session's own `targetSnapshot`. The ROM extreme farther from the range is the rest position, the other is the peak; overshooting through the range counts as reached. This works for targets below the resting angle (knee flexion) and above it (shoulder flexion).
+**Measure.** *Deficit* = degrees still short of the target range on a day (best of the day; 0 = reached), from each session's `romMinAngle`/`romMaxAngle` against that session's own `targetSnapshot`. The ROM extreme farther from the range is the rest position, the other is the peak; overshooting through the range counts as reached. This works for targets below the resting angle (squats) and above it (shoulder abduction).
 
 **Method** (`computeRecoveryForecasts` in `ai-agent.ts` → `forecastRecovery`): completed sessions of the last 90 days → daily best deficit → Theil–Sen slope (median of pairwise slopes, robust to odd sessions) → residual bootstrap (400 resamples, deterministic seed) for the slope's 10th–90th percentile and the time to reach the range. The ETA range spans two recovery shapes: **linear** (progress continues at the current rate, the optimistic end) and **saturating** (exponential approach fit on ln(deficit + 1°), the conservative end). Adherence = completed / due quests of the exercise in the last 28 days (reported, not used in the estimate).
 

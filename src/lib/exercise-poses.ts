@@ -5,7 +5,7 @@
 // 0.186H, forearm ≈ 0.146H, hip–shoulder ≈ 0.29H. Joints are driven by
 // angle keyframes; planted feet use two-bone inverse kinematics.
 //
-// Start/end positions follow the app's cited AAOS/NHS instructions and its
+// Start/end positions follow the app's cited AAOS/NHS/CUH/Mahidol/Powell instructions and its
 // measured targets. They have NOT been verified against Kisner & Colby,
 // "Therapeutic Exercise: Foundations and Techniques" — pending clinician review.
 
@@ -154,6 +154,16 @@ export function measure(s: Skeleton, m: DemoMeasurement): { value: number; verte
 
 // ─── Exercises ──────────────────────────────────────────────────────
 
+/** Motion path drawn over the demo, e.g. the circle a hand traces */
+export interface DemoGuide {
+  center: Pt;
+  radius: number;
+  /** Where the moving point is now (degrees, same convention as poses) */
+  at: number;
+  /** Direction of travel: 1 = increasing angle (clockwise on screen), −1 = decreasing */
+  turn: 1 | -1;
+}
+
 export interface ExerciseDemo {
   slug: string;
   view: 'side' | 'front';
@@ -162,72 +172,92 @@ export interface ExerciseDemo {
   props: { mat?: boolean; wallX?: number };
   /** true = continuous loop (no holds), e.g. arm circles */
   continuous?: boolean;
+  /** Seconds per loop for continuous demos (default CONTINUOUS_CYCLE) */
+  cycle?: number;
+  /** Vertical slice of the 260×200 scene to show (lying exercises fill the frame) */
+  frame?: { y: number; h: number };
+  /** Only the near arm/leg is exercised (one side at a time); mirrored for the other side */
+  unilateral?: boolean;
+  /** Motion paths to draw at progress t */
+  guides?: (t: number) => DemoGuide[];
   /** Pose at progress t ∈ [0, 1] (0 = start position, 1 = end position) */
   pose: (t: number) => Pose;
   caption: string;
 }
 
 const standingHipY = GROUND - SEG.foot * 0.35 - SEG.thigh - SEG.shin;
+const standingNeckY = standingHipY - SEG.torso;
+const frontLegs = { legNear: { upper: 93, lower: 92, end: 180 }, legFar: { upper: 87, lower: 88, end: 0 } };
 const hang: LimbPose = { upper: 92, lower: 90, end: 90 };
 const straightDown = (lean = 0): LimbPose => ({ upper: 90 + lean, lower: 90 + lean, end: 0 });
 
 export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
-  // Heel slide in long sitting: heel stays on the surface while the knee bends
-  ex_knee_flexion: {
-    slug: 'ex_knee_flexion',
+  // Static quads (CUH): lying on the back, other knee bent with the foot flat;
+  // the straight knee is pressed into the floor and the ankle pulled up
+  ex_static_quads: {
+    slug: 'ex_static_quads',
     view: 'side',
     measurement: 'knee',
     props: { mat: true },
-    caption: 'Long sitting, slide the heel toward you, keep it on the surface',
+    frame: { y: 126, h: 82 },
+    caption: 'Lying on your back, tighten the thigh and press the back of the knee down',
     pose: (t) => {
-      const hip = { x: 92, y: GROUND - 9 };
-      const flexion = lerp(8, 95, t); // knee flexion 0 = straight
-      const span = legSpan(180 - flexion);
-      const ankle = { x: hip.x + Math.sqrt(Math.max(span ** 2 - 25, 0)), y: GROUND - 4 };
-      const ik = twoBone(hip, ankle, SEG.thigh, SEG.shin, -1);
+      const hip = { x: 112, y: GROUND - 10 };
+      const bend = lerp(10, 0, t); // relaxed knee slightly off the floor → pressed flat
+      const footFar = { x: hip.x + 62, y: GROUND - 4 };
+      const far = twoBone(hip, footFar, SEG.thigh, SEG.shin, -1);
       return {
         view: 'side',
         hip,
-        torso: -97,
-        head: -88,
-        armNear: { upper: 112, lower: 98, end: 90 },
-        armFar: { upper: 118, lower: 102, end: 90 },
-        legNear: { upper: ik.a1, lower: ik.a2, end: lerp(-62, -10, t), lowerTo: ankle },
-        legFar: { upper: 2, lower: 0, end: -62 },
+        torso: 180,
+        head: 180,
+        armNear: { upper: 4, lower: 2, end: 0 },
+        armFar: { upper: 6, lower: 4, end: 0 },
+        legNear: { upper: -bend / 2, lower: bend / 2, end: lerp(-35, -95, t) },
+        legFar: { upper: far.a1, lower: far.a2, end: 0, lowerTo: footFar },
       };
     },
   },
 
-  // Standing, raise the straight arm forward and overhead
-  ex_shoulder_flexion: {
-    slug: 'ex_shoulder_flexion',
-    view: 'side',
+  // Cross-body stretch (front view): the straight arm is brought across the
+  // chest at shoulder height; the other forearm folds in to hold it
+  ex_cross_body_shoulder_stretch: {
+    slug: 'ex_cross_body_shoulder_stretch',
+    view: 'front',
     measurement: 'shoulder',
     props: {},
-    caption: 'Standing tall, raise the straight arm forward and overhead',
+    unilateral: true,
+    caption: 'Bring the straight arm across the chest, hold it in with the other arm',
     pose: (t) => {
-      const elevation = lerp(6, 172, t);
-      const arm = 90 - elevation;
+      const hip = { x: 130, y: standingHipY };
+      const shoulderNear = { x: hip.x - SEG.shoulderHalf, y: standingNeckY };
+      const shoulderFar = { x: hip.x + SEG.shoulderHalf, y: standingNeckY };
+      const arm = lerp(96, -4, t); // hanging → across the chest, pointing to the other side
+      // Helping hand: from hanging to the stretched arm's forearm
+      const hang = add(shoulderFar, dir(84), SEG.upperArm + SEG.forearm);
+      const contact = add(shoulderNear, dir(arm), SEG.upperArm + SEG.forearm * 0.5);
+      const reach = { x: lerp(hang.x, contact.x, t), y: lerp(hang.y, contact.y + 3, t) };
+      const help = twoBone(shoulderFar, reach, SEG.upperArm, SEG.forearm, 1);
       return {
-        view: 'side',
-        hip: { x: 128, y: standingHipY },
+        view: 'front',
+        hip,
         torso: -90,
         head: -90,
         armNear: { upper: arm, lower: arm, end: arm },
-        armFar: hang,
-        legNear: straightDown(),
-        legFar: straightDown(1),
+        armFar: { upper: help.a1, lower: help.a2, end: help.a2 },
+        ...frontLegs,
       };
     },
   },
 
-  // Standing (front view), raise both arms out to the side to shoulder height
+  // Standing (front view), one arm raised out to the side to shoulder height
   ex_shoulder_abduction: {
     slug: 'ex_shoulder_abduction',
     view: 'front',
     measurement: 'shoulder',
     props: {},
-    caption: 'Standing tall, raise the straight arms out to the side',
+    unilateral: true,
+    caption: 'Standing tall, raise one straight arm out to the side',
     pose: (t) => {
       const a = lerp(6, 80, t); // hips narrower than shoulders → measured ≈ a + 10°
       return {
@@ -236,9 +266,8 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
         torso: -90,
         head: -90,
         armNear: { upper: 90 + a, lower: 90 + a, end: 90 + a },
-        armFar: { upper: 90 - a, lower: 90 - a, end: 90 - a },
-        legNear: { upper: 93, lower: 92, end: 180 },
-        legFar: { upper: 87, lower: 88, end: 0 },
+        armFar: { upper: 84, lower: 84, end: 84 },
+        ...frontLegs,
       };
     },
   },
@@ -301,30 +330,63 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
     },
   },
 
-  // Front view: large slow circles reaching overhead
+  // Front view (Powell Orthopedics): arms out at shoulder height, the hands
+  // trace circles that grow from tiny to large, then reverse direction
   ex_arm_circles: {
     slug: 'ex_arm_circles',
     view: 'front',
     measurement: 'shoulder',
     props: {},
     continuous: true,
-    caption: 'Arms straight, make large slow circles reaching overhead',
+    cycle: 8,
+    caption: 'Arms out at shoulder height, circles growing from small to large, then reverse',
+    guides: (t) => {
+      const c = armCircle(t);
+      return [
+        { center: c.near, radius: c.radius, at: c.angle, turn: c.turn },
+        { center: c.far, radius: c.radius, at: 180 - c.angle, turn: (-c.turn) as 1 | -1 },
+      ];
+    },
     pose: (t) => {
-      const e = 35 + 140 * (0.5 - 0.5 * Math.cos(2 * Math.PI * t)); // 35° → 175° → 35°
+      const c = armCircle(t);
+      const wristNear = add(c.near, dir(c.angle), c.radius);
+      const wristFar = add(c.far, dir(180 - c.angle), c.radius);
+      const toNear = angleOf(sub(wristNear, c.shoulderNear));
+      const toFar = angleOf(sub(wristFar, c.shoulderFar));
       return {
         view: 'front',
         hip: { x: 130, y: standingHipY },
         torso: -90,
         head: -90,
-        armNear: { upper: 90 + e, lower: 90 + e, end: 90 + e },
-        armFar: { upper: 90 - e, lower: 90 - e, end: 90 - e },
-        legNear: { upper: 93, lower: 92, end: 180 },
-        legFar: { upper: 87, lower: 88, end: 0 },
+        armNear: { upper: toNear, lower: toNear, end: toNear, lowerTo: wristNear },
+        armFar: { upper: toFar, lower: toFar, end: toFar, lowerTo: wristFar },
+        ...frontLegs,
       };
     },
   },
-
 };
+
+/**
+ * Arm circles: three forward circles growing 4 → 18 px, then three backward
+ * circles shrinking again (continuous at both ends of the loop). The near
+ * hand's circle angle starts and peaks at the top (−90°).
+ */
+function armCircle(t: number) {
+  const reach = SEG.upperArm + SEG.forearm;
+  const shoulderNear = { x: 130 - SEG.shoulderHalf, y: standingNeckY };
+  const shoulderFar = { x: 130 + SEG.shoulderHalf, y: standingNeckY };
+  const forward = t < 0.5;
+  const u = forward ? t * 2 : (t - 0.5) * 2;
+  return {
+    shoulderNear,
+    shoulderFar,
+    near: { x: shoulderNear.x - reach, y: shoulderNear.y },
+    far: { x: shoulderFar.x + reach, y: shoulderFar.y },
+    radius: forward ? lerp(4, 18, u) : lerp(18, 4, u),
+    angle: forward ? -90 + 1080 * u : -90 - 1080 * u,
+    turn: (forward ? 1 : -1) as 1 | -1,
+  };
+}
 
 // ─── Timeline ───────────────────────────────────────────────────────
 
@@ -337,7 +399,10 @@ export const CONTINUOUS_CYCLE = 4;
 
 /** Progress (0 = start, 1 = end) at time `sec` within a looping demo */
 export function demoProgress(demo: ExerciseDemo, sec: number): number {
-  if (demo.continuous) return (sec % CONTINUOUS_CYCLE) / CONTINUOUS_CYCLE;
+  if (demo.continuous) {
+    const cycle = demo.cycle ?? CONTINUOUS_CYCLE;
+    return (sec % cycle) / cycle;
+  }
   let t = sec % DEMO_CYCLE;
   const p = DEMO_PHASES;
   if ((t -= p.holdStart) < 0) return 0;

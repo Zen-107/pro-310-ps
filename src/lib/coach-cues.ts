@@ -101,12 +101,15 @@ const MEASUREMENT_PHRASES: Record<string, Phrases> = {
 // Exercise-specific wording (slug → measurement → phrases)
 const EXERCISE_PHRASES: Record<string, Record<string, Partial<Phrases>>> = {
   ex_shoulder_abduction: { shoulder: { below: 'กางแขนกว้างขึ้นอีกนิดครับ', above: 'ลดแขนลงมาให้ขนานพื้นครับ' } },
-  ex_arm_circles: { shoulder: { below: 'วาดวงแขนให้กว้างขึ้นอีกนิดครับ', hold: 'ดีมากครับ หมุนช้าๆ ต่อไปเลย' } },
+  ex_arm_circles: { shoulder: { below: 'วาดวงแขนให้กว้างขึ้นอีกนิดครับ', above: 'วงกว้างเกินไปแล้วครับ ลดวงลงนิดนึง', hold: 'ดีมากครับ หมุนช้าๆ ต่อไปเลย' } },
+  ex_cross_body_shoulder_stretch: {
+    shoulder: { below: 'ยกแขนขึ้นมาระดับไหล่ แล้วพาดผ่านหน้าอกครับ', above: 'ลดแขนลงมาให้อยู่ระดับไหล่ครับ', hold: 'ดีครับ ค้างไว้ หายใจตามปกตินะครับ' },
+  },
   ex_squat: { knee: { above: 'ย่อตัวลงอีกนิดครับ', below: 'ไม่ต้องย่อต่ำขนาดนั้นครับ ยกตัวขึ้นนิดนึง', hold: 'ดีมากครับ หลังตรงไว้ แล้วดันส้นเท้ายืนขึ้น' } },
   ex_wall_squat: { knee: { above: 'เลื่อนตัวลงอีกนิดครับ', below: 'เลื่อนตัวขึ้นมานิดนึงครับ', hold: 'ดีมากครับ ค้างไว้ หายใจตามปกติ' } },
   ex_forward_lunge: { knee: { above: 'ย่อตัวลงอีกนิดครับ', below: 'ไม่ต้องย่อลึกขนาดนั้นครับ', hold: 'ดีมากครับ ลำตัวตรงไว้ แล้วดันกลับ' } },
   ex_side_lunge: { knee: { above: 'ย่อเข่าข้างที่ก้าวลงอีกนิดครับ', below: 'ไม่ต้องย่อลึกขนาดนั้นครับ', hold: 'ดีครับ ขาอีกข้างเหยียดตรงไว้' } },
-  ex_knee_flexion: { knee: { above: 'ลากส้นเท้าเข้ามาอีกนิดครับ', below: 'ไม่ต้องงอมากขนาดนั้นครับ', hold: 'ดีครับ ค้างไว้ แล้วค่อยๆ เหยียดขากลับ' } },
+  ex_static_quads: { knee: { below: 'เหยียดเข่าให้ตรง เกร็งต้นขากดหลังเข่าลงกับพื้นครับ', hold: 'ดีครับ เกร็งต้นขาค้างไว้' } },
 };
 
 const baseMeasurement = (name: string) => name.replace(/^(left|right)_/, '');
@@ -178,6 +181,7 @@ const COMPENSATION_PHRASES: Record<string, string> = {
   lifted_knee_straight: 'เข่าข้างที่ยกเหยียดตรงไว้นะครับ',
   no_side_bend: 'บิดตัวอย่างเดียวครับ ไม่ต้องเอียงข้าง',
   other_leg_straight: 'ขาอีกข้างเหยียดตรงไว้นะครับ',
+  other_knee_bent: 'ขาอีกข้างชันเข่าไว้ เท้าวางราบนะครับ',
   trunk_lean: 'ยกอกขึ้นนิดนึงครับ อย่าโน้มตัวไปข้างหน้ามาก',
   trunk_level: 'ให้สะโพกและลำตัวอยู่ระดับเดียวกันนะครับ',
   trunk_shift: 'ลำตัวอยู่ตรงกลางไว้ครับ อย่าเอียงไปข้างใดข้างหนึ่ง',

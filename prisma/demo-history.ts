@@ -12,8 +12,9 @@
  * INCOMPLETE_ROM faults, matching what the live rep counter records.
  */
 import { addDays, dayOfWeek } from '../src/lib/dates';
+import { DEMO_NOTE } from '../src/lib/demo-data';
 
-export const DEMO_NOTE = 'ข้อมูลจำลองสำหรับสาธิต (seed) — ไม่ใช่ข้อมูลผู้ป่วยจริง';
+export { DEMO_NOTE };
 
 export interface DemoTarget {
   name: string;
@@ -31,6 +32,8 @@ export interface DemoScenario {
   skipProb: number;
   /** Explicit practice days (days ago) instead of the schedule, e.g. a new patient */
   onlyDaysAgo?: number[];
+  /** History ends this many days before today (a discharged patient); default 1 */
+  endDaysAgo?: number;
   /** Resting angle of the measured joint */
   restAngle: number;
   /** True degrees short of the target range on day t (t = 0 at the first day) */
@@ -84,11 +87,11 @@ function accuracy(angle: number, t: DemoTarget): number {
 
 export function generateDemoDays(s: DemoScenario, target: DemoTarget, today: string): DemoDay[] {
   const r = rng(s.seed);
-  // Is the target range below the resting angle (e.g. knee flexion) or above it (shoulder flexion)?
+  // Is the target range below the resting angle (e.g. a squat) or above it (shoulder abduction)?
   const below = s.restAngle > target.maxAngle;
   const days: DemoDay[] = [];
 
-  for (let ago = s.daysBack; ago >= 1; ago--) {
+  for (let ago = s.daysBack; ago >= (s.endDaysAgo ?? 1); ago--) {
     const day = addDays(today, -ago);
     const t = s.daysBack - ago;
     const scheduled = s.onlyDaysAgo ? s.onlyDaysAgo.includes(ago) : s.daysOfWeek.length === 0 || s.daysOfWeek.includes(dayOfWeek(day));
@@ -127,6 +130,29 @@ export function generateDemoDays(s: DemoScenario, target: DemoTarget, today: str
     });
   }
   return days;
+}
+
+/**
+ * SIMULATED reference cohort for the population model (lib/population-model.ts):
+ * discharged patients of the demo hospital who did the same exercise, with
+ * recovery speeds spread around a typical one. Deterministic per index.
+ */
+export function referenceScenario(kind: 'knee' | 'shoulder', i: number): DemoScenario {
+  const r = rng(1000 + i * 31 + (kind === 'knee' ? 0 : 500));
+  const timeConstant = Math.max(14, (kind === 'knee' ? 30 : 38) + 9 * r.gauss()); // days for the deficit to fall to ~37%
+  const start = 40 + r.next() * 25;
+  const endDaysAgo = 10 + Math.floor(r.next() * 80);
+  return {
+    daysBack: endDaysAgo + 35 + Math.floor(r.next() * 20),
+    endDaysAgo,
+    daysOfWeek: kind === 'knee' ? [] : [1, 3, 5],
+    skipProb: 0.15 + r.next() * 0.25,
+    restAngle: kind === 'knee' ? 170 : 15,
+    deficit: (t: number) => start * Math.exp(-t / timeConstant),
+    noise: 5,
+    attemptsPerSession: 6,
+    seed: 2000 + i + (kind === 'knee' ? 0 : 100),
+  };
 }
 
 /**

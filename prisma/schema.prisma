@@ -146,6 +146,17 @@ enum PrescriptionStatus {
   CANCELLED
 }
 
+// Clinician-recorded result of a plan when it ends. These labels are what a
+// future outcome model is trained and validated on (GET /api/analytics/dataset).
+enum PrescriptionOutcome {
+  GOAL_MET // target ROM / function reached
+  PARTIAL // improved but not to target
+  NOT_IMPROVED
+  REINJURY // new or recurrent injury during or after the plan
+  DROPPED_OUT // stopped attending / practising
+  REFERRED // referred on (surgery, specialist, other service)
+}
+
 enum QuestStatus {
   PENDING
   IN_PROGRESS
@@ -393,16 +404,19 @@ model ReferenceMeasurement {
 // ─── Prescriptions & daily quests ───────────────────────────────────
 
 model Prescription {
-  id          String             @id @default(cuid())
+  id          String               @id @default(cuid())
   patientId   String
   clinicianId String
   title       String
   notes       String?
-  startDate   DateTime           @db.Date
-  endDate     DateTime?          @db.Date
-  status      PrescriptionStatus @default(ACTIVE)
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  startDate   DateTime             @db.Date
+  endDate     DateTime?            @db.Date
+  status      PrescriptionStatus   @default(ACTIVE)
+  outcome     PrescriptionOutcome?
+  outcomeNote String?
+  outcomeAt   DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
 
   patient   Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
   clinician Clinician          @relation(fields: [clinicianId], references: [id], onDelete: Restrict)

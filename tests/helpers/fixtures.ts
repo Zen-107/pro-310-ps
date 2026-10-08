@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { TERMS_VERSION } from '@/lib/terms';
 import { JOINT_FORMULAS, ANGLE_ALGORITHM_VERSION } from '@/lib/joint-formulas';
 import { addDays, dateOnly, localDateString } from '@/lib/dates';
-import { DEMO_SCENARIOS, generateDemoDays, type DemoScenario } from '../../prisma/demo-history';
+import { DEMO_SCENARIOS, generateDemoDays, referenceScenario, type DemoScenario } from '../../prisma/demo-history';
 import type { TestUser } from './api';
 
 /**
@@ -12,6 +12,7 @@ import type { TestUser } from './api';
  *  - p1: knee flexion, improving history → on_track
  *  - p2: no history (belongs to doctorB only)
  *  - p3: knee flexion, stalled history → plateau
+ *  - refs: 5 discharged (archived) knee-flexion patients → population model reference
  */
 export async function resetAndSeed() {
   const url = process.env.DATABASE_URL ?? '';
@@ -133,7 +134,15 @@ export async function resetAndSeed() {
   await prescribe(p1.id, doctorA.id, DEMO_SCENARIOS.improving);
   await prescribe(p3.id, doctorA.id, DEMO_SCENARIOS.plateau);
 
-  return { org, doctorA, doctorB, doctorNew, p1, p2, p3, exercise };
+  const refs: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const ref = await db.patient.create({ data: { name: `Reference ${i}`, organization: { connect: { id: org.id } } } });
+    await prescribe(ref.id, doctorA.id, referenceScenario('knee', i));
+    await db.patient.update({ where: { id: ref.id }, data: { archivedAt: new Date() } });
+    refs.push(ref.id);
+  }
+
+  return { org, doctorA, doctorB, doctorNew, p1, p2, p3, exercise, refs };
 }
 
 export type Fixtures = Awaited<ReturnType<typeof resetAndSeed>>;

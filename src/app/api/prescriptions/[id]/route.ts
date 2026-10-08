@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import type { Prisma, PrescriptionStatus } from '@prisma/client';
+import type { Prisma, PrescriptionOutcome, PrescriptionStatus } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope } from '@/lib/access';
@@ -9,6 +9,8 @@ import { prescriptionDTO, prescriptionInclude } from '@/lib/prescriptions';
 
 type Params = { params: Promise<{ id: string }> };
 const STATUSES: PrescriptionStatus[] = ['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'];
+const OUTCOMES: PrescriptionOutcome[] = ['GOAL_MET', 'PARTIAL', 'NOT_IMPROVED', 'REINJURY', 'DROPPED_OUT', 'REFERRED'];
+const ENDED: PrescriptionStatus[] = ['COMPLETED', 'CANCELLED'];
 
 export async function GET(_req: Request, { params }: Params) {
   const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
@@ -23,7 +25,8 @@ export async function GET(_req: Request, { params }: Params) {
   }
 }
 
-// Update title / notes / status / dates (care-team clinician)
+// Update title / notes / status / dates / outcome (care-team clinician).
+// An outcome can only be recorded on an ended plan (COMPLETED or CANCELLED).
 export async function PATCH(req: Request, { params }: Params) {
   const auth = await requireApiUser(['CLINICIAN']);
   if ('response' in auth) return auth.response;
@@ -42,6 +45,12 @@ export async function PATCH(req: Request, { params }: Params) {
     if (!STATUSES.includes(body.status as PrescriptionStatus)) return badRequest(`status must be one of ${STATUSES.join(', ')}`);
     data.status = body.status as PrescriptionStatus;
   }
+  if (body.outcome !== undefined) {
+    if (body.outcome !== null && !OUTCOMES.includes(body.outcome as PrescriptionOutcome)) return badRequest(`outcome must be one of ${OUTCOMES.join(', ')} or null`);
+    data.outcome = (body.outcome as PrescriptionOutcome | null) ?? null;
+    data.outcomeAt = body.outcome ? new Date() : null;
+  }
+  if (body.outcomeNote !== undefined) data.outcomeNote = optionalString(body.outcomeNote, 1000) ?? null;
   if (body.startDate !== undefined) {
     if (!isValidDay(body.startDate)) return badRequest('startDate must be YYYY-MM-DD');
     data.startDate = dateOnly(body.startDate);
@@ -57,6 +66,13 @@ export async function PATCH(req: Request, { params }: Params) {
     const start = (data.startDate as Date | undefined) ?? existing.startDate;
     const end = data.endDate === undefined ? existing.endDate : (data.endDate as Date | null);
     if (end && end < start) return badRequest('endDate cannot be before startDate');
+    const status = (data.status as PrescriptionStatus | undefined) ?? existing.status;
+    if (data.outcome && !ENDED.includes(status)) return badRequest('outcome can only be recorded when the plan is COMPLETED or CANCELLED');
+    // Re-opening a plan clears its outcome
+    if (!ENDED.includes(status) && existing.outcome && data.outcome === undefined) {
+      data.outcome = null;
+      data.outcomeAt = null;
+    }
 
     const updated = await db.prescription.update({ where: { id }, data, include: prescriptionInclude });
     return NextResponse.json(prescriptionDTO(updated));

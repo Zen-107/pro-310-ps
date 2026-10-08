@@ -1,7 +1,9 @@
 /**
  * Development seed: wipes ALL data and creates demo organizations, users,
  * the exercise library with cited sources, sample prescriptions and a
- * SIMULATED training history (prisma/demo-history.ts) for the forecast demo.
+ * SIMULATED training history (prisma/demo-history.ts) for the forecast demo,
+ * plus a SIMULATED cohort of discharged (archived) patients that the
+ * population model uses as its reference.
  *
  *   bun run db:seed        (runs `prisma db seed` → this file)
  *
@@ -11,20 +13,34 @@
  * estimates (angleBasis = DEVELOPER_ESTIMATE, reasoning in `rationale`) bounded by
  * normative ROM values, until a clinician sets them.
  */
-import { PrismaClient, type JointName, type Patient, type ReferenceRelevance } from '@prisma/client';
-import { EXERCISES, exerciseIdFromName } from '../src/lib/exercises-data';
+import { PrismaClient, type JointName, type Patient, type ReferenceRelevance, type SourceType } from '@prisma/client';
+import { EXERCISES, exerciseIdFromName, exerciseMeta, targetsForSide } from '../src/lib/exercises-data';
 import { ANGLE_ALGORITHM_VERSION, ANGLE_DEFINITION, JOINT_FORMULAS } from '../src/lib/joint-formulas';
 import { hashPassword } from '../src/lib/password';
 import { mergeTargets } from '../src/lib/presenters';
 import { addDays, dateOnly, localDateString } from '../src/lib/dates';
-import { DEMO_NOTE, DEMO_SCENARIOS, generateDemoDays, type DemoScenario } from './demo-history';
+import { DEMO_NOTE, DEMO_SCENARIOS, generateDemoDays, referenceScenario, type DemoScenario } from './demo-history';
 
 const db = new PrismaClient();
 
 const ACCESSED_AT = new Date('2026-10-01T00:00:00Z');
+const ACCESSED_AT_2 = new Date('2026-10-08T00:00:00Z'); // sources added with the 2026-10 exercise revision
 const VERIFIER_NAME = 'VERIFIED BY DEV';
 
-// ─── Sources (all pages opened and checked on ACCESSED_AT) ──────────
+interface SourceSeed {
+  title: string;
+  url: string;
+  institution: string;
+  authors: string | null;
+  sourceType?: SourceType;
+  language?: string;
+  publishedAt?: Date;
+  accessedAt?: Date;
+  /** Overrides the default verification note */
+  note?: string;
+}
+
+// ─── Sources (all pages opened and checked on their accessedAt date) ──
 const SOURCES = {
   aaosKnee: {
     title: 'Knee Conditioning Program',
@@ -62,11 +78,48 @@ const SOURCES = {
     institution: 'Cambridge University Hospitals NHS Foundation Trust',
     authors: null,
   },
+  mahidolShoulder: {
+    title: 'ท่าบริหาร หัวไหล่ติด (Frozen Shoulder)',
+    url: 'https://www.gj.mahidol.ac.th/main/frozenshoulder/',
+    institution: 'ศูนย์การแพทย์กาญจนาภิเษก คณะแพทยศาสตร์ศิริราชพยาบาล มหาวิทยาลัยมหิดล (Golden Jubilee Medical Center, Mahidol University)',
+    authors: null,
+    language: 'th',
+    publishedAt: new Date('2020-04-08T00:00:00Z'),
+    accessedAt: ACCESSED_AT_2,
+  },
+  powellArmCircles: {
+    title: 'Physical Therapy Moves You Can Do At Home to Reduce Your Pain',
+    url: 'https://www.powellortho.net/blog/physical-therapy-moves-you-can-do-at-home-to-reduce-your-pain',
+    institution: 'Powell Orthopedics and Sports Medicine',
+    authors: null,
+    accessedAt: ACCESSED_AT_2,
+  },
+  // Videos: title and channel confirmed (YouTube oEmbed) on ACCESSED_AT_2; the
+  // video content itself has not been reviewed, so they are seeded PENDING.
+  nhsAaaWallSquatVideo: {
+    title: 'Wall squats (video)',
+    url: 'https://www.youtube.com/watch?v=t6KeIiQAOkA',
+    institution: 'NHS Ayrshire & Arran',
+    authors: null,
+    sourceType: 'VIDEO',
+    accessedAt: ACCESSED_AT_2,
+    note: 'Video: title and channel confirmed on YouTube; content not yet reviewed by a person.',
+  },
+  fitnessBlenderArmCircles: {
+    title: 'Arm Circles (Lv 1) (video)',
+    url: 'https://www.youtube.com/watch?v=140RTNMciH8',
+    institution: 'FitnessBlender (fitness channel, not a clinical source)',
+    authors: null,
+    sourceType: 'VIDEO',
+    accessedAt: ACCESSED_AT_2,
+    note: 'Video: title and channel confirmed on YouTube; content not yet reviewed by a person. Fitness channel, not a clinical source.',
+  },
   // Telerehabilitation datasets: they describe the movements, not target angles.
   // Seeded PENDING (see UNVERIFIED_SOURCES) until a developer or clinician checks them.
   kimore: {
     title: 'The KIMORE Dataset: KInematic Assessment of MOvement and Clinical Scores for Remote Monitoring of Physical REhabilitation (IEEE TNSRE, 2019)',
-    url: 'https://vrai.dii.univpm.it/content/kimore-dataset',
+    // DOI (stable). The lab page https://vrai.dii.univpm.it/content/kimore-dataset returned 403 Forbidden on 2026-10-07.
+    url: 'https://doi.org/10.1109/TNSRE.2019.2923060',
     institution: 'Università Politecnica delle Marche — VRAI Lab',
     authors: 'Capecci M., Ceravolo M. G., Ferracuti F., Iarlori S., Monteriù A., Romeo L., Verdini F.',
   },
@@ -76,13 +129,13 @@ const SOURCES = {
     institution: 'Masaryk University — Faculty of Informatics',
     authors: 'Černek A., Sedmidubsky J., Budikova P., Jánošová M., Katzer L., Procházka M.',
   },
-} as const;
+} satisfies Record<string, SourceSeed>;
 
 type SourceKey = keyof typeof SOURCES;
 
 // Sources not yet opened and checked by a person: seeded PENDING, so they
 // never make an exercise PUBLISHED on their own.
-const UNVERIFIED_SOURCES = new Set<SourceKey>(['kimore', 'rehab24']);
+const UNVERIFIED_SOURCES = new Set<SourceKey>(['kimore', 'rehab24', 'nhsAaaWallSquatVideo', 'fitnessBlenderArmCircles']);
 
 interface Citation {
   source: SourceKey;
@@ -93,23 +146,28 @@ interface Citation {
 
 // ─── Exercise → citations (keyed by slug) ───────────────────────────
 const CITATIONS: Record<string, Citation[]> = {
-  ex_knee_flexion: [
-    { source: 'cuhKnee', relevance: 'CLOSE', sourceExerciseName: 'Heel slides', note: 'Knee flexion by sliding the heel toward the buttocks; matches the long-sitting variant used in the app.' },
-    { source: 'aaosKnee', relevance: 'PARTIAL', sourceExerciseName: 'Hamstring Curls', note: 'Knee flexion performed standing rather than sitting.' },
+  ex_static_quads: [
+    { source: 'cuhKnee', relevance: 'EXACT', sourceExerciseName: 'Static quads', note: 'The source gives no hold time ("Hold for seconds"); the app uses 5 s (team default). 3 sets of 10 as in the source.' },
   ],
-  ex_shoulder_flexion: [
-    { source: 'nhsAaaShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Assisted Flexion', note: 'Stick-assisted flexion lying on the back; the app uses active standing flexion.' },
+  ex_cross_body_shoulder_stretch: [
+    {
+      source: 'mahidolShoulder',
+      relevance: 'PARTIAL',
+      sourceExerciseName: 'ท่าเอื้อมมือ (reach across to the opposite shoulder)',
+      note: 'Cross-body stretch with the hand on the opposite shoulder and the other hand pushing the elbow. The app follows the exercise sheet supplied by the project team: straight arm held in by the other forearm, 10 s hold.',
+    },
   ],
   ex_shoulder_abduction: [
     { source: 'nhsAaaShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Assisted Abduction', note: 'Assisted by the other arm; the app uses active abduction.' },
   ],
   ex_wall_squat: [
+    { source: 'nhsAaaWallSquatVideo', relevance: 'EXACT', sourceExerciseName: 'Wall squats' },
     { source: 'aaosKnee', relevance: 'PARTIAL', sourceExerciseName: 'Half Squats', note: 'Free-standing half squat, not against a wall.' },
     { source: 'cuhKnee', relevance: 'PARTIAL', sourceExerciseName: 'Squat', note: 'Mid-stage squat, not against a wall.' },
   ],
   ex_arm_circles: [
-    { source: 'aaosShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Pendulum', note: 'Pendulum circles with the arm hanging, not standing arm circles at shoulder height.' },
-    { source: 'nhsAaaShoulder', relevance: 'PARTIAL', sourceExerciseName: 'Pendular Exercises', note: 'Pendulum circles with the arm hanging.' },
+    { source: 'powellArmCircles', relevance: 'EXACT', sourceExerciseName: 'Arm Circles', note: 'Arms out at shoulder height, tiny circles growing larger, about 10 s, then reverse.' },
+    { source: 'fitnessBlenderArmCircles', relevance: 'EXACT', sourceExerciseName: 'Arm Circles (Lv 1)' },
   ],
   ex_trunk_lateral_flexion: [
     { source: 'kimore', relevance: 'CLOSE', sourceExerciseName: 'Lateral tilt of the trunk with the arms in extension (Ex2)' },
@@ -150,27 +208,30 @@ async function main() {
 
   // ─── Sources ──────────────────────────────────────────────────────
   const sourceIds = {} as Record<SourceKey, string>;
-  for (const [key, s] of Object.entries(SOURCES) as [SourceKey, (typeof SOURCES)[SourceKey]][]) {
+  for (const [key, s] of Object.entries(SOURCES) as [SourceKey, SourceSeed][]) {
     const verified = !UNVERIFIED_SOURCES.has(key);
+    const accessedAt = s.accessedAt ?? ACCESSED_AT;
     const created = await db.exerciseSource.create({
       data: {
-        sourceType: verified ? 'PATIENT_EDUCATION' : 'JOURNAL_ARTICLE',
+        sourceType: s.sourceType ?? (verified ? 'PATIENT_EDUCATION' : 'JOURNAL_ARTICLE'),
         title: s.title,
         url: s.url,
         institution: s.institution,
         authors: s.authors,
-        accessedAt: ACCESSED_AT,
+        language: s.language ?? 'en',
+        publishedAt: s.publishedAt ?? null,
+        accessedAt,
         ...(verified
           ? {
               verificationStatus: 'VERIFIED' as const,
               verifiedByType: 'DEVELOPER' as const,
               verifiedByName: VERIFIER_NAME,
-              verifiedAt: ACCESSED_AT,
-              notes: 'Developer-verified citation (not clinically reviewed). Source does not specify target angles.',
+              verifiedAt: accessedAt,
+              notes: s.note ?? 'Developer-verified citation (not clinically reviewed). Source does not specify target angles.',
             }
           : {
               verificationStatus: 'PENDING' as const,
-              notes: 'Research dataset: describes the exercise movements, not target angles. Pending verification.',
+              notes: s.note ?? 'Research dataset: describes the exercise movements, not target angles. Pending verification.',
             }),
       },
     });
@@ -334,8 +395,8 @@ async function main() {
       clinician: { connect: { id: doctor.id } },
       items: {
         create: [
-          item('ex_knee_flexion', 3, 10, 30, [], 0),
-          item('ex_wall_squat', 2, 8, 45, [1, 3, 5], 1),
+          item('ex_static_quads', 3, 10, 30, [], 0),
+          item('ex_wall_squat', 2, 8, 45, [], 1),
           item('ex_squat', 2, 8, 45, [2, 4, 6], 2),
         ],
       },
@@ -350,7 +411,7 @@ async function main() {
       clinician: { connect: { id: physio.id } },
       items: {
         create: [
-          item('ex_shoulder_flexion', 3, 10, 30, [1, 3, 5], 0),
+          item('ex_cross_body_shoulder_stretch', 2, 5, 20, [1, 3, 5], 0),
           item('ex_shoulder_abduction', 3, 10, 30, [1, 3, 5], 1),
           item('ex_arm_circles', 2, 10, 30, [], 2),
         ],
@@ -358,7 +419,7 @@ async function main() {
     },
   });
 
-  // Post-op patient: knee flexion target lowered by the doctor (override)
+  // Post-op patient: wall squat depth limited by the doctor (override)
   await db.prescription.create({
     data: {
       title: 'ฟื้นฟูหลังผ่าตัดเข่า — สัปดาห์ที่ 2–4',
@@ -369,7 +430,7 @@ async function main() {
       items: {
         create: [
           {
-            ...item('ex_knee_flexion', 2, 10, 45, [], 0),
+            ...item('ex_wall_squat', 2, 10, 45, [], 0),
             targetOverrides: {
               create: [
                 { joint: 'left_knee', idealAngle: 100, minAngle: 90, maxAngle: 110 },
@@ -377,20 +438,61 @@ async function main() {
               ],
             },
           },
+          item('ex_static_quads', 3, 10, 30, [], 1),
         ],
       },
     },
   });
 
   // ─── Simulated history (demo only) ─────────────────────────────────
-  await seedDemoHistory({ patientId: wichai.id, slug: 'ex_knee_flexion', scenario: DEMO_SCENARIOS.improving, reviewerId: doctor.id });
-  await seedDemoHistory({ patientId: somying.id, slug: 'ex_shoulder_flexion', scenario: DEMO_SCENARIOS.plateau, reviewerId: physio.id });
-  await seedDemoHistory({ patientId: somchai.id, slug: 'ex_knee_flexion', scenario: DEMO_SCENARIOS.newPatient, reviewerId: doctor.id });
+  await seedDemoHistory({ patientId: wichai.id, slug: 'ex_wall_squat', scenario: DEMO_SCENARIOS.improving, reviewerId: doctor.id });
+  await seedDemoHistory({ patientId: somying.id, slug: 'ex_shoulder_abduction', scenario: DEMO_SCENARIOS.plateau, reviewerId: physio.id });
+  await seedDemoHistory({ patientId: somchai.id, slug: 'ex_wall_squat', scenario: DEMO_SCENARIOS.newPatient, reviewerId: doctor.id });
   for (const p of [somchai, somying, wichai]) {
     await db.patient.update({
       where: { id: p.id },
       data: { clinicalNotes: `${DEMO_NOTE}: ประวัติการฝึกย้อนหลังสร้างขึ้นเพื่อสาธิตการประมาณการระยะฟื้นตัว` },
     });
+  }
+
+  // ─── Simulated reference cohort (population model demo) ─────────────
+  // Discharged patients (archived, so hidden from every patient list) whose
+  // measured progress the population model compares current patients with.
+  const REFERENCE_COHORT = [
+    { kind: 'knee' as const, slug: 'ex_wall_squat', count: 8, clinicianId: doctor.id },
+    { kind: 'shoulder' as const, slug: 'ex_shoulder_abduction', count: 6, clinicianId: physio.id },
+  ];
+  for (const group of REFERENCE_COHORT) {
+    for (let i = 0; i < group.count; i++) {
+      const scenario = referenceScenario(group.kind, i);
+      const code = `${group.kind === 'knee' ? 'K' : 'S'}${String(i + 1).padStart(2, '0')}`;
+      const finalDeficit = scenario.deficit(scenario.daysBack - (scenario.endDaysAgo ?? 1));
+      const ref = await db.patient.create({
+        data: {
+          name: `ผู้ป่วยจำลอง (อ้างอิง) ${code}`,
+          hn: `SIM-${code}`,
+          gender: i % 2 ? 'FEMALE' : 'MALE',
+          dateOfBirth: new Date(Date.UTC(1950 + ((i * 7) % 40), i % 12, 1)),
+          organization: { connect: { id: hospital.id } },
+          clinicalNotes: `${DEMO_NOTE}: ผู้ป่วยอ้างอิงสำหรับแบบจำลองประชากร`,
+          archivedAt: new Date(Date.now() - ((scenario.endDaysAgo ?? 1) - 1) * 86_400_000),
+        },
+      });
+      await db.prescription.create({
+        data: {
+          title: `${DEMO_NOTE} — ${group.slug}`,
+          startDate: dateOnly(addDays(localDateString(), -scenario.daysBack)),
+          endDate: dateOnly(addDays(localDateString(), -(scenario.endDaysAgo ?? 1))),
+          status: 'COMPLETED',
+          outcome: finalDeficit <= 3 ? 'GOAL_MET' : 'PARTIAL',
+          outcomeAt: new Date(Date.now() - (scenario.endDaysAgo ?? 1) * 86_400_000),
+          patient: { connect: { id: ref.id } },
+          clinician: { connect: { id: group.clinicianId } },
+          items: { create: [item(group.slug, 2, 10, 30, scenario.daysOfWeek)] },
+        },
+      });
+      await seedDemoHistory({ patientId: ref.id, slug: group.slug, scenario, reviewerId: group.clinicianId });
+    }
   }
 
   // ─── Summary ──────────────────────────────────────────────────────
@@ -399,6 +501,7 @@ async function main() {
     db.exercise.count({ where: { status: 'DRAFT' } }),
   ]);
   console.log(`Seeded: 2 organizations, 3 clinicians, 3 patients, ${Object.keys(SOURCES).length} sources`);
+  console.log(`Simulated reference cohort: ${REFERENCE_COHORT.reduce((n, g) => n + g.count, 0)} archived patients (population model)`);
   console.log(`Exercises: ${published} published, ${draft} draft (see statusNote)`);
   console.log(`Simulated history: ${await db.exerciseSession.count({ where: { notes: DEMO_NOTE } })} sessions (marked "${DEMO_NOTE}")`);
   console.log(`Demo password for all accounts: ${password}`);
@@ -416,14 +519,20 @@ async function seedDemoHistory(opts: { patientId: string; slug: string; scenario
   });
   if (!item) throw new Error(`No prescription item for ${opts.slug}`);
 
-  const targets = mergeTargets(item.exercise.targets, item.targetOverrides);
-  const primary = targets[0];
+  // One-side-at-a-time exercises are simulated on the left side (Somying: left shoulder)
+  const meta = exerciseMeta(item.exercise.slug);
+  const side = meta.unilateral ? ('left' as const) : null;
+  const merged = mergeTargets(item.exercise.targets, item.targetOverrides);
+  const targets = side ? targetsForSide(merged, side) : merged;
+  const primary = targets.find((t) => t.isPrimary) ?? targets[0];
   const snapshot = {
     exerciseSlug: item.exercise.slug,
     exerciseName: item.exercise.name,
     sets: item.sets,
     repsPerSet: item.repsPerSet,
     restSeconds: item.restSeconds,
+    holdSeconds: meta.holdSeconds,
+    side,
     angleDefinition: ANGLE_DEFINITION,
     targets,
     formChecks: item.exercise.formChecks,

@@ -43,7 +43,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAppStore } from '@/lib/store';
-import { RepCounter, REP_DEFAULTS, type IncompleteAttempt, type MotionState, type RepCompletion } from '@/lib/rep-counter';
+import { RepCounter, repOptionsFor, type HoldStatus, type IncompleteAttempt, type MotionState, type RepCompletion } from '@/lib/rep-counter';
 import { CueGate, FaultPersistence, type CueKind } from '@/lib/cue-gate';
 import { LandmarkSmoother } from '@/lib/landmark-smoother';
 import { evaluateFormChecks, type FormCheck } from '@/lib/form-checks';
@@ -69,6 +69,8 @@ import {
 import {
   CATEGORIES,
   DIFFICULTY_LABELS,
+  SIDE_LABELS,
+  type Side,
   type TargetJoint,
 } from '@/lib/exercises-data';
 
@@ -425,11 +427,16 @@ interface ExerciseFromAPI {
   restSeconds: number;
   icon: string;
   bodyPart: string;
+  holdSeconds: number | null;
+  isometric: boolean;
+  unilateral: boolean;
+  posture: { measurement: string; min?: number; max?: number; hintTh: string } | null;
 }
 
 interface QuestFromAPI {
   id: string;
   status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'MISSED';
+  sidesDone: Side[];
   prescription: { title: string; clinicianName: string };
   exercise: ExerciseFromAPI;
 }
@@ -518,6 +525,8 @@ export function LiveSessionView() {
   const [formCue, setFormCue] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState<ExerciseFromAPI | null>(null);
+  const [sessionSide, setSessionSide] = useState<Side | null>(null); // one-side-at-a-time exercises
+  const [holdStatus, setHoldStatus] = useState<HoldStatus | null>(null); // hold exercises: current hold progress
   // Remembered per-device preferences. Only the active-session screen reads
   // them (never server-rendered), so the lazy localStorage read is hydration-safe.
   const [ttsEnabled, setTtsEnabled] = useState(() => readPref('physio.ttsEnabled', true)); // coach voice on unless muted
@@ -582,6 +591,7 @@ export function LiveSessionView() {
   const formCueRef = useRef<string | null>(null); // latest compensation cue, for the coach
   // Spoken-cue gating: movement phase, cooldowns, persistent posture faults
   const motionRef = useRef<MotionState>({ phase: 'rest', target: null, since: 0 });
+  const holdStatusRef = useRef<HoldStatus | null>(null);
   const cueGateRef = useRef(new CueGate());
   const faultPersistRef = useRef(new FaultPersistence());
   const deferredCueRef = useRef<{ text: string; key: string; kind: CueKind; expires: number } | null>(null);
@@ -1003,7 +1013,7 @@ export function LiveSessionView() {
   // Start from a prescribed quest ({ questId }) or as free practice ({ exerciseId }).
   // The server returns the exercise with the prescription's dose and angle
   // overrides applied; the session runs on those merged targets.
-  const handleStartExercise = useCallback(async (start: { questId: string }) => {
+  const handleStartExercise = useCallback(async (start: { questId: string; side?: Side }) => {
     // Runs inside the click: unlocks speech + Web Audio for the whole session
     if (ttsEnabledRef.current) unlockAudio();
     setConnecting(true);
@@ -1022,6 +1032,7 @@ export function LiveSessionView() {
         return;
       }
       const exercise = sessionData.exercise as ExerciseFromAPI;
+      const side: Side | null = sessionData.side ?? null;
 
       st.clearSessionData();
       st.setSelectedExerciseId(exercise.id);
@@ -1030,7 +1041,7 @@ export function LiveSessionView() {
       st.setCurrentSessionId(sessionData.id);
 
       stoppingRef.current = false;
-      repCounterRef.current = new RepCounter(exercise.targetJoints, REP_DEFAULTS);
+      repCounterRef.current = new RepCounter(exercise.targetJoints, repOptionsFor(exercise));
       pendingLogsRef.current = [];
       pendingRepsRef.current = [];
       pendingFaultsRef.current = [];
@@ -1039,6 +1050,7 @@ export function LiveSessionView() {
       lastFrameRecRef.current = 0;
       smootherRef.current.reset();
       motionRef.current = { phase: 'rest', target: null, since: 0 };
+      holdStatusRef.current = null;
       cueGateRef.current.reset();
       faultPersistRef.current.reset();
       deferredCueRef.current = null;
@@ -1049,6 +1061,8 @@ export function LiveSessionView() {
       personVisibleRef.current = false;
 
       setSelectedExercise(exercise);
+      setSessionSide(side);
+      setHoldStatus(null);
       setMediaPipeError(null);
       setCameraError(null);
       setDetectionActive(false);
@@ -1059,7 +1073,9 @@ export function LiveSessionView() {
       setPhase('active');
       lastCoachCallRef.current = Date.now(); // first coach cue after the greeting
       cueGateRef.current.allow('greeting', 'info', 'rest', Date.now());
-      speakText(`เริ่มท่า${exercise.nameTh}กันเลยครับ จัดตัวให้กล้องเห็นทั้งตัวนะครับ`);
+      speakText(
+        `เริ่มท่า${exercise.nameTh}${side ? `ข้าง${SIDE_LABELS[side]}` : ''}กันเลยครับ จัดตัวให้กล้องเห็นทั้งตัวนะครับ`
+      );
     } catch {
       toast.error('ไม่สามารถเริ่มเซสชันได้ กรุณาตรวจสอบการเชื่อมต่อ');
     } finally {
@@ -1500,11 +1516,33 @@ export function LiveSessionView() {
         }
       };
 
+      const holdSec = exercise?.holdSeconds ?? 0;
       for (const event of repCounterRef.current?.update(angles, now) ?? []) {
         if (event.type === 'rep') {
           if (completeRep(event)) return;
+          // Hold exercises: the rep is counted mid-hold, so say when to let go
+          if (holdSec) cue(`ครบ ${holdSec} วินาทีแล้ว ${exercise?.isometric ? 'ผ่อนแรงได้ครับ' : 'ค่อยๆ ปล่อยได้ครับ'}`, 'info', 'hold-done');
+        } else if (event.type === 'short_hold') {
+          showFormCue(`ค้างให้ครบ ${holdSec} วินาทีนะครับ`);
+          deferredCueRef.current = { text: `ค้างให้ครบ ${holdSec} วินาทีนะครับ`, key: 'short-hold', kind: 'rom', expires: now + DEFERRED_CUE_MS };
         } else {
           recordIncomplete(event);
+        }
+      }
+      // Required body position (Static Quads: lying down) not met yet: say how to get into it
+      if (exercise?.posture && repCounterRef.current && !repCounterRef.current.postureOk) {
+        if (cue(exercise.posture.hintTh, 'coach', 'posture-gate')) {
+          showFormCue(exercise.posture.hintTh);
+          lastCoachCallRef.current = now;
+        }
+      }
+      if (holdSec) {
+        const hs = repCounterRef.current?.holdStatus(now) ?? null;
+        // Whole seconds only: one React update per second of hold
+        const key = (h: HoldStatus | null) => (h ? `${h.target.name}:${Math.floor(h.heldMs / 1000)}:${h.done}` : '');
+        if (key(hs) !== key(holdStatusRef.current)) {
+          holdStatusRef.current = hs;
+          setHoldStatus(hs);
         }
       }
 
@@ -1729,6 +1767,9 @@ export function LiveSessionView() {
                             )}
                           </div>
                           <ExerciseDemo slug={quest.exercise.slug} compact target={quest.exercise.targetJoints.find((t) => t.isPrimary)} />
+                          {quest.exercise.holdSeconds && (
+                            <p className="text-xs text-muted-foreground">ค้างไว้ครั้งละ {quest.exercise.holdSeconds} วินาที</p>
+                          )}
                           <p className="flex items-center gap-1 text-xs text-muted-foreground">
                             <RotateCcw className="h-3 w-3" />
                             {quest.exercise.sets} เซ็ต × {quest.exercise.repsPerSet} ครั้ง · พัก {quest.exercise.restSeconds} วินาที
@@ -1736,15 +1777,48 @@ export function LiveSessionView() {
                           {overridden && (
                             <p className="text-xs text-amber-600 dark:text-amber-400">มุมเป้าหมายปรับโดยผู้ดูแลของคุณ</p>
                           )}
-                          <Button
-                            className="w-full bg-teal-600 text-white hover:bg-teal-700"
-                            size="sm"
-                            disabled={connecting}
-                            onClick={() => handleStartExercise({ questId: quest.id })}
-                          >
-                            {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                            {done ? 'ฝึกซ้ำ' : 'เริ่มภารกิจ'}
-                          </Button>
+                          {quest.exercise.unilateral ? (
+                            // One side at a time: each side is its own session; the quest completes when both are done
+                            <div className="space-y-1.5">
+                              <p className="text-xs font-medium">ทำทีละข้าง เลือกข้างที่จะฝึก</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                {(['left', 'right'] as const).map((side) => {
+                                  const sideDone = quest.sidesDone.includes(side);
+                                  const limb = quest.exercise.bodyPart === 'upper' ? 'แขน' : 'ขา';
+                                  return (
+                                    <Button
+                                      key={side}
+                                      size="sm"
+                                      variant={sideDone ? 'outline' : 'default'}
+                                      className={sideDone ? '' : 'bg-teal-600 text-white hover:bg-teal-700'}
+                                      disabled={connecting}
+                                      onClick={() => handleStartExercise({ questId: quest.id, side })}
+                                      aria-label={`เริ่มฝึก${limb}ข้าง${SIDE_LABELS[side]}${sideDone ? ' (ทำแล้ว ฝึกซ้ำ)' : ''}`}
+                                    >
+                                      {connecting ? (
+                                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                      ) : sideDone ? (
+                                        <CheckCircle className="mr-1.5 h-4 w-4 text-teal-600" />
+                                      ) : (
+                                        <Play className="mr-1.5 h-4 w-4" />
+                                      )}
+                                      {limb}{SIDE_LABELS[side]}
+                                    </Button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <Button
+                              className="w-full bg-teal-600 text-white hover:bg-teal-700"
+                              size="sm"
+                              disabled={connecting}
+                              onClick={() => handleStartExercise({ questId: quest.id })}
+                            >
+                              {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                              {done ? 'ฝึกซ้ำ' : 'เริ่มภารกิจ'}
+                            </Button>
+                          )}
                         </CardContent>
                       </Card>
                     );
@@ -1856,7 +1930,10 @@ export function LiveSessionView() {
             <ChevronLeft className="h-5 w-5" />
           </button>
           <div className="min-w-0 text-center">
-            <p className="truncate text-sm font-semibold text-white">{selectedExercise?.nameTh || selectedExercise?.name || 'Exercise'}</p>
+            <p className="truncate text-sm font-semibold text-white">
+              {selectedExercise?.nameTh || selectedExercise?.name || 'Exercise'}
+              {sessionSide && ` · ข้าง${SIDE_LABELS[sessionSide]}`}
+            </p>
             <p className="text-xs text-white/70">
               เซ็ต {currentSet}/{selectedExercise?.sets || 3} • ครั้งที่ {currentRep}/{repsPerSet}
             </p>
@@ -1943,6 +2020,26 @@ export function LiveSessionView() {
               </div>
             </div>
 
+            {selectedExercise?.holdSeconds && (
+              <div className="flex min-w-[clamp(5.5rem,13vh,9rem)] flex-col justify-between rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:px-5">
+                <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-teal-300">
+                  {holdStatus?.done && selectedExercise.isometric ? 'ผ่อนแรง' : 'ค้างไว้'}
+                </p>
+                <p className="whitespace-nowrap leading-none tabular-nums">
+                  <span className="text-[clamp(2.75rem,10vh,6.5rem)] font-black">
+                    {holdStatus ? Math.min(selectedExercise.holdSeconds, Math.floor(holdStatus.heldMs / 1000)) : 0}
+                  </span>
+                  <span className="text-[clamp(1.1rem,3.6vh,2.4rem)] font-bold text-white/55">/{selectedExercise.holdSeconds} วิ</span>
+                </p>
+                <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/15">
+                  <div
+                    className={`h-full rounded-full transition-[width] duration-300 ${holdStatus?.done ? 'bg-emerald-400' : 'bg-amber-300'}`}
+                    style={{ width: `${holdStatus ? Math.min(100, (holdStatus.heldMs / holdStatus.holdMs) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
             {gauge && (
               <div className="hidden rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:block">
                 <RomGauge value={liveAngles[gauge.name]} target={gauge} />
@@ -1986,7 +2083,10 @@ export function LiveSessionView() {
             {/* Header: always visible */}
             <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{selectedExercise?.nameTh || selectedExercise?.name}</p>
+                <p className="truncate text-sm font-semibold">
+                  {selectedExercise?.nameTh || selectedExercise?.name}
+                  {sessionSide && ` · ข้าง${SIDE_LABELS[sessionSide]}`}
+                </p>
                 <p className="text-[11px] text-white/60 tabular-nums">
                   เซ็ต {currentSet}/{selectedExercise?.sets || 3} · ครั้งที่ {currentRep}/{repsPerSet}
                   {avgAccuracy !== null && <> · แม่นยำ {avgAccuracy}%</>}
@@ -2098,6 +2198,7 @@ export function LiveSessionView() {
                       <ExerciseDemo
                         slug={selectedExercise.slug}
                         target={selectedExercise.targetJoints.find((t) => t.isPrimary)}
+                        side={sessionSide ?? undefined}
                         compact
                         className="mt-2 bg-white/90 dark:bg-slate-900/80"
                       />

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { RepCounter, REP_DEFAULTS, getRepTargets, type RepEvent, type MovementPhase } from '@/lib/rep-counter';
+import { RepCounter, REP_DEFAULTS, getRepTargets, repOptionsFor, type RepEvent, type MovementPhase } from '@/lib/rep-counter';
 
 const shoulder = { name: 'left_shoulder', idealAngle: 165, minAngle: 150, maxAngle: 180, isPrimary: true };
 const shoulderR = { name: 'right_shoulder', idealAngle: 165, minAngle: 150, maxAngle: 180 };
@@ -116,5 +116,57 @@ describe('RepCounter', () => {
     expect(rom.primaryJoint).toBe('left_shoulder');
     expect(rom.romMinAngle).toBeCloseTo(10, 0);
     expect(rom.romMaxAngle).toBeGreaterThan(160);
+  });
+});
+
+describe('hold exercises', () => {
+  const stretch = { name: 'left_shoulder', idealAngle: 90, minAngle: 70, maxAngle: 110, isPrimary: true };
+  const knee = { name: 'left_knee', idealAngle: 175, minAngle: 170, maxAngle: 180, isPrimary: true };
+
+  test('the rep counts once the hold time is reached, while still holding', () => {
+    const c = new RepCounter([stretch], repOptionsFor({ holdSeconds: 10, isometric: false }));
+    const before = play(c, [
+      [500, 10, 10],
+      [1000, 10, 90],
+      [9000, 90, 90],
+    ]);
+    expect(before.events.filter((e) => e.type === 'rep')).toHaveLength(0);
+    expect(c.holdStatus(before.end)?.heldMs).toBeGreaterThan(8000);
+    const after = play(c, [[1500, 90, 90]], ['left_shoulder'], before.end);
+    expect(after.events.map((e) => e.type)).toEqual(['rep']);
+    expect(c.holdStatus(after.end)?.done).toBe(true);
+    // Lowering the arm afterwards does not count again
+    expect(play(c, [[1000, 90, 10], [1000, 10, 10]], ['left_shoulder'], after.end).events).toHaveLength(0);
+  });
+
+  test('letting go before the hold time is a short hold, not a rep', () => {
+    const c = new RepCounter([stretch], repOptionsFor({ holdSeconds: 10, isometric: false }));
+    const { events } = play(c, [
+      [500, 10, 10],
+      [1000, 10, 90],
+      [3000, 90, 90],
+      [1000, 90, 10],
+    ]);
+    expect(events.map((e) => e.type)).toEqual(['short_hold']);
+  });
+
+  test('isometric: holds repeat in place after the relax period', () => {
+    const c = new RepCounter([knee], repOptionsFor({ holdSeconds: 5, isometric: true }));
+    // Knee straight for 22 s: holds end at 5 s, 13 s and 21 s (5 s hold + 3 s relax)
+    const { events } = play(c, [[22_000, 176, 176]], ['left_knee']);
+    expect(events.filter((e) => e.type === 'rep')).toHaveLength(3);
+  });
+
+  test('posture gate: a straight knee while standing does not count', () => {
+    const c = new RepCounter([knee], repOptionsFor({ holdSeconds: 5, isometric: true, posture: { measurement: 'trunk_inclination', min: 60 } }));
+    let t = 0;
+    const feed = (ms: number, trunk: number) => {
+      const out: RepEvent[] = [];
+      for (const end = t + ms; t < end; t += FRAME) out.push(...c.update({ left_knee: 176, trunk_inclination: trunk }, t));
+      return out;
+    };
+    expect(feed(8000, 5)).toHaveLength(0); // standing upright
+    expect(c.postureOk).toBe(false);
+    expect(feed(6000, 88).map((e) => e.type)).toEqual(['rep']); // lying down
   });
 });

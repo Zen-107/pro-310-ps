@@ -1,4 +1,5 @@
 import { isAngleCorrect } from '@/lib/angle-utils';
+import type { PostureGate } from '@/lib/exercises-data';
 
 // Rep counting for one session, independent of React/MediaPipe so it can be tested.
 //
@@ -7,6 +8,11 @@ import { isAngleCorrect } from '@/lib/angle-utils';
 // reached while in range. The primary target and its left/right counterpart are
 // tracked independently, so exercising either side counts; when both sides
 // finish within pairWindowMs (e.g. a squat) it is one rep.
+//
+// Hold exercises (holdMs > 0, e.g. a 10 s stretch): the rep counts as soon as
+// the range has been held for holdMs; leaving earlier is a 'short_hold'.
+// Isometric holds (static quads) barely move the joint, so after a counted
+// hold and relaxMs the next hold starts in place, without leaving the range.
 //
 // An incomplete attempt (ROM shortfall) = the measurement moves ≥ attemptMinDeg
 // from its rest position toward the range, never enters it, and returns to rest.
@@ -46,7 +52,23 @@ export interface IncompleteAttempt {
   deficit: number;
 }
 
-export type RepEvent = RepCompletion | IncompleteAttempt;
+/** Hold exercises: the range was reached but left before the required hold time */
+export interface ShortHold {
+  type: 'short_hold';
+  target: RepTarget;
+  heldMs: number;
+}
+
+export type RepEvent = RepCompletion | IncompleteAttempt | ShortHold;
+
+/** Progress of the current hold (hold exercises only) */
+export interface HoldStatus {
+  target: RepTarget;
+  heldMs: number;
+  holdMs: number;
+  /** The hold was counted; isometric exercises now relax before the next hold */
+  done: boolean;
+}
 
 export type MovementPhase = 'rest' | 'moving' | 'hold' | 'returning';
 
@@ -62,6 +84,8 @@ interface TargetState {
   // rep
   inRange: boolean;
   enteredAt: number;
+  holdCredited: boolean; // hold exercises: this hold already produced its rep
+  creditedAt: number;
   bestAccuracy: number;
   bestAngles: Record<string, number>;
   // incomplete-attempt tracking
@@ -88,9 +112,28 @@ export const REP_DEFAULTS = {
   awayStepDeg: 2, // growth of the distance to the range that counts as moving away
   returnSettleMs: 500, // no movement away for this long = back at rest
   returnMinMs: 1000, // after leaving the range, 'returning' lasts at least this long
+  holdMs: 0, // > 0: hold exercise — the rep counts once held this long (not on leaving the range)
+  isometric: false, // hold in place: after a counted hold and relaxMs, the next hold starts without leaving the range
+  relaxMs: 3000,
+  posture: null as PostureGate | null, // body position required for anything to count (e.g. lying down)
 };
 
 export type RepOptions = typeof REP_DEFAULTS;
+
+/** Rep options for an exercise's hold and posture settings (lib/exercises-data exerciseMeta) */
+export function repOptionsFor(meta: { holdSeconds: number | null; isometric: boolean; posture?: PostureGate | null }): RepOptions {
+  return {
+    ...REP_DEFAULTS,
+    ...(meta.holdSeconds ? { holdMs: meta.holdSeconds * 1000, isometric: meta.isometric } : {}),
+    posture: meta.posture ?? null,
+  };
+}
+
+function postureMet(gate: PostureGate | null, angles: Record<string, number>): boolean {
+  if (!gate) return true;
+  const v = angles[gate.measurement];
+  return v !== undefined && (gate.min === undefined || v >= gate.min) && (gate.max === undefined || v <= gate.max);
+}
 
 /** Primary target plus its left/right counterpart, if the exercise has one */
 export function getRepTargets<T extends RepTarget>(targets: T[]): T[] {
@@ -124,6 +167,8 @@ export class RepCounter {
     return (this.states[name] ??= {
       inRange: false,
       enteredAt: 0,
+      holdCredited: false,
+      creditedAt: 0,
       bestAccuracy: -1,
       bestAngles: {},
       firstSeenAt: null,
@@ -138,10 +183,26 @@ export class RepCounter {
     });
   }
 
+  /** false while the exercise's required body position is not met (nothing counts) */
+  postureOk = true;
+
   /** Feed one frame of measurements; returns completed reps / incomplete attempts. */
   update(angles: Record<string, number>, now: number): RepEvent[] {
     const events: RepEvent[] = [];
     const o = this.opts;
+
+    // Wrong body position (e.g. still standing for a lying exercise): drop any
+    // hold or attempt in progress silently and wait
+    this.postureOk = postureMet(o.posture, angles);
+    if (!this.postureOk) {
+      for (const st of Object.values(this.states)) {
+        st.inRange = false;
+        st.holdCredited = false;
+        st.attempting = false;
+        st.restDistance = null;
+      }
+      return events;
+    }
 
     for (const target of this.repTargets) {
       const angle = angles[target.name];
@@ -167,16 +228,40 @@ export class RepCounter {
       if (!st.inRange && inRange) {
         st.inRange = true;
         st.enteredAt = now;
+        st.holdCredited = false;
         st.bestAccuracy = -1;
         st.bestAngles = {};
         st.attempting = false; // reached the range: this is a rep, not a shortfall
       }
 
       if (st.inRange && inRange) {
+        if (o.isometric && st.holdCredited && now - st.creditedAt >= o.relaxMs) {
+          // Relaxed long enough: the next hold starts where the patient is
+          st.holdCredited = false;
+          st.enteredAt = now;
+          st.bestAccuracy = -1;
+          st.bestAngles = {};
+        }
         const { percentAccuracy } = isAngleCorrect(angle, target.idealAngle, target.minAngle, target.maxAngle);
-        if (percentAccuracy > st.bestAccuracy) {
+        if (!st.holdCredited && percentAccuracy > st.bestAccuracy) {
           st.bestAccuracy = percentAccuracy;
           st.bestAngles = { ...angles };
+        }
+        if (o.holdMs > 0 && !st.holdCredited && now - st.enteredAt >= o.holdMs) {
+          st.holdCredited = true;
+          st.creditedAt = now;
+          // Both sides held together (pair window) = one rep
+          if (now - this.lastRepAt >= o.pairWindowMs) {
+            this.lastRepAt = now;
+            events.push({
+              type: 'rep',
+              target,
+              enteredAt: st.enteredAt,
+              durationMs: now - st.enteredAt,
+              bestAccuracy: st.bestAccuracy,
+              bestAngles: st.bestAngles,
+            });
+          }
         }
         continue;
       }
@@ -189,7 +274,14 @@ export class RepCounter {
         st.lastAwayAt = now;
         st.awayRef = distance;
         st.restDistance = distance; // re-baseline rest as the limb returns
-        if (now - st.enteredAt >= o.minHoldMs && now - this.lastRepAt >= o.pairWindowMs) {
+        if (o.holdMs > 0) {
+          // Hold exercise: the rep was counted during the hold, if it lasted
+          const held = now - st.enteredAt;
+          if (!st.holdCredited && held >= o.minHoldMs && now - this.lastIncompleteAt >= o.pairWindowMs) {
+            this.lastIncompleteAt = now;
+            events.push({ type: 'short_hold', target, heldMs: held });
+          }
+        } else if (now - st.enteredAt >= o.minHoldMs && now - this.lastRepAt >= o.pairWindowMs) {
           this.lastRepAt = now;
           events.push({
             type: 'rep',
@@ -266,6 +358,20 @@ export class RepCounter {
       this.phaseSince = now;
     }
     return { ...best, since: this.phaseSince };
+  }
+
+  /** Hold exercises: the tracked side currently in range (furthest into its hold), else null */
+  holdStatus(now: number): HoldStatus | null {
+    const o = this.opts;
+    if (o.holdMs <= 0) return null;
+    let best: HoldStatus | null = null;
+    for (const target of this.repTargets) {
+      const st = this.states[target.name];
+      if (!st?.inRange) continue;
+      const s: HoldStatus = { target, heldMs: st.holdCredited ? o.holdMs : now - st.enteredAt, holdMs: o.holdMs, done: st.holdCredited };
+      if (!best || s.heldMs > best.heldMs) best = s;
+    }
+    return best;
   }
 
   private lastPhase: MovementPhase = 'rest';

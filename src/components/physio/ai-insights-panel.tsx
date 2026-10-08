@@ -8,9 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ForecastCaveat, RecoveryForecastCard, type ExerciseForecastDTO } from '@/components/physio/recovery-forecast-card';
+import { RiskSummary, type RiskDTO } from '@/components/physio/risk-summary';
 
-// Clinician view of the AI agent's analysis for one patient: recovery
-// forecasts and fault trends are computed (no AI) and load automatically;
+// Clinician view of the AI agent's analysis for one patient: early-warning
+// risk, recovery forecasts and fault trends are computed (no AI) and load automatically;
 // the AI narrative is generated on demand.
 
 interface Trend {
@@ -36,6 +37,7 @@ const FLAG_LABEL: Record<string, { text: string; good?: boolean }> = {
 export function AiInsightsPanel({ patientId }: { patientId: string }) {
   const [trends, setTrends] = useState<Trend[] | null>(null);
   const [forecasts, setForecasts] = useState<ExerciseForecastDTO[]>([]);
+  const [risk, setRisk] = useState<RiskDTO | null>(null);
   const [sessions, setSessions] = useState(0);
   const [summary, setSummary] = useState<{ text: string; model: string; at: string } | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -48,6 +50,7 @@ export function AiInsightsPanel({ patientId }: { patientId: string }) {
         if (cancelled) return;
         setTrends(d.trends);
         setForecasts(d.forecasts ?? []);
+        setRisk(d.risk ?? null);
         setSessions(d.sessionsAnalysed);
       })
       .catch(() => !cancelled && setTrends([]));
@@ -81,6 +84,9 @@ export function AiInsightsPanel({ patientId }: { patientId: string }) {
           <BrainCircuit className="h-4 w-4 text-violet-600" />
           ระยะฟื้นตัว แนวโน้ม & ข้อเสนอแนะ (AI Agent)
           <span className="text-xs font-normal text-muted-foreground">{sessions} เซสชันล่าสุด</span>
+          <Badge variant="outline" className="border-amber-300 text-[10px] font-normal text-amber-800 dark:border-amber-800 dark:text-amber-300">
+            ต้นแบบเพื่อการศึกษา · รอข้อมูลผู้ใช้จริง
+          </Badge>
           <Button size="sm" variant="outline" className="ml-auto h-7" disabled={generating || !trends?.length} onClick={generate}>
             {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {summary ? 'วิเคราะห์ใหม่' : 'สรุปด้วย AI'}
@@ -88,12 +94,14 @@ export function AiInsightsPanel({ patientId }: { patientId: string }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {risk && <RiskSummary risk={risk} />}
+
         {forecasts.length > 0 && (
           <section className="space-y-2">
             <h4 className="text-xs font-semibold text-foreground">ประมาณการระยะฟื้นตัว (90 วันล่าสุด)</h4>
             <div className="grid gap-2 md:grid-cols-2">
               {forecasts.map((f) => (
-                <RecoveryForecastCard key={f.exerciseId} data={f} />
+                <RecoveryForecastCard key={f.key} data={f} />
               ))}
             </div>
             <ForecastCaveat />

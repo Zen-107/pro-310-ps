@@ -11,6 +11,7 @@ import {
   demoProgress,
   dir,
   measure,
+  type DemoGuide,
   type Limb,
   type Pt,
 } from '@/lib/exercise-poses';
@@ -76,14 +77,41 @@ function arcPath(c: Pt, radius: number, a0: number, sweep: number, wedge = false
   return wedge ? `M${r(c.x)},${r(c.y)} L${r(p0.x)},${r(p0.y)} ${arc.slice(arc.indexOf('A'))} Z` : arc;
 }
 
+/** Dashed path of a circling hand, the stretch already travelled and an arrowhead showing the direction */
+function GuidePath({ g }: { g: DemoGuide }) {
+  const trail = 140 * g.turn;
+  const head = add(g.center, dir(g.at), g.radius);
+  const tangent = dir(g.at + 90 * g.turn);
+  const normal = dir(g.at);
+  const tip = add(head, tangent, 5);
+  const base1 = add(head, normal, 3.2);
+  const base2 = add(head, normal, -3.2);
+  return (
+    <g className="stroke-teal-600 dark:stroke-teal-400" fill="none" strokeLinecap="round">
+      <circle cx={r(g.center.x)} cy={r(g.center.y)} r={r(g.radius)} strokeWidth={0.8} strokeDasharray="2 2.5" opacity={0.6} />
+      <path d={arcPath(g.center, g.radius, g.at - trail, trail)} strokeWidth={1.8} />
+      <path
+        d={`M${r(tip.x)},${r(tip.y)} L${r(base1.x)},${r(base1.y)} L${r(base2.x)},${r(base2.y)}Z`}
+        className="fill-teal-600 dark:fill-teal-400"
+        strokeWidth={0.6}
+      />
+    </g>
+  );
+}
+
+const SCENE_W = 260;
+
 export function ExerciseDemo({
   slug,
   target,
+  side: trainingSide,
   compact = false,
   className = '',
 }: {
   slug: string;
   target?: Target;
+  /** One-side-at-a-time exercises: the side being trained (the demo is a mirror image, so 'right' is flipped) */
+  side?: 'left' | 'right';
   compact?: boolean;
   className?: string;
 }) {
@@ -131,7 +159,7 @@ export function ExerciseDemo({
     const t = demoProgress(demo, sec);
     const skel = buildSkeleton(demo.pose(t));
     const m = measure(skel, demo.measurement);
-    return { skel, m };
+    return { skel, m, guides: demo.guides?.(t) ?? [] };
   }, [demo, sec]);
 
   if (!demo || !frame) {
@@ -142,7 +170,10 @@ export function ExerciseDemo({
     );
   }
 
-  const { skel, m } = frame;
+  const { skel, m, guides } = frame;
+  const mirrored = !!demo.unilateral && trainingSide === 'right';
+  const viewY = demo.frame?.y ?? 0;
+  const viewH = demo.frame?.h ?? 200;
   const side = skel.view === 'side';
   const near = 'fill-slate-300 dark:fill-slate-500';
   const far = side ? 'fill-slate-400 dark:fill-slate-600' : near;
@@ -162,6 +193,7 @@ export function ExerciseDemo({
   const a0 = angleOf(fromVec);
   const inRange = target ? m.value >= target.minAngle && m.value <= target.maxAngle : false;
   const labelAt = add(m.vertex, dir(a0 + (sign * m.value) / 2), 30);
+  const labelX = mirrored ? SCENE_W - labelAt.x : labelAt.x;
 
   const body = (
     <g className={outline} strokeWidth={0.6}>
@@ -170,7 +202,7 @@ export function ExerciseDemo({
         <path key={`lf${i}`} d={d} className={highlightLegFar && i < 1 ? active : far} />
       ))}
       {arm(skel.armFar).map((d, i) => (
-        <path key={`af${i}`} d={d} className={!side && highlightArm ? active : far} />
+        <path key={`af${i}`} d={d} className={!side && highlightArm && !demo.unilateral ? active : far} />
       ))}
       {/* trunk, neck, head */}
       <path d={capsule(skel.hip, skel.neck, side ? 10.5 : 14.5, side ? 12 : 18.5, side ? 1.5 : -1)} className={near} />
@@ -188,15 +220,24 @@ export function ExerciseDemo({
 
   return (
     <div className={`relative rounded-xl border bg-gradient-to-b from-muted/30 to-muted/60 ${className}`}>
-      <svg viewBox="0 0 260 200" className={`w-full ${compact ? 'h-28' : 'h-48'}`} role="img" aria-label={`Demonstration: ${demo.caption}`}>
+      <svg
+        viewBox={`0 ${viewY} ${SCENE_W} ${viewH}`}
+        className={`w-full ${compact ? 'h-28' : 'h-48'}`}
+        role="img"
+        aria-label={`Demonstration: ${demo.caption}${demo.unilateral && trainingSide ? ` (${trainingSide} side)` : ''}`}
+      >
         {/* floor, mat, wall */}
-        <line x1={0} y1={GROUND} x2={260} y2={GROUND} className="stroke-slate-400/60" strokeWidth={1} />
+        <line x1={0} y1={GROUND} x2={SCENE_W} y2={GROUND} className="stroke-slate-400/60" strokeWidth={1} />
         {demo.props.mat && <rect x={20} y={GROUND - 4} width={220} height={4} rx={2} className="fill-sky-200/70 dark:fill-sky-900/60" />}
         {demo.props.wallX !== undefined && (
           <rect x={demo.props.wallX - 6} y={20} width={6} height={GROUND - 20} className="fill-slate-300/80 dark:fill-slate-700" />
         )}
 
+        <g transform={mirrored ? `translate(${SCENE_W},0) scale(-1,1)` : undefined}>
         {body}
+        {guides.map((g, i) => (
+          <GuidePath key={i} g={g} />
+        ))}
 
         {/* target band + live angle */}
         {target && (
@@ -214,9 +255,10 @@ export function ExerciseDemo({
           strokeLinecap="round"
         />
         <circle cx={r(m.vertex.x)} cy={r(m.vertex.y)} r={2.2} className="fill-white stroke-slate-600" strokeWidth={0.8} />
+        </g>
         {!compact && (
           <text
-            x={r(labelAt.x)}
+            x={r(labelX)}
             y={r(labelAt.y)}
             textAnchor="middle"
             dominantBaseline="middle"

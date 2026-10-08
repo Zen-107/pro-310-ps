@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { dateOnly, dateOnlyString, dayOfWeek } from '@/lib/dates';
 import { exerciseDTO, exerciseInclude } from '@/lib/presenters';
+import { snapshotSide, type Side } from '@/lib/exercises-data';
 
 /**
  * Create the quests due on `day` for a patient (idempotent) and mark earlier
@@ -39,6 +40,8 @@ export async function ensureQuestsForDay(patientId: string, day: string) {
 }
 
 export const questInclude = {
+  // Completed sessions' snapshots: which sides of a one-side-at-a-time exercise are done
+  sessions: { where: { status: 'COMPLETED' }, select: { targetSnapshot: true } },
   prescriptionItem: {
     include: {
       targetOverrides: true,
@@ -66,6 +69,7 @@ export function questDTO(q: QuestWithRelations) {
     dueDate: dateOnlyString(q.dueDate),
     status: q.status,
     completedAt: q.completedAt?.toISOString() ?? null,
+    sidesDone: [...new Set(q.sessions.map((s) => snapshotSide(s.targetSnapshot)).filter((x): x is Side => x !== null))],
     prescription: {
       id: item.prescription.id,
       title: item.prescription.title,

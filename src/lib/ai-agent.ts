@@ -18,7 +18,10 @@ import { mergeTargets } from '@/lib/presenters';
 import { cleanText, safeTruncate } from '@/lib/text-safe';
 import { cleanClinicalSummary, thaiMeasurementName } from '@/lib/clinical-markdown';
 import { addDays, dateOnly, localDateString } from '@/lib/dates';
-import { forecastRecovery, type ForecastStatus, type RangeTarget, type RecoveryForecast, type SessionPoint } from '@/lib/recovery-forecast';
+import { dailyDeficits, forecastRecovery, type ForecastStatus, type RecoveryForecast, type SessionPoint } from '@/lib/recovery-forecast';
+import { populationEstimate, type PopulationEstimate } from '@/lib/population-model';
+import { loadReferenceRates, priorFor, referenceCount, sessionTarget, type ReferenceRates } from '@/lib/population-refs';
+import { SIDE_LABELS, snapshotSide, type Side } from '@/lib/exercises-data';
 
 // ─── Model access ────────────────────────────────────────────────────
 // Every supported provider exposes an OpenAI-compatible Chat Completions
@@ -402,7 +405,11 @@ const FORECAST_LOOKBACK_DAYS = 90;
 const ADHERENCE_DAYS = 28;
 
 export interface ExerciseForecast {
+  /** Unique per series: the exercise, plus the side for one-side-at-a-time exercises */
+  key: string;
   exerciseId: string;
+  /** Side trained (one-side-at-a-time exercises; each side is forecast separately), else null */
+  side: Side | null;
   exercise: string;
   exerciseTh: string;
   /** Target of the primary joint in the latest session */
@@ -410,22 +417,23 @@ export interface ExerciseForecast {
   /** Share of due quests completed in the last 28 days (null = none due) */
   adherence: number | null;
   forecast: RecoveryForecast;
+  /** Population model (lib/population-model.ts): estimate informed by the clinic's other patients; null below the reference minimum */
+  population: PopulationEstimate | null;
+  /** Other patients of the organization with a measurable rate for this exercise */
+  referencePatients: number;
 }
 
-type SnapshotTarget = RangeTarget & { nameTh?: string };
-
-/** Target of the session's measured joint (its primary joint, else the exercise's primary target) */
-function sessionTarget(snapshot: unknown, primaryJoint: string | null): SnapshotTarget | null {
-  const targets = ((snapshot ?? {}) as { targets?: SnapshotTarget[] }).targets ?? [];
-  return targets.find((t) => t.name === primaryJoint) ?? targets.find((t) => t.isPrimary) ?? targets[0] ?? null;
+export interface ForecastContext {
+  /** Preloaded reference rates (pass when forecasting many patients of one organization) */
+  references?: ReferenceRates;
 }
 
 /** Per-exercise recovery forecasts from the patient's completed sessions (last 90 days) */
-export async function computeRecoveryForecasts(patientId: string): Promise<ExerciseForecast[]> {
+export async function computeRecoveryForecasts(patientId: string, ctx: ForecastContext = {}): Promise<ExerciseForecast[]> {
   const since = new Date(Date.now() - FORECAST_LOOKBACK_DAYS * 86_400_000);
   const adherenceFrom = dateOnly(addDays(localDateString(), -ADHERENCE_DAYS));
   const today = dateOnly(localDateString());
-  const [sessions, quests] = await Promise.all([
+  const [sessions, quests, references] = await Promise.all([
     db.exerciseSession.findMany({
       where: { patientId, status: 'COMPLETED', startedAt: { gte: since } },
       orderBy: { startedAt: 'asc' },
@@ -443,12 +451,21 @@ export async function computeRecoveryForecasts(patientId: string): Promise<Exerc
       where: { patientId, dueDate: { gte: adherenceFrom, lt: today }, status: { in: ['COMPLETED', 'MISSED'] } },
       select: { status: true, prescriptionItem: { select: { exerciseId: true } } },
     }),
+    ctx.references ??
+      db.patient.findUnique({ where: { id: patientId }, select: { organizationId: true } }).then((p) => (p ? loadReferenceRates(p.organizationId) : new Map())),
   ]);
 
-  const byExercise = new Map<string, typeof sessions>();
-  for (const s of sessions) byExercise.set(s.exerciseId, [...(byExercise.get(s.exerciseId) ?? []), s]);
+  // One series per exercise, and per side for one-side-at-a-time exercises
+  const bySeries = new Map<string, typeof sessions>();
+  for (const s of sessions) {
+    const side = snapshotSide(s.targetSnapshot);
+    const key = side ? `${s.exerciseId}:${side}` : s.exerciseId;
+    bySeries.set(key, [...(bySeries.get(key) ?? []), s]);
+  }
 
-  return [...byExercise.entries()].map(([exerciseId, list]) => {
+  return [...bySeries.entries()].map(([key, list]) => {
+    const exerciseId = list[0].exerciseId;
+    const side = snapshotSide(list[0].targetSnapshot);
     const points: SessionPoint[] = list.map((s) => ({
       day: localDateString(s.startedAt),
       romMinAngle: s.romMinAngle,
@@ -457,17 +474,33 @@ export async function computeRecoveryForecasts(patientId: string): Promise<Exerc
     }));
     const latest = sessionTarget(list[list.length - 1].targetSnapshot, list[list.length - 1].primaryJoint);
     const due = quests.filter((q) => q.prescriptionItem.exerciseId === exerciseId);
+    const forecast = forecastRecovery(points);
+    const prior = priorFor(references, exerciseId, patientId);
+    const daily = forecast.points.length ? forecast.points : dailyDeficits(points);
+    const level = daily.length ? medianOf(daily.slice(-3).map((p) => p.deficit)) : null;
     return {
+      key,
       exerciseId,
-      exercise: list[0].exercise.name,
-      exerciseTh: list[0].exercise.nameTh,
+      side,
+      exercise: side ? `${list[0].exercise.name} (${side})` : list[0].exercise.name,
+      exerciseTh: side ? `${list[0].exercise.nameTh} ข้าง${SIDE_LABELS[side]}` : list[0].exercise.nameTh,
       target: latest
         ? { joint: latest.name, jointTh: latest.nameTh ?? latest.name, minAngle: latest.minAngle, maxAngle: latest.maxAngle }
         : null,
       adherence: due.length ? Math.round((due.filter((q) => q.status === 'COMPLETED').length / due.length) * 100) : null,
-      forecast: forecastRecovery(points),
+      forecast,
+      // Only where the whole-history rate describes the present: not after the goal,
+      // and not for a plateau/decline (their earlier, faster weeks would read as "on track")
+      population: prior && level !== null && (forecast.status === 'on_track' || forecast.status === 'insufficient') ? populationEstimate(daily, level, prior) : null,
+      referencePatients: referenceCount(references, exerciseId, patientId),
     };
   });
+}
+
+function medianOf(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 const STATUS_TH: Record<ForecastStatus, string> = {
@@ -486,6 +519,9 @@ function forecastLine(f: ExerciseForecast): string {
   if (r.slopePerWeek !== null && r.slopeInterval) parts.push(`แนวโน้ม ${r.slopePerWeek}°/สัปดาห์ (ช่วง 80%: ${r.slopeInterval[0]} ถึง ${r.slopeInterval[1]})`);
   if (r.etaDays) parts.push(`ประมาณการถึงเป้าหมายใน ${r.etaDays[0]}–${r.etaDays[2]}${r.etaCapped ? '+' : ''} วัน`);
   if (r.status === 'insufficient' && r.daysNeeded) parts.push(`ต้องฝึกเพิ่มอีกอย่างน้อย ${r.daysNeeded} วัน`);
+  const pop = f.population;
+  if (pop?.etaDays && r.status === 'insufficient') parts.push(`ประมาณการจากแบบจำลองประชากร (ผู้ป่วยอื่น ${pop.k} คนที่ฝึกท่าเดียวกัน, น้ำหนักข้อมูลของผู้ป่วยเอง ${Math.round(pop.ownWeight * 100)}%): ${pop.etaDays[0]}–${pop.etaDays[2]}${pop.etaCapped ? '+' : ''} วัน`);
+  if (pop?.fasterThanPercent !== null && pop?.fasterThanPercent !== undefined) parts.push(`ฟื้นตัวเร็วกว่าผู้ป่วยอ้างอิง ${pop.fasterThanPercent}%`);
   if (f.adherence !== null) parts.push(`การฝึกตามแผน 28 วัน ${f.adherence}%`);
   return `- ${parts.join(' · ')}`;
 }

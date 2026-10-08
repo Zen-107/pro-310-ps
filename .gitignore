@@ -12,3 +12,6 @@ tsconfig.tsbuildinfo
 
 # Session videos (patient health data — never commit)
 /storage/
+
+# Database backups (contain patient data) — bun run db:backup
+/backups/

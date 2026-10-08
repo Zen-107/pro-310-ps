@@ -1,16 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, CircleDashed, Hourglass, TrendingDown, TrendingUp } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDashed, Hourglass, TrendingDown, TrendingUp, Users } from 'lucide-react';
 
 // Clinician-only card: recovery forecast for one exercise (lib/recovery-forecast.ts).
 // Chart: "degrees still short of the target range" per day (lower is better,
 // 0 = target reached), the robust trend line, and — when on track — a dashed
 // projection to the goal line with the estimated arrival window as a band.
+// Below it, the population model (lib/population-model.ts): how this patient
+// compares with the clinic's other patients on the same exercise, and an early
+// estimate before the patient's own trend is long enough.
 
 export type ForecastStatus = 'goal_reached' | 'on_track' | 'plateau' | 'declining' | 'insufficient';
 
 export interface ExerciseForecastDTO {
+  /** Unique per series (exercise, plus side for one-side-at-a-time exercises) */
+  key: string;
   exerciseId: string;
   exerciseTh: string;
   target: { joint: string; jointTh: string; minAngle: number; maxAngle: number } | null;
@@ -29,7 +34,20 @@ export interface ExerciseForecastDTO {
     daysNeeded: number | null;
     reasons: string[];
   };
+  population: {
+    k: number;
+    ownWeight: number;
+    etaDays: [number, number, number] | null;
+    etaCapped: boolean;
+    fasterThanPercent: number | null;
+    slowResponder: boolean;
+    typicalHalfLifeDays: number | null;
+  } | null;
+  referencePatients: number;
 }
+
+/** Reference patients needed before the population model is used (POPULATION.MIN_REFERENCE_PATIENTS) */
+const MIN_REFERENCE_PATIENTS = 5;
 
 // Status colours are reserved for state and always shown with an icon + label
 const STATUS: Record<ForecastStatus, { label: string; icon: React.ComponentType<{ className?: string }>; className: string }> = {
@@ -55,7 +73,8 @@ export function formatEta(eta: [number, number, number], capped: boolean): strin
   return lo < 7 ? `${loText} – ${w(hi)} สัปดาห์` : `${w(lo)}–${w(hi)} สัปดาห์`;
 }
 
-function headline(f: ExerciseForecastDTO['forecast']): string {
+function headline(data: ExerciseForecastDTO): string {
+  const f = data.forecast;
   switch (f.status) {
     case 'on_track':
       return f.etaDays ? `คาดว่าถึงช่วงเป้าหมายใน ${formatEta(f.etaDays, f.etaCapped)}` : 'กำลังดีขึ้น';
@@ -66,6 +85,7 @@ function headline(f: ExerciseForecastDTO['forecast']): string {
     case 'declining':
       return 'มุมที่ทำได้ห่างจากเป้าหมายมากขึ้น — ควรประเมินผู้ป่วย';
     case 'insufficient':
+      if (data.population?.etaDays) return `ประมาณการเบื้องต้น (เทียบผู้ป่วยที่ฝึกท่าเดียวกัน): ${formatEta(data.population.etaDays, data.population.etaCapped)}`;
       return f.daysNeeded ? `ต้องฝึกเพิ่มอีกอย่างน้อย ${f.daysNeeded} วันจึงจะประมาณการได้` : 'แนวโน้มยังไม่ชัดเจนพอจะประมาณการ';
   }
 }
@@ -191,7 +211,7 @@ export function RecoveryForecastCard({ data }: { data: ExerciseForecastDTO }) {
         </span>
       </div>
 
-      <p className="text-sm font-semibold leading-snug text-foreground">{headline(f)}</p>
+      <p className="text-sm font-semibold leading-snug text-foreground">{headline(data)}</p>
 
       <ForecastChart data={data} />
 
@@ -233,6 +253,8 @@ export function RecoveryForecastCard({ data }: { data: ExerciseForecastDTO }) {
         )}
       </dl>
 
+      <PopulationNote data={data} />
+
       {f.points.length > 0 && (
         <details className="text-muted-foreground">
           <summary className="cursor-pointer select-none">ดูข้อมูลเป็นตาราง</summary>
@@ -258,6 +280,43 @@ export function RecoveryForecastCard({ data }: { data: ExerciseForecastDTO }) {
   );
 }
 
+/** Comparison with the clinic's other patients (population model) */
+function PopulationNote({ data }: { data: ExerciseForecastDTO }) {
+  const pop = data.population;
+  // Not used after the goal, or for a plateau/decline (see computeRecoveryForecasts)
+  if (data.forecast.status !== 'on_track' && data.forecast.status !== 'insufficient') return null;
+  if (!pop) {
+    return (
+      <p className="flex items-start gap-1.5 text-muted-foreground">
+        <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        {data.referencePatients < MIN_REFERENCE_PATIENTS
+          ? `แบบจำลองประชากร: ผู้ป่วยอ้างอิงที่ฝึกท่านี้ยังมีไม่พอ (${data.referencePatients}/${MIN_REFERENCE_PATIENTS} คน)`
+          : 'แบบจำลองประชากร: ต้องมีข้อมูลการฝึกอย่างน้อย 2 วัน'}
+      </p>
+    );
+  }
+  const own = Math.round(pop.ownWeight * 100);
+  return (
+    <div className={`space-y-1 rounded-md border p-2 ${pop.slowResponder ? 'border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20' : 'bg-muted/40'}`}>
+      <p className="flex items-center gap-1.5 font-medium text-foreground">
+        <Users className="h-3.5 w-3.5 shrink-0" />
+        เทียบกับผู้ป่วยอื่น {pop.k} คนที่ฝึกท่านี้
+      </p>
+      <ul className="space-y-0.5 pl-5 text-muted-foreground">
+        {pop.typicalHalfLifeDays !== null && <li>ผู้ป่วยทั่วไปลดองศาที่ยังขาดลงครึ่งหนึ่งในราว {pop.typicalHalfLifeDays} วัน</li>}
+        {pop.fasterThanPercent !== null && (
+          <li className={pop.slowResponder ? 'font-medium text-amber-800 dark:text-amber-300' : undefined}>
+            รายนี้ฟื้นตัวเร็วกว่าผู้ป่วยอ้างอิง {pop.fasterThanPercent}%{pop.slowResponder ? ' — ช้ากว่าส่วนใหญ่ ควรทบทวนแผน' : ''}
+          </li>
+        )}
+        <li>
+          น้ำหนักข้อมูลของผู้ป่วยรายนี้ {own}%{own < 50 ? ' (ข้อมูลยังน้อย ตัวเลขจึงใกล้ค่าเฉลี่ยของผู้ป่วยอื่น)' : ''}
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 /** Caveat shown once under the forecast cards */
 export function ForecastCaveat() {
   return (
@@ -265,7 +324,9 @@ export function ForecastCaveat() {
       <Hourglass className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       ประมาณการจากแนวโน้มของผู้ป่วยรายนี้เท่านั้น (Theil–Sen + bootstrap) ช่วงเร็วสุดคือกรณีพัฒนาการคงที่ ช่วงช้าสุดคือกรณีพัฒนาการช้าลงตามธรรมชาติ
       ในการทดสอบด้วยข้อมูลจำลอง ช่วงนี้ครอบคลุมวันที่ถึงเป้าหมายจริงประมาณ 63–95% ของกรณี ถือว่าการฝึกสม่ำเสมอเท่าปัจจุบัน และกล้องคลาดเคลื่อนได้ราว 5–10°
-      — ใช้ประกอบการตัดสินใจของผู้ดูแล ไม่ใช่การพยากรณ์ผลการรักษา
+      ประมาณการเบื้องต้น (ก่อนมีข้อมูลพอ) ใช้แบบจำลองประชากรจากผู้ป่วยอื่นที่ฝึกท่าเดียวกัน ซึ่งแม่นในข้อมูลจำลองเฉพาะเมื่อการฟื้นตัวเป็นเส้นโค้งอิ่มตัวตามที่สมมติไว้
+      — <strong className="font-semibold">ต้นแบบเพื่อการศึกษา ยังไม่ได้ตรวจสอบกับข้อมูลผู้ใช้จริง</strong> ใช้ประกอบการตัดสินใจของผู้ดูแลเท่านั้น
+      (ผลทางสถิติ: docs/PREDICTIVE-ANALYTICS.md)
     </p>
   );
 }

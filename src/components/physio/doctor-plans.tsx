@@ -80,10 +80,24 @@ interface Prescription {
   title: string;
   notes: string | null;
   status: 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+  outcome: Outcome | null;
+  outcomeNote: string | null;
   startDate: string;
   clinician: { name: string };
   items: PrescriptionItem[];
 }
+
+type Outcome = 'GOAL_MET' | 'PARTIAL' | 'NOT_IMPROVED' | 'REINJURY' | 'DROPPED_OUT' | 'REFERRED';
+
+// Recorded when a plan ends: the labels a future outcome model is trained on
+const OUTCOME_LABEL: Record<Outcome, string> = {
+  GOAL_MET: 'ถึงเป้าหมาย',
+  PARTIAL: 'ดีขึ้นบางส่วน',
+  NOT_IMPROVED: 'ไม่ดีขึ้น',
+  REINJURY: 'บาดเจ็บซ้ำ / บาดเจ็บใหม่',
+  DROPPED_OUT: 'หยุดฝึก / ขาดการติดตาม',
+  REFERRED: 'ส่งต่อ (ผ่าตัด / ผู้เชี่ยวชาญ)',
+};
 
 const DAY_LABELS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 const STATUS_LABEL: Record<Prescription['status'], string> = {
@@ -116,6 +130,9 @@ export function DoctorPlans() {
   const [newTitle, setNewTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState('');
+  const [ending, setEnding] = useState(false);
+  const [endOutcome, setEndOutcome] = useState<Outcome | ''>('');
+  const [endNote, setEndNote] = useState('');
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Load care-team patients + exercise library ──────────
@@ -200,6 +217,32 @@ export function DoctorPlans() {
     const updated = await run(
       () => api<Prescription>(`/api/prescriptions/${plan.id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
       `สถานะแผน: ${STATUS_LABEL[status]}`
+    );
+    if (updated) replacePlan(updated);
+  }
+
+  async function endPlan() {
+    if (!plan) return;
+    const updated = await run(
+      () =>
+        api<Prescription>(`/api/prescriptions/${plan.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'COMPLETED', outcome: endOutcome || null, outcomeNote: endNote.trim() || null }),
+        }),
+      'จบแผนการรักษาแล้ว'
+    );
+    if (updated) {
+      replacePlan(updated);
+      setEnding(false);
+      setEndOutcome('');
+      setEndNote('');
+    }
+  }
+
+  async function setOutcome(planId: string, outcome: Outcome) {
+    const updated = await run(
+      () => api<Prescription>(`/api/prescriptions/${planId}`, { method: 'PATCH', body: JSON.stringify({ outcome }) }),
+      `บันทึกผลการรักษา: ${OUTCOME_LABEL[outcome]}`
     );
     if (updated) replacePlan(updated);
   }
@@ -354,11 +397,43 @@ export function DoctorPlans() {
                       <Play className="h-3.5 w-3.5" /> ใช้งานต่อ
                     </Button>
                   )}
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => setStatus('COMPLETED')}>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => setEnding((v) => !v)} aria-expanded={ending}>
                     <CheckCircle2 className="h-3.5 w-3.5" /> จบแผน
                   </Button>
                 </div>
               </div>
+              {ending && (
+                <div className="space-y-3 rounded-lg border border-teal-200 bg-teal-50/50 p-3 dark:border-teal-900 dark:bg-teal-950/20">
+                  <p className="text-sm font-medium">ผลการรักษาเมื่อจบแผน</p>
+                  <p className="text-xs text-muted-foreground">
+                    ใช้เป็นข้อมูลผลลัพธ์สำหรับพัฒนาแบบจำลองพยากรณ์ในอนาคต (ส่งออกแบบไม่ระบุตัวตน) — ข้ามได้ถ้ายังไม่ทราบ และบันทึกภายหลังได้
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(Object.keys(OUTCOME_LABEL) as Outcome[]).map((o) => (
+                      <Button
+                        key={o}
+                        size="sm"
+                        type="button"
+                        variant={endOutcome === o ? 'default' : 'outline'}
+                        className={endOutcome === o ? 'bg-teal-600 hover:bg-teal-700' : ''}
+                        aria-pressed={endOutcome === o}
+                        onClick={() => setEndOutcome(endOutcome === o ? '' : o)}
+                      >
+                        {OUTCOME_LABEL[o]}
+                      </Button>
+                    ))}
+                  </div>
+                  <Textarea value={endNote} onChange={(e) => setEndNote(e.target.value.slice(0, 1000))} placeholder="หมายเหตุ (ไม่บังคับ, ไม่ถูกส่งออก)" className="min-h-14" />
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEnding(false)}>
+                      ยกเลิก
+                    </Button>
+                    <Button size="sm" className="bg-teal-600 hover:bg-teal-700" disabled={busy} onClick={endPlan}>
+                      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} ยืนยันจบแผน
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium flex items-center gap-1.5">
                   <StickyNote className="h-4 w-4 text-amber-500" /> คำแนะนำถึงผู้ป่วย (แสดงในภารกิจ)
@@ -435,6 +510,41 @@ export function DoctorPlans() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {/* Ended plans and their recorded outcome */}
+      {prescriptions.some((p) => p.status === 'COMPLETED' || p.status === 'CANCELLED') && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold">แผนที่จบแล้ว · ผลการรักษา</CardTitle>
+          </CardHeader>
+          <CardContent className="divide-y">
+            {prescriptions
+              .filter((p) => p.status === 'COMPLETED' || p.status === 'CANCELLED')
+              .map((p) => (
+                <div key={p.id} className="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{p.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {STATUS_LABEL[p.status]} · เริ่ม {new Date(p.startDate).toLocaleDateString('th-TH', { dateStyle: 'medium' })}
+                    </p>
+                  </div>
+                  <Select value={p.outcome ?? undefined} onValueChange={(v) => setOutcome(p.id, v as Outcome)} disabled={busy}>
+                    <SelectTrigger className="h-9 w-full sm:w-56" aria-label={`ผลการรักษาของ ${p.title}`}>
+                      <SelectValue placeholder="ยังไม่บันทึกผลการรักษา" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(OUTCOME_LABEL) as Outcome[]).map((o) => (
+                        <SelectItem key={o} value={o}>
+                          {OUTCOME_LABEL[o]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

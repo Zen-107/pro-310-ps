@@ -11,6 +11,7 @@ import type {
 } from '@prisma/client';
 import { ageFromDob, localDateString } from '@/lib/dates';
 import { parseFormChecks } from '@/lib/form-checks';
+import { exerciseMeta } from '@/lib/exercises-data';
 import { safeTruncate, sanitizeText } from '@/lib/text-safe';
 
 // Display limits (grapheme clusters) for free text that reaches report screens
@@ -95,6 +96,8 @@ export function exerciseDTO(
     icon: ex.icon,
     status: ex.status,
     formChecks: parseFormChecks(ex.formChecks),
+    // Hold time / one side at a time (code-defined per slug, lib/exercises-data.ts)
+    ...exerciseMeta(ex.slug),
     targetJoints: mergeTargets(ex.targets, overrides),
     references: (ex.references ?? []).map((r) => ({
       title: r.source.title,

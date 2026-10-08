@@ -156,4 +156,77 @@ describe.skipIf(!enabled)('API (integration)', () => {
       expect(s.redFlags.map((r: { patientId: string }) => r.patientId)).toContain(f.p1.id);
     });
   });
+
+  describe('predictive analytics', () => {
+    test('population model: reference patients are the archived cohort, never the patient themself', async () => {
+      const insights = await import('@/app/api/patients/[id]/ai-insights/route');
+      signInAs(f.doctorA.user);
+      const p1 = (await json(await insights.GET(req('/'), params({ id: f.p1.id })))).body;
+      const fc = p1.forecasts[0];
+      expect(fc.referencePatients).toBe(6); // 5 archived + p3 (p1 itself left out)
+      expect(fc.population.k).toBe(6);
+      expect(fc.population.ownWeight).toBeGreaterThan(0.5); // 42 days of own data
+      expect(fc.population.etaDays).toHaveLength(3);
+      expect(typeof fc.population.fasterThanPercent).toBe('number');
+    });
+
+    test('risk score in the insights endpoint and the clinician summary', async () => {
+      const insights = await import('@/app/api/patients/[id]/ai-insights/route');
+      const summary = await import('@/app/api/clinician/summary/route');
+      signInAs(f.doctorA.user);
+      const p3 = (await json(await insights.GET(req('/'), params({ id: f.p3.id })))).body;
+      expect(p3.risk.factors.map((x: { code: string }) => x.code)).toContain('recovery_plateau');
+      expect(p3.risk.score).toBe(p3.risk.factors.reduce((a: number, x: { points: number }) => a + x.points, 0));
+
+      const s = (await json(await summary.GET())).body;
+      const ids = s.risks.map((r: { patientId: string }) => r.patientId);
+      expect(ids).toContain(f.p1.id); // red-flag message from the safety tests
+      expect(ids).not.toContain(f.p2.id); // other care team
+      for (const id of f.refs) expect(ids).not.toContain(id); // archived
+      expect(s.risks.every((r: { level: string }) => r.level !== 'low')).toBe(true);
+    });
+
+    test('outcome can only be recorded on an ended plan; re-opening clears it', async () => {
+      const rx = await import('@/app/api/prescriptions/[id]/route');
+      signInAs(f.doctorA.user);
+      const plan = await db.prescription.findFirstOrThrow({ where: { patientId: f.p3.id } });
+      const patch = (body: unknown) => rx.PATCH(req('/', { method: 'PATCH', body }), params({ id: plan.id }));
+
+      expect((await patch({ outcome: 'GOAL_MET' })).status).toBe(400); // still ACTIVE
+      expect((await patch({ status: 'COMPLETED', outcome: 'WOBBLE' })).status).toBe(400);
+      const ended = await json(await patch({ status: 'COMPLETED', outcome: 'PARTIAL', outcomeNote: 'ROM ดีขึ้นแต่ไม่ถึงเป้า' }));
+      expect(ended.status).toBe(200);
+      expect(ended.body.outcome).toBe('PARTIAL');
+      expect(ended.body.outcomeAt).not.toBeNull();
+
+      const reopened = await json(await patch({ status: 'ACTIVE' }));
+      expect(reopened.body.outcome).toBeNull();
+
+      signInAs(f.doctorB.user);
+      expect((await patch({ status: 'COMPLETED', outcome: 'GOAL_MET' })).status).toBe(404);
+      signInAs(f.doctorA.user);
+      await patch({ status: 'COMPLETED', outcome: 'PARTIAL' });
+    });
+
+    test('dataset export: de-identified, care-team scoped, with outcomes', async () => {
+      const dataset = await import('@/app/api/analytics/dataset/route');
+      signInAs(f.doctorA.user);
+      const res = await dataset.GET(req('/api/analytics/dataset'));
+      expect(res.headers.get('content-type')).toContain('text/csv');
+      const csv = await res.text();
+      const [header, ...lines] = csv.split('\n');
+      expect(header.split(',')).toContain('outcome');
+      expect(lines).toHaveLength(2); // p1 + p3 (archived references and p2 excluded)
+      for (const banned of ['Patient T-', 'T-001', 'T-003', f.p1.id, f.p3.id]) expect(csv).not.toContain(banned);
+
+      const body = (await json(await dataset.GET(req('/api/analytics/dataset?format=json')))).body;
+      expect(body.labelled).toBe(1); // p3's plan ended as PARTIAL above
+      const p3row = body.rows.find((r: { outcome: string | null }) => r.outcome === 'PARTIAL');
+      expect(p3row.forecast_status).toBe('plateau');
+      expect(p3row.adherence_pct).toBeGreaterThan(0);
+
+      signInAs(f.p1.user);
+      expect((await dataset.GET(req('/api/analytics/dataset'))).status).toBe(403);
+    });
+  });
 });

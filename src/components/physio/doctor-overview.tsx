@@ -12,8 +12,9 @@ import {
 } from 'recharts';
 import {
   Users, CalendarCheck, AlertTriangle, ClipboardCheck, ShieldAlert,
-  Flame, ChevronRight, User,
+  Flame, ChevronRight, User, Download,
 } from 'lucide-react';
+import { RiskBadge, type RiskDTO } from '@/components/physio/risk-summary';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -43,7 +44,11 @@ interface ClinicianSummary {
   redFlagWindowDays: number;
   /** Exercises whose recovery has plateaued or is declining (lib/recovery-forecast.ts) */
   recoveryAlerts?: { patientId: string; patientName: string; exerciseTh: string; status: 'plateau' | 'declining'; currentDeficit: number | null }[];
+  /** Early-warning score of patients at moderate or high risk, highest first (lib/risk-score.ts) */
+  risks?: (RiskDTO & { patientId: string; patientName: string })[];
 }
+
+type Alert = { level: 'red' | 'warning' | 'info'; message: string; patientName: string; patientId: string; risk?: RiskDTO };
 
 /* ------------------------------------------------------------------ */
 /*  Animation helpers                                                  */
@@ -143,9 +148,9 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
     return { totalPatients, activePatients };
   }, [patients]);
 
-  /* ---- Alerts: red flags (escalated symptoms) first, then risk signals ---- */
+  /* ---- Alerts: red flags (escalated symptoms) first, then the early-warning score ---- */
   const alerts = useMemo(() => {
-    const result: { level: 'red' | 'warning' | 'info'; message: string; patientName: string; patientId: string }[] = [];
+    const result: Alert[] = [];
 
     for (const f of summary?.redFlags ?? []) {
       result.push({
@@ -155,24 +160,19 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
         patientId: f.patientId,
       });
     }
-    for (const r of summary?.recoveryAlerts ?? []) {
-      const short = r.currentDeficit !== null ? ` (ยังขาดเป้าหมาย ≈${r.currentDeficit}°)` : '';
+    // Plateau / declining recovery, low adherence, inactivity, worsening form … one row per patient
+    for (const r of summary?.risks ?? []) {
+      const factors = r.factors.filter((f) => f.code !== 'red_flag_symptoms'); // red flags have their own row
+      if (!factors.length) continue;
       result.push({
         level: 'warning',
-        message: r.status === 'declining' ? `${r.exerciseTh}: มุมที่ทำได้แย่ลง${short}` : `${r.exerciseTh}: พัฒนาการหยุดนิ่ง 14 วัน${short} — พิจารณาปรับแผน`,
+        message: factors.slice(0, 2).map((f) => f.label).join(' · '),
         patientName: r.patientName,
         patientId: r.patientId,
+        risk: r,
       });
     }
     for (const p of patients) {
-      // Low accuracy over several sessions
-      if (p.latestAccuracy > 0 && p.latestAccuracy < 50 && p.totalSessions >= 3) {
-        result.push({ level: 'warning', message: `ความแม่นยำต่ำ (${p.latestAccuracy}%)`, patientName: p.name, patientId: p.id });
-      }
-      // Inactive for 7+ days (has sessions but no recent)
-      if (p.totalSessions > 0 && p.recentSessions7d === 0) {
-        result.push({ level: 'warning', message: 'ไม่ได้ฝึกมา 7 วัน', patientName: p.name, patientId: p.id });
-      }
       // Never started
       if (p.totalSessions === 0) {
         result.push({ level: 'info', message: 'ยังไม่เคยเริ่มฝึก', patientName: p.name, patientId: p.id });
@@ -182,9 +182,10 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
   }, [patients, summary]);
 
   const highRiskCount = useMemo(
-    () => new Set(alerts.filter((a) => a.level !== 'info').map((a) => a.patientId)).size,
-    [alerts]
+    () => new Set([...(summary?.redFlags ?? []).map((f) => f.patientId), ...(summary?.risks ?? []).filter((r) => r.level === 'high').map((r) => r.patientId)]).size,
+    [summary]
   );
+  const watchCount = (summary?.risks ?? []).filter((r) => r.level === 'moderate').length;
   const redFlagCount = summary?.redFlags.length ?? 0;
 
   /* ---- Render ---- */
@@ -210,6 +211,13 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
             {new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
+        <a
+          href="/api/analytics/dataset"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title="ข้อมูลไม่ระบุตัวตน: คุณลักษณะระหว่างการรักษา + ผลการรักษาที่บันทึกเมื่อจบแผน สำหรับพัฒนาแบบจำลองพยากรณ์"
+        >
+          <Download className="h-3.5 w-3.5" /> ส่งออกข้อมูลผลการรักษา (CSV)
+        </a>
       </motion.div>
 
       {/* ---- Summary cards ---- */}
@@ -233,7 +241,7 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
           icon={<ShieldAlert className="h-5 w-5" />}
           label="ความเสี่ยงสูง / Red flags"
           value={highRiskCount}
-          hint={redFlagCount ? `Red flag ${redFlagCount} ราย ใน ${summary?.redFlagWindowDays ?? 7} วัน` : 'ไม่มี Red flag ใน 7 วัน'}
+          hint={`${redFlagCount ? `Red flag ${redFlagCount} ราย` : 'ไม่มี Red flag'}${watchCount ? ` · ควรติดตาม ${watchCount} ราย` : ''}`}
           tone={redFlagCount ? 'red' : highRiskCount ? 'amber' : 'slate'}
           onClick={() => scrollTo('alerts')}
         />
@@ -279,6 +287,7 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
                       )}
                       <span className="min-w-0 flex-1 text-sm">
                         <span className="font-medium">{alert.patientName}</span>{' '}
+                        {alert.risk && <RiskBadge risk={alert.risk} />}{' '}
                         <span className="text-muted-foreground">— {alert.message}</span>
                       </span>
                       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
