@@ -45,55 +45,53 @@ export interface PostureGate {
 
 export const EXERCISES: ExerciseData[] = [
   {
-    name: "Static Quads",
-    nameTh: "เกร็งต้นขาด้านหน้า",
+    name: "Seated Heel Slides",
+    nameTh: "ไถส้นเท้างอเข่า",
     category: "knee",
-    description: "นอนหงาย เกร็งกล้ามเนื้อต้นขาด้านหน้าเพื่อกดหลังเข่าลงกับพื้น ช่วยให้ต้นขาแข็งแรงและเหยียดเข่าได้สุด",
+    description: "นอนหงาย ขาเหยียดตรง งอเข่าโดยไถส้นเท้าเข้าหาก้น แล้วไถกลับสู่ท่าเริ่มต้น ช่วยเพิ่มองศาการงอเข่า",
     instructions: [
       "วางกล้องไว้ด้านข้าง ระดับพื้น ให้เห็นทั้งตัว",
-      "นอนหงาย ชันเข่าข้างหนึ่ง เท้าวางราบ อีกข้างเหยียดตรง",
-      "กระดกปลายเท้าข้างที่เหยียดขึ้นหาตัว",
-      "เกร็งต้นขาด้านหน้า กดหลังเข่าลงกับพื้น",
-      "ค้างไว้ 5 วินาที แล้วผ่อนแรง",
+      "นอนหงาย ขาทั้งสองข้างเหยียดตรง",
+      "งอเข่าโดยไถส้นเท้าไปตามพื้นเข้าหาก้น",
+      "ไถส้นเท้ากลับไปเหยียดขาตรงในท่าเริ่มต้น",
+      "ทำ 3 เซ็ต เซ็ตละ 15 ครั้ง",
     ],
     targetJoints: [
       {
         name: "left_knee",
         nameTh: "เข่าซ้าย",
-        idealAngle: 175,
-        minAngle: 170,
-        maxAngle: 180,
+        idealAngle: 80,
+        minAngle: 50,
+        maxAngle: 100,
         unit: "°",
         rationale:
-          "CUH 'Static quads' (lying, the straight knee pressed into the floor). Developer estimate: a fully straight knee reads ≈170–180° from a side-view camera. The camera sees the straight knee and the hold time, not the muscle tension itself. The source gives no hold time (\"Hold for seconds\"); 5 s is a team default.",
+          "Heel slides (lying on the back, legs straight; slide the heel towards the buttocks and back; 3 sets of 15), wording supplied by the project team. The source gives no angle. Developer estimate: a heel slid well towards the buttocks reads ≈50–100° interior knee angle from a side-view camera; the wide range lets early-stage patients count reps.",
       },
       {
         name: "right_knee",
         nameTh: "เข่าขวา",
-        idealAngle: 175,
-        minAngle: 170,
-        maxAngle: 180,
+        idealAngle: 80,
+        minAngle: 50,
+        maxAngle: 100,
         unit: "°",
         rationale: "Same as left side.",
       },
     ],
     difficulty: "beginner",
     sets: 3,
-    repsPerSet: 10,
+    repsPerSet: 15,
     restSeconds: 30,
     icon: "Footprints",
     bodyPart: "lower",
-    holdSeconds: 5,
-    isometric: true,
-    // A standing knee is straight too: count only while lying (trunk ≈ 90° from vertical)
+    // A seated or standing knee bends too: count only while lying (trunk ≈ 90° from vertical)
     posture: { measurement: "trunk_inclination", min: 60, hintTh: "นอนหงายราบกับพื้น ให้กล้องเห็นด้านข้างลำตัวก่อนนะครับ" },
     formChecks: [
       {
-        "id": "other_knee_bent",
-        "type": "max",
+        "id": "other_leg_straight",
+        "type": "min",
         "measurement": "{other}_knee",
-        "threshold": 140,
-        "message": "Keep the other knee bent with the foot flat"
+        "threshold": 150,
+        "message": "Keep the other leg straight on the floor"
       }
     ],
   },
@@ -662,7 +660,7 @@ export const DIFFICULTY_COLORS: Record<string, string> = {
   advanced: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 };
 
-/** Stable exercise ID used by the seed route, e.g. "Static Quads" → "ex_static_quads" */
+/** Stable exercise ID used by the seed route, e.g. "Seated Heel Slides" → "ex_seated_heel_slides" */
 export function exerciseIdFromName(name: string): string {
   return `ex_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
 }

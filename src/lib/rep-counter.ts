@@ -11,7 +11,7 @@ import type { PostureGate } from '@/lib/exercises-data';
 //
 // Hold exercises (holdMs > 0, e.g. a 10 s stretch): the rep counts as soon as
 // the range has been held for holdMs; leaving earlier is a 'short_hold'.
-// Isometric holds (static quads) barely move the joint, so after a counted
+// Isometric holds (e.g. a static quads hold) barely move the joint, so after a counted
 // hold and relaxMs the next hold starts in place, without leaving the range.
 //
 // An incomplete attempt (ROM shortfall) = the measurement moves ≥ attemptMinDeg

@@ -37,9 +37,9 @@ describe('exercise catalogue', () => {
     });
   }
 
-  // Floor exercises are hard for one webcam to see. Static Quads is the one
+  // Floor exercises are hard for one webcam to see. Heel Slides is the one
   // deliberate exception (requested by the clinical team; camera at floor level).
-  const LYING_ALLOWED = new Set(['ex_static_quads']);
+  const LYING_ALLOWED = new Set(['ex_seated_heel_slides']);
   test('only standing or sitting exercises, except the allowed lying ones', () => {
     const lying = /นอน|lying|supine|prone|side-lying|bridge|clamshell|straight leg raise/i;
     for (const ex of EXERCISES) {
@@ -109,8 +109,8 @@ describe('one side at a time', () => {
   });
 
   test('catalogue metadata: hold times and sides', () => {
-    expect(exerciseMeta('ex_static_quads')).toMatchObject({ holdSeconds: 5, isometric: true, unilateral: false });
-    expect(exerciseMeta('ex_static_quads').posture?.measurement).toBe('trunk_inclination');
+    expect(exerciseMeta('ex_seated_heel_slides')).toMatchObject({ holdSeconds: null, isometric: false, unilateral: false });
+    expect(exerciseMeta('ex_seated_heel_slides').posture?.measurement).toBe('trunk_inclination');
     expect(exerciseMeta('ex_cross_body_shoulder_stretch')).toMatchObject({ holdSeconds: 10, unilateral: true });
     expect(exerciseMeta('ex_shoulder_abduction').unilateral).toBe(true);
     expect(exerciseMeta('ex_unknown')).toEqual({ holdSeconds: null, isometric: false, unilateral: false, posture: null });

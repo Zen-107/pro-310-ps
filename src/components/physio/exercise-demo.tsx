@@ -195,15 +195,22 @@ export function ExerciseDemo({
   const labelAt = add(m.vertex, dir(a0 + (sign * m.value) / 2), 30);
   const labelX = mirrored ? SCENE_W - labelAt.x : labelAt.x;
 
+  // A helping arm drawn in front of the body gets a darker shade so it reads apart from the trunk
+  const farArm = arm(skel.armFar).map((d, i) => (
+    <path
+      key={`af${i}`}
+      d={d}
+      className={!side && highlightArm && !demo.unilateral ? active : demo.farArmInFront ? 'fill-slate-400 dark:fill-slate-400' : far}
+    />
+  ));
+
   const body = (
     <g className={outline} strokeWidth={0.6}>
       {/* far side (behind) */}
       {leg(skel.legFar).map((d, i) => (
         <path key={`lf${i}`} d={d} className={highlightLegFar && i < 1 ? active : far} />
       ))}
-      {arm(skel.armFar).map((d, i) => (
-        <path key={`af${i}`} d={d} className={!side && highlightArm && !demo.unilateral ? active : far} />
-      ))}
+      {!demo.farArmInFront && farArm}
       {/* trunk, neck, head */}
       <path d={capsule(skel.hip, skel.neck, side ? 10.5 : 14.5, side ? 12 : 18.5, side ? 1.5 : -1)} className={near} />
       <path d={capsule(skel.neck, add(skel.neck, unit({ x: skel.headCenter.x - skel.neck.x, y: skel.headCenter.y - skel.neck.y }), SEG.neck + 2), 3.6, 3.4)} className={near} />
@@ -215,6 +222,7 @@ export function ExerciseDemo({
       {arm(skel.armNear).map((d, i) => (
         <path key={`an${i}`} d={d} className={highlightArm ? active : near} />
       ))}
+      {demo.farArmInFront && farArm}
     </g>
   );
 

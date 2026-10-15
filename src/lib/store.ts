@@ -27,6 +27,9 @@ interface AppState {
   // Patient: quest picked on the dashboard → highlighted in the camera tab
   selectedQuestId: string | null;
   setSelectedQuestId: (id: string | null) => void;
+  // Patient: quest started from another tab → the camera tab starts its session right away
+  pendingQuestStart: { questId: string; side?: 'left' | 'right' } | null;
+  setPendingQuestStart: (start: { questId: string; side?: 'left' | 'right' } | null) => void;
 
   // Session state
   isSessionActive: boolean;
@@ -67,6 +70,8 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedExerciseId: (id) => set({ selectedExerciseId: id }),
   selectedQuestId: null,
   setSelectedQuestId: (id) => set({ selectedQuestId: id }),
+  pendingQuestStart: null,
+  setPendingQuestStart: (start) => set({ pendingQuestStart: start }),
 
   isSessionActive: false,
   setIsSessionActive: (active) => set({ isSessionActive: active }),

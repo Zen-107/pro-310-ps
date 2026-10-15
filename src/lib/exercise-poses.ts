@@ -178,6 +178,8 @@ export interface ExerciseDemo {
   frame?: { y: number; h: number };
   /** Only the near arm/leg is exercised (one side at a time); mirrored for the other side */
   unilateral?: boolean;
+  /** Draw the far arm over the body (e.g. a helping arm held in front of the chest) */
+  farArmInFront?: boolean;
   /** Motion paths to draw at progress t */
   guides?: (t: number) => DemoGuide[];
   /** Pose at progress t ∈ [0, 1] (0 = start position, 1 = end position) */
@@ -192,20 +194,22 @@ const hang: LimbPose = { upper: 92, lower: 90, end: 90 };
 const straightDown = (lean = 0): LimbPose => ({ upper: 90 + lean, lower: 90 + lean, end: 0 });
 
 export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
-  // Static quads (CUH): lying on the back, other knee bent with the foot flat;
-  // the straight knee is pressed into the floor and the ankle pulled up
-  ex_static_quads: {
-    slug: 'ex_static_quads',
+  // Heel slides: lying on the back, legs straight; the heel slides along the
+  // floor towards the buttocks (knee rises) and back, the other leg stays straight
+  ex_seated_heel_slides: {
+    slug: 'ex_seated_heel_slides',
     view: 'side',
     measurement: 'knee',
     props: { mat: true },
     frame: { y: 126, h: 82 },
-    caption: 'Lying on your back, tighten the thigh and press the back of the knee down',
+    caption: 'Lying on your back, slide the heel towards your buttocks, then back',
     pose: (t) => {
       const hip = { x: 112, y: GROUND - 10 };
-      const bend = lerp(10, 0, t); // relaxed knee slightly off the floor → pressed flat
-      const footFar = { x: hip.x + 62, y: GROUND - 4 };
-      const far = twoBone(hip, footFar, SEG.thigh, SEG.shin, -1);
+      const knee = lerp(175, 80, t); // interior knee angle: straight → bent
+      const heelY = GROUND - 5; // heel stays on the floor
+      const span = legSpan(knee);
+      const heel = { x: hip.x + Math.sqrt(Math.max(span ** 2 - (heelY - hip.y) ** 2, 0)), y: heelY };
+      const near = twoBone(hip, heel, SEG.thigh, SEG.shin, -1);
       return {
         view: 'side',
         hip,
@@ -213,38 +217,37 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
         head: 180,
         armNear: { upper: 4, lower: 2, end: 0 },
         armFar: { upper: 6, lower: 4, end: 0 },
-        legNear: { upper: -bend / 2, lower: bend / 2, end: lerp(-35, -95, t) },
-        legFar: { upper: far.a1, lower: far.a2, end: 0, lowerTo: footFar },
+        legNear: { upper: near.a1, lower: near.a2, end: lerp(-60, -5, t), lowerTo: heel },
+        legFar: { upper: 1, lower: 1, end: -65 },
       };
     },
   },
 
-  // Cross-body stretch (front view): the straight arm is brought across the
-  // chest at shoulder height; the other forearm folds in to hold it
+  // Cross-body stretch (front view, upper body): the straight arm is brought
+  // across the chest at shoulder height, then the other forearm comes up in
+  // front of it and holds it in against the chest (arms cross like a "+")
   ex_cross_body_shoulder_stretch: {
     slug: 'ex_cross_body_shoulder_stretch',
     view: 'front',
     measurement: 'shoulder',
     props: {},
     unilateral: true,
-    caption: 'Bring the straight arm across the chest, hold it in with the other arm',
+    farArmInFront: true,
+    frame: { y: 6, h: 118 },
+    caption: 'Bring the straight arm across the chest, hold it in with the other forearm',
     pose: (t) => {
       const hip = { x: 130, y: standingHipY };
-      const shoulderNear = { x: hip.x - SEG.shoulderHalf, y: standingNeckY };
-      const shoulderFar = { x: hip.x + SEG.shoulderHalf, y: standingNeckY };
-      const arm = lerp(96, -4, t); // hanging → across the chest, pointing to the other side
-      // Helping hand: from hanging to the stretched arm's forearm
-      const hang = add(shoulderFar, dir(84), SEG.upperArm + SEG.forearm);
-      const contact = add(shoulderNear, dir(arm), SEG.upperArm + SEG.forearm * 0.5);
-      const reach = { x: lerp(hang.x, contact.x, t), y: lerp(hang.y, contact.y + 3, t) };
-      const help = twoBone(shoulderFar, reach, SEG.upperArm, SEG.forearm, 1);
+      const across = Math.min(1, t / 0.6); // stretched arm moves first
+      const help = Math.max(0, (t - 0.35) / 0.65); // then the helping arm
+      const arm = lerp(96, 3, across); // hanging → across the chest, pointing to the other side
       return {
         view: 'front',
         hip,
         torso: -90,
         head: -90,
         armNear: { upper: arm, lower: arm, end: arm },
-        armFar: { upper: help.a1, lower: help.a2, end: help.a2 },
+        // Elbow comes in below the chest, forearm swings up to press the stretched arm in near the shoulder
+        armFar: { upper: lerp(84, 120, help), lower: lerp(84, 256, help), end: lerp(84, 256, help) },
         ...frontLegs,
       };
     },

@@ -516,6 +516,7 @@ export function LiveSessionView() {
   const sessionAccuracy = useAppStore((s) => s.sessionAccuracy);
   const aiFeedback = useAppStore((s) => s.aiFeedback);
   const selectedQuestId = useAppStore((s) => s.selectedQuestId);
+  const pendingQuestStart = useAppStore((s) => s.pendingQuestStart);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   // ─── Local State ────────────────────────────────────────────────────
@@ -535,6 +536,8 @@ export function LiveSessionView() {
   const [demoOpen, setDemoOpen] = useState(true);
   // Video recording (PDPA): consent is per patient, recording can be turned off per session
   const [videoConsent, setVideoConsent] = useState<{ consented: boolean; consentedAt: string | null } | null>(null);
+  const [consentLoaded, setConsentLoaded] = useState(false); // consent fetch settled (ok or failed)
+  const [autoStarting, setAutoStarting] = useState(false); // starting a quest picked on another tab
   const [recordVideo, setRecordVideo] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
@@ -634,7 +637,8 @@ export function LiveSessionView() {
     fetch('/api/me/video-consent')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setVideoConsent({ consented: d.consented, consentedAt: d.consentedAt }))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setConsentLoaded(true));
   }, []);
 
   // Pause/resume the video together with the session; silence speech on pause
@@ -1529,7 +1533,7 @@ export function LiveSessionView() {
           recordIncomplete(event);
         }
       }
-      // Required body position (Static Quads: lying down) not met yet: say how to get into it
+      // Required body position (Seated Heel Slides: lying down) not met yet: say how to get into it
       if (exercise?.posture && repCounterRef.current && !repCounterRef.current.postureOk) {
         if (cue(exercise.posture.hintTh, 'coach', 'posture-gate')) {
           showFormCue(exercise.posture.hintTh);
@@ -1627,9 +1631,26 @@ export function LiveSessionView() {
     st.setSelectedQuestId(null);
   }, []);
 
+  // Quest started from another tab (e.g. the exercises page): skip the quest
+  // list and start its session. Waits for the consent status so recording is set.
+  useEffect(() => {
+    if (!pendingQuestStart || !consentLoaded || phase !== 'pre-session') return;
+    useAppStore.getState().setPendingQuestStart(null);
+    setAutoStarting(true);
+    void handleStartExercise(pendingQuestStart).finally(() => setAutoStarting(false));
+  }, [pendingQuestStart, consentLoaded, phase, handleStartExercise]);
+
   // =====================================================================
   // RENDER: Pre-Session Screen
   // =====================================================================
+  if (phase === 'pre-session' && (pendingQuestStart || autoStarting)) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        <p className="text-sm">กำลังเปิดกล้องเพื่อเริ่มภารกิจ…</p>
+      </div>
+    );
+  }
   if (phase === 'pre-session') {
     return (
       <div className="min-h-screen bg-background">

@@ -146,8 +146,8 @@ interface Citation {
 
 // ─── Exercise → citations (keyed by slug) ───────────────────────────
 const CITATIONS: Record<string, Citation[]> = {
-  ex_static_quads: [
-    { source: 'cuhKnee', relevance: 'EXACT', sourceExerciseName: 'Static quads', note: 'The source gives no hold time ("Hold for seconds"); the app uses 5 s (team default). 3 sets of 10 as in the source.' },
+  ex_seated_heel_slides: [
+    { source: 'cuhKnee', relevance: 'EXACT', sourceExerciseName: 'Heel slides', note: 'Lying on the back, legs straight, slide the heel towards the buttocks and back; 3 sets of 15. Wording supplied by the project team; the app name "Seated Heel Slides" was requested by the team.' },
   ],
   ex_cross_body_shoulder_stretch: [
     {
@@ -395,7 +395,7 @@ async function main() {
       clinician: { connect: { id: doctor.id } },
       items: {
         create: [
-          item('ex_static_quads', 3, 10, 30, [], 0),
+          item('ex_seated_heel_slides', 3, 15, 30, [], 0),
           item('ex_wall_squat', 2, 8, 45, [], 1),
           item('ex_squat', 2, 8, 45, [2, 4, 6], 2),
         ],
@@ -438,7 +438,7 @@ async function main() {
               ],
             },
           },
-          item('ex_static_quads', 3, 10, 30, [], 1),
+          item('ex_seated_heel_slides', 3, 15, 30, [], 1),
         ],
       },
     },

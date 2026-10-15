@@ -7,8 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DIFFICULTY_COLORS, DIFFICULTY_LABELS } from '@/lib/exercises-data';
+import { DIFFICULTY_COLORS, DIFFICULTY_LABELS, SIDE_LABELS, type Side } from '@/lib/exercises-data';
 import { useAppStore } from '@/lib/store';
+import { unlockAudio } from '@/lib/speech';
 import { ExerciseDemo } from '@/components/physio/exercise-demo';
 
 // Patient's prescribed exercises: demo, steps, targets and sources.
@@ -46,12 +47,13 @@ interface Exercise {
 interface QuestToday {
   id: string;
   status: string;
-  exercise: { id: string; sets: number; repsPerSet: number; targetJoints: Target[] };
+  sidesDone: Side[];
+  exercise: { id: string; sets: number; repsPerSet: number; targetJoints: Target[]; unilateral?: boolean; bodyPart?: string };
 }
 
 export function ExercisesView() {
   const setActiveTab = useAppStore((s) => s.setActiveTab);
-  const setSelectedQuestId = useAppStore((s) => s.setSelectedQuestId);
+  const setPendingQuestStart = useAppStore((s) => s.setPendingQuestStart);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [quests, setQuests] = useState<QuestToday[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,8 +76,10 @@ export function ExercisesView() {
     };
   }, []);
 
-  function startQuest(questId: string) {
-    setSelectedQuestId(questId);
+  // Straight into the camera session (the camera tab starts it, no second pick)
+  function startQuest(questId: string, side?: Side) {
+    unlockAudio(); // inside the click: lets the coach speak once the session starts
+    setPendingQuestStart({ questId, side });
     setActiveTab('camera');
   }
 
@@ -177,7 +181,29 @@ export function ExercisesView() {
                   )}
 
                   {quest ? (
-                    quest.status === 'COMPLETED' ? (
+                    quest.exercise.unilateral ? (
+                      // One side at a time: each side is its own session
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium">ทำทีละข้าง เลือกข้างที่จะฝึก</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(['left', 'right'] as const).map((side) => {
+                            const sideDone = quest.sidesDone?.includes(side);
+                            const limb = quest.exercise.bodyPart === 'upper' ? 'แขน' : 'ขา';
+                            return (
+                              <Button
+                                key={side}
+                                variant={sideDone ? 'outline' : 'default'}
+                                className={sideDone ? '' : 'bg-teal-600 hover:bg-teal-700'}
+                                onClick={() => startQuest(quest.id, side)}
+                              >
+                                {sideDone ? <CheckCircle className="h-4 w-4 text-teal-600" /> : <Play className="h-4 w-4" />}
+                                {limb}{SIDE_LABELS[side]}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : quest.status === 'COMPLETED' ? (
                       <div className="flex items-center justify-between rounded-lg bg-teal-50 p-3 text-sm text-teal-700 dark:bg-teal-950/30 dark:text-teal-400">
                         <span className="flex items-center gap-1.5">
                           <CheckCircle className="h-4 w-4" /> ภารกิจวันนี้สำเร็จแล้ว

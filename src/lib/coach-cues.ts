@@ -109,7 +109,7 @@ const EXERCISE_PHRASES: Record<string, Record<string, Partial<Phrases>>> = {
   ex_wall_squat: { knee: { above: 'เลื่อนตัวลงอีกนิดครับ', below: 'เลื่อนตัวขึ้นมานิดนึงครับ', hold: 'ดีมากครับ ค้างไว้ หายใจตามปกติ' } },
   ex_forward_lunge: { knee: { above: 'ย่อตัวลงอีกนิดครับ', below: 'ไม่ต้องย่อลึกขนาดนั้นครับ', hold: 'ดีมากครับ ลำตัวตรงไว้ แล้วดันกลับ' } },
   ex_side_lunge: { knee: { above: 'ย่อเข่าข้างที่ก้าวลงอีกนิดครับ', below: 'ไม่ต้องย่อลึกขนาดนั้นครับ', hold: 'ดีครับ ขาอีกข้างเหยียดตรงไว้' } },
-  ex_static_quads: { knee: { below: 'เหยียดเข่าให้ตรง เกร็งต้นขากดหลังเข่าลงกับพื้นครับ', hold: 'ดีครับ เกร็งต้นขาค้างไว้' } },
+  ex_seated_heel_slides: { knee: { above: 'ไถส้นเท้าเข้าหาก้นอีกนิดครับ', below: 'ไม่ต้องงอเข่ามากขนาดนั้นครับ', hold: 'ดีครับ แล้วไถส้นเท้ากลับไปเหยียดขาตรง' } },
 };
 
 const baseMeasurement = (name: string) => name.replace(/^(left|right)_/, '');
