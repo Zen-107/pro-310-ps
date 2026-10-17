@@ -36,3 +36,8 @@ export async function appendChunk(storageKey: string, data: Uint8Array, truncate
   if (truncate) await fs.writeFile(file, data);
   else await fs.appendFile(file, data);
 }
+
+/** Remove a stored video file; a file that is already gone is not an error */
+export async function deleteVideoFile(storageKey: string): Promise<void> {
+  await fs.rm(videoPath(storageKey), { force: true });
+}

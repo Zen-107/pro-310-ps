@@ -104,7 +104,7 @@ Every route requires a signed-in user (next-auth session cookie) **and acceptanc
 ### Account & consent
 - **GET /api/me** — signed-in user + clinician/patient profile
 - **GET / POST /api/me/terms** (any role) — entry consent popup (`src/components/terms-gate.tsx`, text and `TERMS_VERSION` in `src/lib/terms.ts`). Until the current version is accepted, the home page renders only the popup and every other API route returns 403 `TERMS_REQUIRED`; `{ accept: true, version }` records it (also sets `Patient.consentAt`). Bumping `TERMS_VERSION` makes everyone accept again
-- **GET / POST /api/me/video-consent** (PATIENT) — video-recording consent status; `{ consent: true|false }` gives (current `VIDEO_CONSENT_VERSION`, text in `src/lib/consent.ts`) or withdraws it
+- **GET / POST /api/me/video-consent** (PATIENT) — video-recording consent status; `{ consent: true|false }` gives (current `VIDEO_CONSENT_VERSION`, text in `src/lib/consent.ts`) or withdraws it; withdrawal deletes all of the patient's session videos (rows and files)
 - **/api/auth/*** — next-auth (sign-in, sign-out, session, csrf)
 
 ### Exercises (any role)
@@ -208,7 +208,7 @@ Exercise (DRAFT | PUBLISHED | RETIRED)
 - **JWT sessions** (8 h, one clinic shift). The token carries `role`, `clinicianId`, `patientId`, `organizationId` (`src/lib/auth.ts`, types in `src/types/next-auth.d.ts`).
 - **Pages:** `src/app/page.tsx` (server component) → no session: redirect to `/login`; terms not accepted: only `TermsGate`; otherwise `AppShell` with the role's tabs. Admin accounts have no screens yet.
 - **Terms / PDPA gate:** versioned per user; enforced on the page and in `requireApiUser`.
-- **Video consent:** separate, versioned, withdrawable; enforced server-side on upload. Videos are served only through the access-checked route and excluded from build tracing (`next.config.ts`).
+- **Video consent:** separate, versioned (`video-consent-th-v2`), withdrawable; enforced server-side on upload. Withdrawing clears the consent first, then permanently deletes every `SessionVideo` row and file of that patient (`POST /api/me/video-consent`, `deleteVideoFile()` in `video-storage.ts`); the confirm dialog and toast say so. v2 changed the withdrawal wording, so patients who agreed to v1 are asked again. Videos are served only through the access-checked route and excluded from build tracing (`next.config.ts`).
 - **What leaves the device:** pose landmarks, angles and session metrics (never camera images, unless video consent is given). Coaching phrases go to the AI provider and the TTS service without names or identifiers.
 
 ---
@@ -227,7 +227,7 @@ All joint angles use the vector dot product with the vertex at B:
 
 | Measurement | Formula | Used by |
 |---|---|---|
-| `left/right_knee` | angle(hip, knee, ankle) | Static Quads, Wall Squat, Squat, Forward/Side Lunge |
+| `left/right_knee` | angle(hip, knee, ankle) | Seated Heel Slides, Wall Squat, Squat, Forward/Side Lunge |
 | `left/right_shoulder` | angle(hip, shoulder, elbow) | Cross-Body Shoulder Stretch, Shoulder Abduction, Arm Circles |
 | `left/right_elbow` | angle(shoulder, elbow, wrist) | form checks |
 | `left/right_hip_abduction` | angle(other hip, hip, knee) − 90 | Standing Hip Abduction |
@@ -236,11 +236,11 @@ All joint angles use the vector dot product with the vertex at B:
 | `trunk_rotation` | shoulder line vs hip line, transverse plane (world landmarks only) | Trunk Rotation |
 | `left/right_hip`, `left/right_hip_flexion`, `hip_opening` | see `joint-formulas.ts` | none; kept for old sessions |
 
-**Catalogue** (`src/lib/exercises-data.ts`, seeded by `prisma/seed.ts`): exercises a single webcam can see. Published: Static Quads, Wall Squat, Squat, Cross-Body Shoulder Stretch, Shoulder Abduction, Arm Circles. Draft (pending source verification): Trunk Lateral Flexion, Trunk Rotation, Forward Lunge, Side Lunge, Standing Hip Abduction. Floor exercises are avoided; Static Quads (lying, camera at floor level, CUH) is the one deliberate exception. Knee Flexion and Shoulder Flexion were replaced in the 2026-10 revision by Static Quads and the Cross-Body Shoulder Stretch; re-run `bun run db:seed` to get the new catalogue.
+**Catalogue** (`src/lib/exercises-data.ts`, seeded by `prisma/seed.ts`): exercises a single webcam can see. Published: Seated Heel Slides, Wall Squat, Squat, Cross-Body Shoulder Stretch, Shoulder Abduction, Arm Circles. Draft (pending source verification): Trunk Lateral Flexion, Trunk Rotation, Forward Lunge, Side Lunge, Standing Hip Abduction. Floor exercises are avoided; Seated Heel Slides (lying, camera at floor level, CUH "Heel slides", 3 × 15, knee 50–100°) is the one deliberate exception. Knee Flexion and Shoulder Flexion were replaced in the 2026-10 revision by Static Quads and the Cross-Body Shoulder Stretch; Static Quads was then replaced by Seated Heel Slides (`5596df3e`). Every exercise needs a demo in `EXERCISE_DEMOS` (`src/lib/exercise-poses.ts`) keyed by the same slug, or its card shows no animation. Databases seeded before that change are converted in place by the data migration `20261017000000_static_quads_to_heel_slides` (`bun run db:migrate:deploy`), so prescriptions and sessions stay linked; no re-seed needed.
 
 **Per-exercise behaviour** (code-defined per slug, `exerciseMeta()`, exposed on the exercise DTO):
-- `holdSeconds`: the rep counts once the target range has been held this long (Static Quads 5 s, Cross-Body Stretch 10 s); leaving earlier is a `short_hold` event with a spoken reminder. The live HUD shows a hold timer.
-- `isometric` (Static Quads): the knee barely moves, so after a counted hold and a 3 s relax the next hold starts in place. The camera verifies a straight knee and the hold time, not the muscle tension.
+- `holdSeconds`: the rep counts once the target range has been held this long (Cross-Body Stretch 10 s); leaving earlier is a `short_hold` event with a spoken reminder. The live HUD shows a hold timer.
+- `isometric`: for static holds where the joint barely moves; after a counted hold and a 3 s relax the next hold starts in place. No exercise in the current catalogue uses it (Static Quads did, before it was replaced).
 - `unilateral` (Cross-Body Stretch, Shoulder Abduction): the patient picks left or right on the quest card; the session measures that side only and records `side` in `targetSnapshot`. The quest completes once both sides have a completed session. Recovery forecasts and population references treat each side as its own series. The demo is drawn as a mirror image and flipped for the right side.
 
 **Scoring:** in range = correct; accuracy = max(0, 100 − deviation/tolerance × 50), tolerance = (max − min)/2. **ROM** = max − min of the side that moved most.
@@ -418,6 +418,7 @@ bun run typecheck          # app + tests (tests have their own tsconfig with Bun
 | Every API call returns 403 `TERMS_REQUIRED` | The user hasn't accepted the current `TERMS_VERSION` |
 | `prisma generate` EPERM on Windows | The running dev server locks the query engine DLL — stop `bun run dev`, regenerate, restart |
 | Exercise missing from quests | Only `PUBLISHED` exercises appear; check `status` / `statusNote` |
+| Exercise card has no demo animation / "Static Quads" still listed | The database predates a catalogue change: run `bun run db:migrate:deploy` (or `db:seed` on a throwaway DB). A new exercise also needs an `EXERCISE_DEMOS` entry with the same slug |
 | `db:seed` fails / "table … does not exist" | Connected to an empty database. `docker ps`: the data lives in `pro-310-ps-db-1` (volume `pro-310-ps_pgdata`); the project name is pinned in `docker-compose.yml` so `bun run db:up` always uses it. On a brand-new database run `bun run db:migrate:deploy` before seeding |
 
 ---
@@ -436,6 +437,7 @@ bun run typecheck          # app + tests (tests have their own tsconfig with Bun
 | 7. Cue timing | `868c982c` | Movement-phase gating, cooldowns, faster non-stacking speech |
 | 8. UI/UX | `89e42ffa` | Focus Mode HUD, clinician summary cards, tabbed report, slate/teal theme, touch targets |
 | 9. Recovery forecast | (this change) | Per-patient forecast (Theil–Sen + bootstrap, linear vs saturating range), plateau/declining detection with overview alerts, simulation-validated; simulated demo history in the seed |
+| 10. Catalogue & consent fixes | `5596df3e`, (this change) | Static Quads → Seated Heel Slides (+ in-place data migration for old databases); withdrawing video consent deletes all of the patient's recorded videos (consent text v2) |
 
 ### Known limitations / next steps
 - **Clinical validation:** target angles, compensation thresholds, coaching phrases and the consent text need review by a physiotherapist; KIMORE / REHAB24-6 sources need verification before those exercises can be published.

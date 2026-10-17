@@ -939,7 +939,11 @@ export function LiveSessionView() {
       setVideoConsent({ consented: d.consented, consentedAt: d.consentedAt });
       setConsentOpen(false);
       setConsentChecked(false);
-      toast.success(consent ? 'บันทึกความยินยอมแล้ว' : 'ถอนความยินยอมแล้ว — จะไม่บันทึกวิดีโออีก');
+      toast.success(
+        consent
+          ? 'บันทึกความยินยอมแล้ว'
+          : `ถอนความยินยอมแล้ว — ลบวิดีโอที่บันทึกไว้ ${d.videosDeleted ?? 0} รายการ และจะไม่บันทึกวิดีโออีก`
+      );
     } catch {
       toast.error('บันทึกความยินยอมไม่สำเร็จ');
     } finally {
@@ -1737,7 +1741,7 @@ export function LiveSessionView() {
                     className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
                     disabled={savingConsent}
                     onClick={() => {
-                      if (window.confirm('ถอนความยินยอมการบันทึกวิดีโอ? การฝึกครั้งต่อไปจะไม่บันทึกวิดีโอ')) saveVideoConsent(false);
+                      if (window.confirm('ถอนความยินยอมการบันทึกวิดีโอ?\nวิดีโอการฝึกที่บันทึกไว้ทั้งหมดจะถูกลบถาวรและกู้คืนไม่ได้ และการฝึกครั้งต่อไปจะไม่บันทึกวิดีโอ')) saveVideoConsent(false);
                     }}
                   >
                     ถอนความยินยอม

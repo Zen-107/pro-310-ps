@@ -3,9 +3,10 @@ import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
 import { badRequest, jsonError, readJson, serverError } from '@/lib/api-utils';
 import { VIDEO_CONSENT_VERSION, hasValidVideoConsent } from '@/lib/consent';
+import { deleteVideoFile } from '@/lib/video-storage';
 
 // Patient's own video-recording consent. GET → status; POST { consent: boolean }
-// gives (current version) or withdraws consent.
+// gives (current version) or withdraws consent and deletes all recorded videos.
 export async function GET() {
   const auth = await requireApiUser(['PATIENT']);
   if ('response' in auth) return auth.response;
@@ -40,7 +41,18 @@ export async function POST(req: Request) {
         : { videoConsentAt: null, videoConsentVersion: null },
       select: { videoConsentAt: true, videoConsentVersion: true },
     });
+    // Withdrawal also erases every video already recorded for this patient
+    // (consent is cleared first, so no new upload can start meanwhile)
+    let videosDeleted = 0;
+    if (!body.consent) {
+      const where = { session: { patientId: auth.user.patientId } };
+      const videos = await db.sessionVideo.findMany({ where, select: { storageKey: true } });
+      await db.sessionVideo.deleteMany({ where });
+      await Promise.all(videos.map((v) => deleteVideoFile(v.storageKey).catch(() => {})));
+      videosDeleted = videos.length;
+    }
     return NextResponse.json({
+      videosDeleted,
       consented: hasValidVideoConsent(p),
       consentedAt: p.videoConsentAt?.toISOString() ?? null,
       version: p.videoConsentVersion,
