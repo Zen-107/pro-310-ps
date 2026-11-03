@@ -8,10 +8,12 @@ import type {
   ExerciseSource,
   Gender,
   PrescriptionTargetOverride,
+  Prisma,
 } from '@prisma/client';
 import { ageFromDob, localDateString } from '@/lib/dates';
 import { parseFormChecks } from '@/lib/form-checks';
 import { exerciseMeta } from '@/lib/exercises-data';
+import { kidExercise } from '@/lib/kids';
 import { safeTruncate, sanitizeText } from '@/lib/text-safe';
 
 // Display limits (grapheme clusters) for free text that reaches report screens
@@ -75,6 +77,11 @@ type ExerciseWithRelations = Exercise & {
   references?: (ExerciseReference & { source: ExerciseSource })[];
 };
 
+function kidFields(ex: { slug: string; nameTh: string; instructions: Prisma.JsonValue }) {
+  const k = kidExercise(ex.slug, { nameTh: ex.nameTh, instructions: Array.isArray(ex.instructions) ? (ex.instructions as string[]) : [] });
+  return { kidName: k.name, kidSteps: k.steps, forKids: k.forKids };
+}
+
 export function exerciseDTO(
   ex: ExerciseWithRelations,
   dose?: { sets: number; repsPerSet: number; restSeconds: number },
@@ -98,6 +105,8 @@ export function exerciseDTO(
     formChecks: parseFormChecks(ex.formChecks),
     // Hold time / one side at a time (code-defined per slug, lib/exercises-data.ts)
     ...exerciseMeta(ex.slug),
+    // Child-facing name and short steps (lib/kids.ts)
+    ...kidFields(ex),
     targetJoints: mergeTargets(ex.targets, overrides),
     references: (ex.references ?? []).map((r) => ({
       title: r.source.title,

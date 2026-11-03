@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import type { FaultType } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
+import { EXPERTS } from '@/lib/roles';
 import { patientScope } from '@/lib/access';
 import { serverError } from '@/lib/api-utils';
 import { ageFromDob, dateOnlyString, localDateString } from '@/lib/dates';
@@ -37,7 +38,7 @@ const DAY_MS = 86_400_000;
 const round = (v: number, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 
 export async function GET(req: Request) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(EXPERTS);
   if ('response' in auth) return auth.response;
   const format = new URL(req.url).searchParams.get('format') === 'json' ? 'json' : 'csv';
   const salt = process.env.NEXTAUTH_SECRET ?? 'ai-physio';

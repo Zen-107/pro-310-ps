@@ -4,13 +4,14 @@ import { canAccessPatient } from '@/lib/access';
 import { notFound, serverError } from '@/lib/api-utils';
 import { analyzePatientTrends } from '@/lib/ai-agent';
 import { predictPatient } from '@/lib/predictive';
+import { STAFF } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 
 // Computed fault/accuracy/ROM trends, recovery forecasts (individual + population
 // model) and the early-warning risk score — no AI call. Care team only.
 export async function GET(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(STAFF);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {
@@ -26,7 +27,7 @@ export async function GET(_req: Request, { params }: Params) {
 // Trends + AI clinical summary and recommendations (analyst agent), care team.
 // If the AI service fails, the computed trends are still returned with aiError.
 export async function POST(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(STAFF);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {

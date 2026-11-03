@@ -1,8 +1,9 @@
 /**
- * Development seed: wipes ALL data and creates demo organizations, users,
- * the exercise library with cited sources, sample prescriptions and a
- * SIMULATED training history (prisma/demo-history.ts) for the forecast demo,
- * plus a SIMULATED cohort of discharged (archived) patients that the
+ * Development seed: wipes ALL data and creates a demo school (expert,
+ * teachers, parents, classes, kids with login cards — src/lib/demo-accounts.ts),
+ * the exercise library with cited sources, class mission sets and a
+ * SIMULATED play history (prisma/demo-history.ts) for the forecast demo,
+ * plus a SIMULATED cohort of earlier (archived) children that the
  * population model uses as its reference.
  *
  *   bun run db:seed        (runs `prisma db seed` → this file)
@@ -20,6 +21,10 @@ import { hashPassword } from '../src/lib/password';
 import { mergeTargets } from '../src/lib/presenters';
 import { addDays, dateOnly, localDateString } from '../src/lib/dates';
 import { DEMO_NOTE, DEMO_SCENARIOS, generateDemoDays, referenceScenario, type DemoScenario } from './demo-history';
+import { assignToClassroom, createKidInClassroom } from '../src/lib/classrooms';
+import { DEMO_ADULT_PIN, DEMO_KIDS } from '../src/lib/demo-accounts';
+import { TERMS_VERSION } from '../src/lib/terms';
+import { VIDEO_CONSENT_VERSION } from '../src/lib/consent';
 
 const db = new PrismaClient();
 
@@ -293,174 +298,134 @@ async function main() {
     exerciseIds[slug] = created.id;
   }
 
-  // ─── Organizations ────────────────────────────────────────────────
-  const hospital = await db.organization.create({
-    data: {
-      name: 'โรงพยาบาลสาธิต AI Physio (Demo Hospital)',
-      type: 'HOSPITAL',
-      address: 'กลุ่มงานเวชศาสตร์ฟื้นฟู 123 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพมหานคร 10000',
-      phone: '02-000-0000',
-    },
-  });
-  const clinic = await db.organization.create({
-    data: {
-      name: 'คลินิกกายภาพบำบัดสาธิต (Demo PT Clinic)',
-      type: 'CLINIC',
-      address: '45 ถนนตัวอย่าง ตำบลตัวอย่าง อำเภอเมือง จังหวัดตัวอย่าง 50000',
-      phone: '02-000-0001',
-    },
-  });
-
-  // ─── Users ────────────────────────────────────────────────────────
-  const password = process.env.SEED_DEMO_PASSWORD || 'physio-demo-2026';
-  const passwordHash = await hashPassword(password);
-
-  await db.user.create({
-    data: { email: 'admin@demo.aiphysio.local', name: 'ผู้ดูแลระบบ', role: 'ADMIN', passwordHash },
-  });
-
-  const doctor = await db.clinician.create({
-    data: {
-      title: 'DOCTOR',
-      specialty: 'Orthopaedics',
-      licenseNumber: 'DEMO-MD-001',
-      organization: { connect: { id: hospital.id } },
-      user: { create: { email: 'doctor@demo.aiphysio.local', name: 'นพ.ประเสริฐ ตัวอย่าง', role: 'CLINICIAN', passwordHash } },
-    },
-  });
-  const physio = await db.clinician.create({
-    data: {
-      title: 'PHYSIOTHERAPIST',
-      specialty: 'Musculoskeletal physiotherapy',
-      licenseNumber: 'DEMO-PT-001',
-      organization: { connect: { id: hospital.id } },
-      user: { create: { email: 'pt@demo.aiphysio.local', name: 'กภ.สุดา ตัวอย่าง', role: 'CLINICIAN', passwordHash } },
-    },
-  });
-  await db.clinician.create({
-    data: {
-      title: 'PHYSIOTHERAPIST',
-      licenseNumber: 'DEMO-PT-002',
-      organization: { connect: { id: clinic.id } },
-      user: { create: { email: 'pt2@demo.aiphysio.local', name: 'กภ.อนันต์ ตัวอย่าง', role: 'CLINICIAN', passwordHash } },
-    },
-  });
-
-  const patientSeeds = [
-    { hn: '69-00001', email: 'patient1@demo.aiphysio.local', name: 'คุณสมชาย ใจดี', dob: '1971-03-15', gender: 'MALE', condition: 'ปวดเข่าเรื้อรัง OA Grade 2' },
-    { hn: '69-00002', email: 'patient2@demo.aiphysio.local', name: 'คุณสมหญิง รักเรียน', dob: '1984-07-02', gender: 'FEMALE', condition: 'บาดเจ็บไหล่ซ้าย rotator cuff' },
-    { hn: '69-00003', email: 'patient3@demo.aiphysio.local', name: 'คุณวิชัย กล้าหาญ', dob: '1966-11-20', gender: 'MALE', condition: 'ท่าเดินผิดปกติ หลังผ่าตัดเข่า' },
-  ] as const;
-
-  const patients: Patient[] = [];
-  for (const p of patientSeeds) {
-    patients.push(
-      await db.patient.create({
-        data: {
-          name: p.name,
-          hn: p.hn,
-          dateOfBirth: new Date(p.dob),
-          gender: p.gender,
-          condition: p.condition,
-          organization: { connect: { id: hospital.id } },
-          user: { create: { email: p.email, name: p.name, role: 'PATIENT', passwordHash } },
-        },
-      })
-    );
-  }
-  const [somchai, somying, wichai] = patients;
-
-  // ─── Care team ────────────────────────────────────────────────────
-  await db.careAssignment.createMany({
-    data: [
-      { patientId: somchai.id, clinicianId: doctor.id, role: 'PRIMARY' },
-      { patientId: somying.id, clinicianId: physio.id, role: 'PRIMARY' },
-      { patientId: wichai.id, clinicianId: doctor.id, role: 'PRIMARY' },
-      { patientId: wichai.id, clinicianId: physio.id, role: 'SUPPORTING' },
-    ],
-  });
-
-  // ─── Prescriptions (published exercises only) ─────────────────────
   const item = (slug: string, sets: number, reps: number, rest: number, daysOfWeek: number[] = [], sortOrder = 0) => {
     if (!exerciseIds[slug]) throw new Error(`Unknown exercise ${slug}`);
     return { exerciseId: exerciseIds[slug], sets, repsPerSet: reps, restSeconds: rest, daysOfWeek, sortOrder };
   };
 
-  await db.prescription.create({
+  // ─── School ───────────────────────────────────────────────────────
+  const school = await db.organization.create({
     data: {
-      title: 'โปรแกรมฟื้นฟูเข่า OA ระยะที่ 1',
-      notes: 'ทำทุกวัน หยุดถ้าปวดเกินระดับ 5/10',
-      startDate: dateOnly(addDays(localDateString(), -DEMO_SCENARIOS.newPatient.daysBack - 1)),
-      patient: { connect: { id: somchai.id } },
-      clinician: { connect: { id: doctor.id } },
-      items: {
-        create: [
-          item('ex_seated_heel_slides', 3, 15, 30, [], 0),
-          item('ex_wall_squat', 2, 8, 45, [], 1),
-          item('ex_squat', 2, 8, 45, [2, 4, 6], 2),
-        ],
-      },
+      name: 'โรงเรียนสาธิตยืดยืด (Demo School)',
+      type: 'SCHOOL',
+      address: '123 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพมหานคร 10000',
+      phone: '02-000-0000',
     },
   });
 
-  await db.prescription.create({
-    data: {
-      title: 'โปรแกรมเพิ่มองศาการเคลื่อนไหวไหล่',
-      startDate: dateOnly(addDays(localDateString(), -DEMO_SCENARIOS.plateau.daysBack)),
-      patient: { connect: { id: somying.id } },
-      clinician: { connect: { id: physio.id } },
-      items: {
-        create: [
-          item('ex_cross_body_shoulder_stretch', 2, 5, 20, [1, 3, 5], 0),
-          item('ex_shoulder_abduction', 3, 10, 30, [1, 3, 5], 1),
-          item('ex_arm_circles', 2, 10, 30, [], 2),
-        ],
-      },
-    },
+  // ─── Adults ───────────────────────────────────────────────────────
+  // Adult profiles are Clinician rows (expert / teacher / parent), see schema.prisma
+  const password = process.env.SEED_DEMO_PASSWORD || 'physio-demo-2026';
+  const passwordHash = await hashPassword(password);
+  const pinHash = await hashPassword(DEMO_ADULT_PIN);
+
+  await db.user.create({
+    data: { email: 'admin@demo.aiphysio.local', name: 'ผู้ดูแลระบบ', role: 'ADMIN', passwordHash },
   });
 
-  // Post-op patient: wall squat depth limited by the doctor (override)
-  await db.prescription.create({
-    data: {
-      title: 'ฟื้นฟูหลังผ่าตัดเข่า — สัปดาห์ที่ 2–4',
-      notes: 'จำกัดการงอเข่าไม่เกิน 90° ในช่วงนี้',
-      startDate: dateOnly(addDays(localDateString(), -DEMO_SCENARIOS.improving.daysBack)),
-      patient: { connect: { id: wichai.id } },
-      clinician: { connect: { id: doctor.id } },
-      items: {
-        create: [
-          {
-            ...item('ex_wall_squat', 2, 10, 45, [], 0),
-            targetOverrides: {
-              create: [
-                { joint: 'left_knee', idealAngle: 100, minAngle: 90, maxAngle: 110 },
-                { joint: 'right_knee', idealAngle: 100, minAngle: 90, maxAngle: 110 },
-              ],
-            },
-          },
-          item('ex_seated_heel_slides', 3, 15, 30, [], 1),
-        ],
+  const adult = (
+    email: string,
+    name: string,
+    role: 'CLINICIAN' | 'TEACHER' | 'PARENT',
+    title: 'PHYSIOTHERAPIST' | 'TEACHER' | 'PARENT',
+    extra: { licenseNumber?: string; specialty?: string; pin?: boolean } = {}
+  ) =>
+    db.clinician.create({
+      data: {
+        title,
+        licenseNumber: extra.licenseNumber ?? null,
+        specialty: extra.specialty ?? null,
+        organization: { connect: { id: school.id } },
+        user: { create: { email, name, role, passwordHash, adultPinHash: extra.pin ? pinHash : null } },
       },
-    },
+    });
+
+  const expert = await adult('pt@demo.aiphysio.local', 'อ.กภ.สุดา ใจดี', 'CLINICIAN', 'PHYSIOTHERAPIST', {
+    licenseNumber: 'DEMO-PT-001',
+    specialty: 'กายภาพบำบัดเด็ก',
+  });
+  const teacher1 = await adult('teacher1@demo.aiphysio.local', 'ครูมาลี สอนดี', 'TEACHER', 'TEACHER', { pin: true });
+  const teacher2 = await adult('teacher2@demo.aiphysio.local', 'ครูวิทย์ ใฝ่รู้', 'TEACHER', 'TEACHER', { pin: true });
+  const parent1 = await adult('parent1@demo.aiphysio.local', 'คุณแม่น้ำฝน รักลูก', 'PARENT', 'PARENT', { pin: true });
+  const parent2 = await adult('parent2@demo.aiphysio.local', 'คุณพ่อสมศักดิ์ ใจเย็น', 'PARENT', 'PARENT', { pin: true });
+  const parent3 = await adult('parent3@demo.aiphysio.local', 'คุณแม่พิมพ์ใจ ยิ้มแย้ม', 'PARENT', 'PARENT');
+
+  // ─── Classes, class mission sets and kids ─────────────────────────
+  const class1 = await db.classroom.create({
+    data: { name: 'ป.3/1', gradeLabel: 'ประถมศึกษาปีที่ 3', organizationId: school.id, teacherId: teacher1.id },
+  });
+  const class2 = await db.classroom.create({
+    data: { name: 'ป.5/2', gradeLabel: 'ประถมศึกษาปีที่ 5', organizationId: school.id, teacherId: teacher2.id },
   });
 
-  // ─── Simulated history (demo only) ─────────────────────────────────
-  await seedDemoHistory({ patientId: wichai.id, slug: 'ex_wall_squat', scenario: DEMO_SCENARIOS.improving, reviewerId: doctor.id });
-  await seedDemoHistory({ patientId: somying.id, slug: 'ex_shoulder_abduction', scenario: DEMO_SCENARIOS.plateau, reviewerId: physio.id });
-  await seedDemoHistory({ patientId: somchai.id, slug: 'ex_wall_squat', scenario: DEMO_SCENARIOS.newPatient, reviewerId: doctor.id });
-  for (const p of [somchai, somying, wichai]) {
-    await db.patient.update({
-      where: { id: p.id },
-      data: { clinicalNotes: `${DEMO_NOTE}: ประวัติการฝึกย้อนหลังสร้างขึ้นเพื่อสาธิตการประมาณการระยะฟื้นตัว` },
+  // Class sets use PUBLISHED exercises only: drafts never become quests.
+  // Kids first, then the class sets (assignToClassroom gives every member a copy)
+  const kids: Record<string, Patient> = {};
+  for (const k of DEMO_KIDS) {
+    const classroom = k.classroom === 1 ? class1 : class2;
+    const card = await createKidInClassroom(db, classroom, { name: k.name, nickname: k.nickname, avatar: k.avatar, pictures: [...k.pictures] });
+    kids[k.nickname] = await db.patient.update({
+      where: { id: card.id },
+      data: { kidCode: k.kidCode, parentLinkCode: k.parentLinkCode, dateOfBirth: new Date(k.dob), gender: k.gender },
     });
   }
 
+  const startDate = addDays(localDateString(), -DEMO_SCENARIOS.improving.daysBack - 1);
+  const planItem = (slug: string, sets: number, reps: number, daysOfWeek: number[] = []) => item(slug, sets, reps, 20, daysOfWeek);
+  await assignToClassroom(db, class1, {
+    title: 'ยืดเหยียดยามเช้า',
+    notes: 'ทำก่อนเข้าแถวหรือหลังพักกลางวัน',
+    startDate,
+    endDate: null,
+    items: [planItem('ex_arm_circles', 2, 8), planItem('ex_shoulder_abduction', 2, 6, [1, 3, 5]), planItem('ex_cross_body_shoulder_stretch', 1, 3, [2, 4])],
+  });
+  await assignToClassroom(db, class2, {
+    title: 'ขาแข็งแรง หลังตรง',
+    notes: 'เน้นหลังตรงทุกท่า',
+    startDate,
+    endDate: null,
+    items: [planItem('ex_squat', 2, 8), planItem('ex_wall_squat', 1, 3), planItem('ex_arm_circles', 2, 8, [1, 3, 5])],
+  });
+
+  // Parents (parent1 has two children in different classes)
+  const guardians: [string, string][] = [
+    [parent1.id, 'มะลิ'],
+    [parent1.id, 'ต้นกล้า'],
+    [parent2.id, 'ภูผา'],
+    [parent3.id, 'ใบเตย'],
+  ];
+  await db.careAssignment.createMany({
+    data: guardians.map(([clinicianId, nick]) => ({ clinicianId, patientId: kids[nick].id, role: 'GUARDIAN' as const })),
+  });
+  // The expert advises both classes
+  await db.careAssignment.createMany({
+    data: Object.values(kids).map((k) => ({ clinicianId: expert.id, patientId: k.id, role: 'SUPPORTING' as const })),
+  });
+
+  // Consent: parents accepted for most kids; one has school paper consent only; one has none yet
+  const consentAt = new Date(Date.now() - 45 * 86_400_000);
+  for (const nick of ['มะลิ', 'ต้นกล้า', 'ภูผา', 'ใบเตย']) {
+    await db.patient.update({ where: { id: kids[nick].id }, data: { consentVersion: TERMS_VERSION, consentAt } });
+  }
+  await db.patient.update({ where: { id: kids['มะลิ'].id }, data: { videoConsentAt: consentAt, videoConsentVersion: VIDEO_CONSENT_VERSION } });
+  await db.patient.update({ where: { id: kids['ข้าวหอม'].id }, data: { schoolConsentAt: consentAt } });
+  // 'ปุยฝ้าย' has no consent yet: the teacher screen shows "waiting for a parent"
+
+  // ─── Simulated history (demo only) ─────────────────────────────────
+  await seedDemoHistory({ patientId: kids['มะลิ'].id, slug: 'ex_arm_circles', scenario: DEMO_SCENARIOS.improving, reviewerId: expert.id });
+  await seedDemoHistory({ patientId: kids['ต้นกล้า'].id, slug: 'ex_squat', scenario: DEMO_SCENARIOS.plateau, reviewerId: expert.id });
+  await seedDemoHistory({ patientId: kids['ภูผา'].id, slug: 'ex_squat', scenario: DEMO_SCENARIOS.improving, reviewerId: expert.id });
+  await seedDemoHistory({ patientId: kids['ข้าวหอม'].id, slug: 'ex_arm_circles', scenario: DEMO_SCENARIOS.newPatient, reviewerId: expert.id });
+  for (const k of Object.values(kids)) {
+    await db.patient.update({ where: { id: k.id }, data: { clinicalNotes: `${DEMO_NOTE}: ประวัติการเล่นย้อนหลังสร้างขึ้นเพื่อสาธิต` } });
+  }
+
   // ─── Simulated reference cohort (population model demo) ─────────────
-  // Discharged patients (archived, so hidden from every patient list) whose
-  // measured progress the population model compares current patients with.
+  // Earlier children (archived, so hidden from every list) whose measured
+  // progress the population model compares current children with.
   const REFERENCE_COHORT = [
-    { kind: 'knee' as const, slug: 'ex_wall_squat', count: 8, clinicianId: doctor.id },
-    { kind: 'shoulder' as const, slug: 'ex_shoulder_abduction', count: 6, clinicianId: physio.id },
+    { kind: 'knee' as const, slug: 'ex_wall_squat', count: 8, clinicianId: teacher1.id },
+    { kind: 'shoulder' as const, slug: 'ex_shoulder_abduction', count: 6, clinicianId: teacher1.id },
   ];
   for (const group of REFERENCE_COHORT) {
     for (let i = 0; i < group.count; i++) {
@@ -469,12 +434,12 @@ async function main() {
       const finalDeficit = scenario.deficit(scenario.daysBack - (scenario.endDaysAgo ?? 1));
       const ref = await db.patient.create({
         data: {
-          name: `ผู้ป่วยจำลอง (อ้างอิง) ${code}`,
+          name: `เด็กจำลอง (อ้างอิง) ${code}`,
           hn: `SIM-${code}`,
           gender: i % 2 ? 'FEMALE' : 'MALE',
-          dateOfBirth: new Date(Date.UTC(1950 + ((i * 7) % 40), i % 12, 1)),
-          organization: { connect: { id: hospital.id } },
-          clinicalNotes: `${DEMO_NOTE}: ผู้ป่วยอ้างอิงสำหรับแบบจำลองประชากร`,
+          dateOfBirth: new Date(Date.UTC(2014 + (i % 5), i % 12, 1)),
+          organization: { connect: { id: school.id } },
+          clinicalNotes: `${DEMO_NOTE}: เด็กอ้างอิงสำหรับแบบจำลองประชากร`,
           archivedAt: new Date(Date.now() - ((scenario.endDaysAgo ?? 1) - 1) * 86_400_000),
         },
       });
@@ -491,7 +456,7 @@ async function main() {
           items: { create: [item(group.slug, 2, 10, 30, scenario.daysOfWeek)] },
         },
       });
-      await seedDemoHistory({ patientId: ref.id, slug: group.slug, scenario, reviewerId: group.clinicianId });
+      await seedDemoHistory({ patientId: ref.id, slug: group.slug, scenario, reviewerId: expert.id });
     }
   }
 
@@ -500,12 +465,13 @@ async function main() {
     db.exercise.count({ where: { status: 'PUBLISHED' } }),
     db.exercise.count({ where: { status: 'DRAFT' } }),
   ]);
-  console.log(`Seeded: 2 organizations, 3 clinicians, 3 patients, ${Object.keys(SOURCES).length} sources`);
-  console.log(`Simulated reference cohort: ${REFERENCE_COHORT.reduce((n, g) => n + g.count, 0)} archived patients (population model)`);
+  console.log(`Seeded: 1 school, 1 expert, 2 teachers, 3 parents, 2 classes, ${DEMO_KIDS.length} kids, ${Object.keys(SOURCES).length} sources`);
+  console.log(`Simulated reference cohort: ${REFERENCE_COHORT.reduce((n, g) => n + g.count, 0)} archived children (population model)`);
   console.log(`Exercises: ${published} published, ${draft} draft (see statusNote)`);
   console.log(`Simulated history: ${await db.exerciseSession.count({ where: { notes: DEMO_NOTE } })} sessions (marked "${DEMO_NOTE}")`);
-  console.log(`Demo password for all accounts: ${password}`);
-  console.log('Accounts: admin@ / doctor@ / pt@ / pt2@ / patient1@ / patient2@ / patient3@ demo.aiphysio.local');
+  console.log(`Demo password for adult accounts: ${password} · adult PIN: ${DEMO_ADULT_PIN}`);
+  console.log('Adults: pt@ (expert) / teacher1@ / teacher2@ / parent1@ / parent2@ / parent3@ demo.aiphysio.local');
+  console.log(`Kids: ${DEMO_KIDS.map((k) => `${k.nickname} ${k.kidCode} [${k.pictures.join(' ')}]`).join(' · ')}`);
 }
 
 // ─── Simulated training history (prisma/demo-history.ts) ──────────────

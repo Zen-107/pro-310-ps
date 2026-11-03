@@ -8,6 +8,7 @@ import { badRequest, jsonError, optionalString, readJson, serverError } from '@/
 import { dateOnly, isValidDay } from '@/lib/dates';
 import { hashPassword } from '@/lib/password';
 import { buildPatientSummaries } from '@/lib/patient-summary';
+import { ADULTS, ASSIGNERS } from '@/lib/roles';
 
 const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER', 'UNSPECIFIED'];
 const HN_PATTERN = /^[A-Za-z0-9\-\/]{1,30}$/;
@@ -24,7 +25,7 @@ async function nextHn(organizationId: string): Promise<string> {
 
 // Care-team patients of the signed-in clinician
 export async function GET() {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ADULTS);
   if ('response' in auth) return auth.response;
   try {
     const patients = await db.patient.findMany({ where: patientScope(auth.user), orderBy: { createdAt: 'desc' } });
@@ -37,7 +38,7 @@ export async function GET() {
 // Register a patient in the clinician's organization (clinician becomes PRIMARY).
 // With `email`, a login is created and a one-time temporary password returned.
 export async function POST(req: Request) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ASSIGNERS);
   if ('response' in auth) return auth.response;
   const body = await readJson(req);
   if (!body) return badRequest('Invalid JSON body');

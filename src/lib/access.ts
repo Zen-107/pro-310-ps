@@ -1,16 +1,18 @@
 import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth-guard';
+import { isAdult } from '@/lib/roles';
 
 // Data scoping rules:
-//  - PATIENT sees only their own records
-//  - CLINICIAN sees patients they have a CareAssignment with (care team)
+//  - PATIENT (child) sees only their own records
+//  - adults (expert, teacher, parent) see children they have a CareAssignment
+//    with: teachers via their class, parents via the link code, experts as assigned
 // Callers return 404 (not 403) for records outside scope, so IDs don't leak.
 
 /** Prisma filter for the patients a user may see (non-archived). */
 export function patientScope(user: SessionUser): Prisma.PatientWhereInput {
   if (user.role === 'PATIENT') return { id: user.patientId ?? '__none__', archivedAt: null };
-  if (user.role === 'CLINICIAN' && user.clinicianId) {
+  if (isAdult(user.role) && user.clinicianId) {
     return { archivedAt: null, careAssignments: { some: { clinicianId: user.clinicianId } } };
   }
   return { id: '__none__' };

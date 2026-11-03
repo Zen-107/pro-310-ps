@@ -5,6 +5,7 @@ import { canAccessPatient } from '@/lib/access';
 import { badRequest, notFound, readJson, serverError } from '@/lib/api-utils';
 import { graphemes, sanitizeText } from '@/lib/text-safe';
 import { MAX_MESSAGE_LENGTH, markThreadRead, messageDTO, senderSelect } from '@/lib/messages';
+import { ADULTS } from '@/lib/roles';
 
 function threadPatientId(user: SessionUser, requested: string | null | undefined) {
   return user.role === 'PATIENT' ? user.patientId : requested ?? null;
@@ -14,7 +15,7 @@ function threadPatientId(user: SessionUser, requested: string | null | undefined
 // clinicians pass ?patientId (care team only). ?after=ISO returns only newer
 // messages (for polling). Reading marks the thread as read for the caller.
 export async function GET(req: NextRequest) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ADULTS);
   if ('response' in auth) return auth.response;
   const patientId = threadPatientId(auth.user, req.nextUrl.searchParams.get('patientId'));
   if (!patientId) return badRequest('patientId is required');
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
 
 // Send a message to a patient's care-team thread. Body: { patientId?, body }.
 export async function POST(req: Request) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ADULTS);
   if ('response' in auth) return auth.response;
   const input = await readJson(req);
   if (!input) return badRequest('Invalid JSON body');

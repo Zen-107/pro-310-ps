@@ -5,6 +5,7 @@ import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope } from '@/lib/access';
 import { badRequest, notFound, readJson, serverError } from '@/lib/api-utils';
 import { prescriptionDTO, prescriptionInclude, validateItemInput } from '@/lib/prescriptions';
+import { ASSIGNERS } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string; itemId: string }> };
 
@@ -14,7 +15,7 @@ async function findItem(userScope: Prisma.PatientWhereInput, id: string, itemId:
 
 // Update dose / schedule / notes; `targetOverrides` (if given) replaces all overrides
 export async function PATCH(req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ASSIGNERS);
   if ('response' in auth) return auth.response;
   const { id, itemId } = await params;
   const body = await readJson(req);
@@ -48,7 +49,7 @@ export async function PATCH(req: Request, { params }: Params) {
 // Remove an exercise from the prescription. Past sessions are kept
 // (their quest link is cleared); future quests for it stop being generated.
 export async function DELETE(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ASSIGNERS);
   if ('response' in auth) return auth.response;
   const { id, itemId } = await params;
   try {

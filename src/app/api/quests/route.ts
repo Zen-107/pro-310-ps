@@ -5,11 +5,12 @@ import { canAccessPatient } from '@/lib/access';
 import { badRequest, notFound, serverError } from '@/lib/api-utils';
 import { addDays, dateOnly, dateOnlyString, localDateString } from '@/lib/dates';
 import { ensureQuestsForDay } from '@/lib/quests';
+import { ANYONE_WITH_CHILD } from '@/lib/roles';
 
 // Quest history / adherence for the last ?days (default 14, max 90).
 // Patients get their own; clinicians pass ?patientId.
 export async function GET(req: NextRequest) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
 
   const patientId = auth.user.role === 'PATIENT' ? auth.user.patientId : req.nextUrl.searchParams.get('patientId');

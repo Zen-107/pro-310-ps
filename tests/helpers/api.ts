@@ -6,10 +6,13 @@ export interface TestUser {
   id: string;
   name: string;
   email: string;
-  role: 'CLINICIAN' | 'PATIENT' | 'ADMIN';
+  role: 'CLINICIAN' | 'PATIENT' | 'ADMIN' | 'TEACHER' | 'PARENT';
   clinicianId: string | null;
   patientId: string | null;
   organizationId: string | null;
+  /** Kid mode: the adult who switched to this child */
+  returnUserId?: string | null;
+  returnName?: string | null;
 }
 
 const g = globalThis as { __testSession?: unknown; __integrationPreloaded?: boolean };

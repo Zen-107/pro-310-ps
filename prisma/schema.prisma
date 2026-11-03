@@ -1,5 +1,12 @@
-// AI Physio — PostgreSQL schema
-// Hierarchy: Organization → Clinician (doctor/PT) ↔ Patient → Prescription → Quest → ExerciseSession
+// AI Physio Kids — PostgreSQL schema
+// Hierarchy: Organization (school) → Clinician (adult profile) ↔ Patient (child) → Prescription → Quest → ExerciseSession
+//
+// Kids branch naming (tables kept so the camera/session pipeline is unchanged):
+//   Patient       = a child (role PATIENT)
+//   Clinician     = an adult profile: expert (CLINICIAN), teacher (TEACHER) or parent (PARENT)
+//   CareAssignment links an adult to a child; it is what scopes every read (src/lib/access.ts)
+//   Prescription  = a mission set; only teachers create them (per child, or per class via classroomId)
+//   Classroom     = a teacher's class; joining one adds the teacher to the child's CareAssignments
 // Migrations: `bun run db:migrate` (dev) / `bun run db:migrate:deploy` (production)
 
 generator client {
@@ -18,17 +25,23 @@ datasource db {
 enum OrgType {
   HOSPITAL
   CLINIC
+  SCHOOL
 }
 
+// CLINICIAN = physio expert, PATIENT = child
 enum UserRole {
   ADMIN
   CLINICIAN
   PATIENT
+  TEACHER
+  PARENT
 }
 
 enum ClinicianTitle {
   DOCTOR
   PHYSIOTHERAPIST
+  TEACHER
+  PARENT
 }
 
 enum Gender {
@@ -41,6 +54,8 @@ enum Gender {
 enum CareRole {
   PRIMARY
   SUPPORTING
+  GUARDIAN // parent
+  TEACHER // class teacher
 }
 
 enum ExerciseCategory {
@@ -188,6 +203,7 @@ model Organization {
 
   clinicians Clinician[]
   patients   Patient[]
+  classrooms Classroom[]
 
   @@map("organizations")
 }
@@ -204,6 +220,8 @@ model User {
   // Terms of use / PDPA consent accepted in the entry popup (see lib/terms.ts)
   termsVersion    String?
   termsAcceptedAt DateTime?
+  // Adults: 4-digit PIN needed to leave kid mode after "play as child"
+  adultPinHash    String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -232,6 +250,7 @@ model Clinician {
   reviews            SessionReview[]
   verifiedSources    ExerciseSource[]
   prescribedSessions ExerciseSession[]
+  classrooms         Classroom[]
 
   @@index([organizationId])
   @@map("clinicians")
@@ -255,6 +274,17 @@ model Patient {
   videoConsentVersion String?
   videoConsentAt      DateTime?
   archivedAt          DateTime? // medical records are archived, never hard-deleted
+  // Kids login (src/lib/kid-login.ts): short code + 3 pictures in order
+  nickname            String?
+  avatar              String? // mascot colour key (src/lib/kids.ts AVATARS)
+  kidCode             String?   @unique
+  picturePinHash      String?
+  pinFailCount        Int       @default(0)
+  pinLockedUntil      DateTime?
+  // A parent types this code to link to the child (then GUARDIAN CareAssignment)
+  parentLinkCode      String?   @unique
+  // Paper consent from home received by the school (instead of a parent's online consent)
+  schoolConsentAt     DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -266,6 +296,7 @@ model Patient {
   sessions        ExerciseSession[]
   messages        CareMessage[]
   threadReads     CareThreadRead[]
+  classrooms      ClassroomMember[]
 
   @@unique([organizationId, hn])
   @@index([organizationId])
@@ -284,6 +315,39 @@ model CareAssignment {
   @@id([patientId, clinicianId])
   @@index([clinicianId])
   @@map("care_assignments")
+}
+
+// A teacher's class. Adding a child adds the teacher to the child's care team.
+model Classroom {
+  id             String    @id @default(cuid())
+  organizationId String
+  teacherId      String // Clinician profile with title TEACHER
+  name           String // e.g. "ป.3/2"
+  gradeLabel     String?
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization  Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  teacher       Clinician         @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  members       ClassroomMember[]
+  prescriptions Prescription[]
+
+  @@index([teacherId])
+  @@map("classrooms")
+}
+
+model ClassroomMember {
+  classroomId String
+  patientId   String
+  joinedAt    DateTime @default(now())
+
+  classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@id([classroomId, patientId])
+  @@index([patientId])
+  @@map("classroom_members")
 }
 
 // ─── Exercise library & citations ───────────────────────────────────
@@ -407,6 +471,7 @@ model Prescription {
   id          String               @id @default(cuid())
   patientId   String
   clinicianId String
+  classroomId String? // set when a teacher assigned the set to the whole class
   title       String
   notes       String?
   startDate   DateTime             @db.Date
@@ -420,10 +485,12 @@ model Prescription {
 
   patient   Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
   clinician Clinician          @relation(fields: [clinicianId], references: [id], onDelete: Restrict)
+  classroom Classroom?         @relation(fields: [classroomId], references: [id], onDelete: SetNull)
   items     PrescriptionItem[]
   sessions  ExerciseSession[]
 
   @@index([patientId, status])
+  @@index([classroomId])
   @@index([clinicianId])
   @@map("prescriptions")
 }

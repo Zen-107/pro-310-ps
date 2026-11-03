@@ -51,6 +51,9 @@ export async function resetAndSeed() {
       data: {
         name: `Patient ${hn}`,
         hn,
+        // A child plays under a parent's consent for them (not the child's own acceptance)
+        consentVersion: TERMS_VERSION,
+        consentAt: new Date(),
         organization: { connect: { id: org.id } },
         user: { create: { email, name: `Patient ${hn}`, role: 'PATIENT', passwordHash: 'x', termsVersion: TERMS_VERSION, termsAcceptedAt: new Date() } },
       },

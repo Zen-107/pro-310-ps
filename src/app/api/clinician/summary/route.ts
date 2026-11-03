@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
+import { STAFF } from '@/lib/roles';
 import { patientScope, sessionScope } from '@/lib/access';
 import { serverError } from '@/lib/api-utils';
 import { safeTruncate } from '@/lib/text-safe';
@@ -14,7 +15,7 @@ import { predictPatients } from '@/lib/predictive';
 const RED_FLAG_WINDOW_DAYS = 7;
 
 export async function GET() {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(STAFF);
   if ('response' in auth) return auth.response;
 
   const todayStart = new Date();

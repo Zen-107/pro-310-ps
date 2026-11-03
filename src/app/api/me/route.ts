@@ -16,6 +16,7 @@ export async function GET() {
         name: true,
         role: true,
         lastLoginAt: true,
+        adultPinHash: true,
         clinician: {
           select: { id: true, title: true, specialty: true, organization: { select: { id: true, name: true, type: true } } },
         },
@@ -25,7 +26,8 @@ export async function GET() {
             name: true,
             dateOfBirth: true,
             gender: true,
-            condition: true,
+            nickname: true,
+            avatar: true,
             consentAt: true,
             organization: { select: { id: true, name: true, type: true } },
           },
@@ -33,7 +35,9 @@ export async function GET() {
       },
     });
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    return NextResponse.json(user);
+    const { adultPinHash, ...rest } = user;
+    // Kid mode: who switched to this child (leaving needs their PIN)
+    return NextResponse.json({ ...rest, hasPin: !!adultPinHash, returnName: auth.user.returnName });
   } catch (error) {
     console.error('Me GET error:', error);
     return NextResponse.json({ error: 'Failed to load profile' }, { status: 500 });

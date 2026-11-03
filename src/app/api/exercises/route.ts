@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { BodyPart, Difficulty, ExerciseCategory, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
+import { ANYONE_WITH_CHILD } from '@/lib/roles';
 import { serverError } from '@/lib/api-utils';
 import { exerciseDTO, exerciseInclude } from '@/lib/presenters';
 
@@ -13,7 +14,7 @@ const DIFFICULTIES: Difficulty[] = ['beginner', 'intermediate', 'advanced'];
 // Clinicians see the full library; patients see only the exercises in their
 // active prescriptions (no free choice of exercises).
 export async function GET(req: NextRequest) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
 
   const params = req.nextUrl.searchParams;

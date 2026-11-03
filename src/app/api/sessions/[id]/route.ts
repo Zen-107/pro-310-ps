@@ -7,12 +7,13 @@ import { badRequest, isFiniteNumber, isIntInRange, jsonError, notFound, optional
 import { JOINT_FORMULAS } from '@/lib/joint-formulas';
 import { sessionDTO } from '@/lib/presenters';
 import { snapshotSide } from '@/lib/exercises-data';
+import { ANYONE_WITH_CHILD } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 
 // Full session: metrics, target snapshot (incl. formulas), reps, joint logs, review
 export async function GET(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {

@@ -14,6 +14,7 @@ import {
   baseMimeType,
   videoPath,
 } from '@/lib/video-storage';
+import { ANYONE_WITH_CHILD } from '@/lib/roles';
 
 // Node's web-stream type and the DOM ReadableStream are the same object at
 // runtime but distinct types (they clash when Bun's types are loaded)
@@ -111,7 +112,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 // Stream the session video (care team or owning patient). Supports Range
 // requests so the browser can seek. ?meta=1 returns metadata only.
 export async function GET(req: NextRequest, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
   const { id } = await params;
 

@@ -6,6 +6,9 @@ interface AppAuthFields {
   clinicianId: string | null;
   patientId: string | null;
   organizationId: string | null;
+  /** Adult who switched to this child ("play as …"); leaving kid mode returns to them */
+  returnUserId: string | null;
+  returnName: string | null;
 }
 
 declare module 'next-auth' {
@@ -28,5 +31,7 @@ declare module 'next-auth/jwt' {
     clinicianId: AppAuthFields['clinicianId'];
     patientId: AppAuthFields['patientId'];
     organizationId: AppAuthFields['organizationId'];
+    returnUserId?: AppAuthFields['returnUserId'];
+    returnName?: AppAuthFields['returnName'];
   }
 }

@@ -4,11 +4,12 @@ import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope } from '@/lib/access';
 import { serverError } from '@/lib/api-utils';
 import { safeTruncate } from '@/lib/text-safe';
+import { ADULTS } from '@/lib/roles';
 
 // Threads visible to the caller with last message and unread count
 // (clinician: every care-team patient; patient: their own thread).
 export async function GET() {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ADULTS);
   if ('response' in auth) return auth.response;
   const me = auth.user.id;
 

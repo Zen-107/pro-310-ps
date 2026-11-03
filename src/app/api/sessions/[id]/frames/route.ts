@@ -12,6 +12,7 @@ import {
   isReplayFrame,
   type ReplayFrame,
 } from '@/lib/replay';
+import { ANYONE_WITH_CHILD } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -56,7 +57,7 @@ export async function POST(req: Request, { params }: Params) {
 
 // All recorded frames of a session, in time order (care team or owning patient)
 export async function GET(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
   const { id } = await params;
 

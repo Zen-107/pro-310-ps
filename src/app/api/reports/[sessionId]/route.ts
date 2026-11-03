@@ -7,6 +7,7 @@ import { ANGLE_DEFINITION, JOINT_FORMULAS } from '@/lib/joint-formulas';
 import { summarizeSession } from '@/lib/ai-agent';
 import { displayText, GENDER_LABEL_TH, TEXT_LIMITS, type TargetDTO } from '@/lib/presenters';
 import { ageFromDob } from '@/lib/dates';
+import { ANYONE_WITH_CHILD, STAFF, isStaff } from '@/lib/roles';
 
 type Params = { params: Promise<{ sessionId: string }> };
 
@@ -170,13 +171,13 @@ function buildReport(s: LoadedSession, isClinician: boolean) {
 }
 
 export async function GET(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
   const { sessionId } = await params;
   try {
     const s = await loadSession(auth.user, sessionId);
     if (!s) return notFound('Session not found');
-    return NextResponse.json(buildReport(s, auth.user.role === 'CLINICIAN'));
+    return NextResponse.json(buildReport(s, isStaff(auth.user.role)));
   } catch (error) {
     return serverError('Report GET error', error);
   }
@@ -184,7 +185,7 @@ export async function GET(_req: Request, { params }: Params) {
 
 // Generate and store an AI clinical summary (Reporter agent), care-team clinician
 export async function POST(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(STAFF);
   if ('response' in auth) return auth.response;
   const { sessionId } = await params;
 

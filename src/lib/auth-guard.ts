@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import type { UserRole } from '@prisma/client';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { hasAcceptedTerms } from '@/lib/terms';
+import { childHasConsent, hasAcceptedTerms } from '@/lib/terms';
 
 export type SessionUser = Session['user'];
 
@@ -13,9 +13,17 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   return session?.user ?? null;
 }
 
-/** true when the user accepted the current terms of use / PDPA consent */
+/**
+ * true when the user may use the app under the current terms: adults accepted
+ * them themselves; a child is covered by a parent's consent or the school's
+ * paper consent (children never see the popup).
+ */
 export async function userAcceptedTerms(userId: string): Promise<boolean> {
-  const u = await db.user.findUnique({ where: { id: userId }, select: { termsVersion: true } });
+  const u = await db.user.findUnique({
+    where: { id: userId },
+    select: { role: true, termsVersion: true, patient: { select: { consentVersion: true, schoolConsentAt: true } } },
+  });
+  if (u?.role === 'PATIENT') return childHasConsent(u.patient);
   return hasAcceptedTerms(u);
 }
 

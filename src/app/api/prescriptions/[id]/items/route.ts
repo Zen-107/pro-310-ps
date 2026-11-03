@@ -4,12 +4,13 @@ import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope } from '@/lib/access';
 import { badRequest, notFound, readJson, serverError } from '@/lib/api-utils';
 import { prescriptionDTO, prescriptionInclude, validateItemInput } from '@/lib/prescriptions';
+import { ASSIGNERS } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 
 // Add an exercise (quest template) to a prescription; returns the full prescription
 export async function POST(req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ASSIGNERS);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   const body = await readJson(req);

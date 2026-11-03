@@ -6,12 +6,13 @@ import { canAccessPatient } from '@/lib/access';
 import { badRequest, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
 import { dateOnly, isValidDay, localDateString } from '@/lib/dates';
 import { prescriptionDTO, prescriptionInclude, validateItemInput, type ItemInput } from '@/lib/prescriptions';
+import { ANYONE_WITH_CHILD, ASSIGNERS } from '@/lib/roles';
 
 const STATUSES: PrescriptionStatus[] = ['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'];
 
 // Prescriptions of a patient. Patients get their own; clinicians pass ?patientId.
 export async function GET(req: NextRequest) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
 
   const patientId = auth.user.role === 'PATIENT' ? auth.user.patientId : req.nextUrl.searchParams.get('patientId');
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
 
 // Create a prescription (care-team clinician), optionally with items
 export async function POST(req: Request) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ASSIGNERS);
   if ('response' in auth) return auth.response;
   const body = await readJson(req);
   if (!body) return badRequest('Invalid JSON body');

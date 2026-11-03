@@ -6,6 +6,7 @@ import { patientScope } from '@/lib/access';
 import { badRequest, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
 import { dateOnly, isValidDay, localDateString } from '@/lib/dates';
 import { buildPatientSummaries } from '@/lib/patient-summary';
+import { ANYONE_WITH_CHILD, ASSIGNERS, STAFF, isStaff } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER', 'UNSPECIFIED'];
@@ -14,7 +15,7 @@ const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER', 'UNSPECIFIED'];
 // Clinicians (care team) see everything; a patient sees their own record
 // without clinician-only fields (notes, alerts).
 export async function GET(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
   const { id } = await params;
 
@@ -89,7 +90,7 @@ export async function GET(_req: Request, { params }: Params) {
       alerts.push({ type: 'warning', message: 'ยังไม่มีข้อมูลเซสชัน — คนไข้ยังไม่ได้เริ่มฝึก' });
     }
 
-    const isClinician = auth.user.role === 'CLINICIAN';
+    const isClinician = isStaff(auth.user.role);
     return NextResponse.json({
       patient: {
         ...summary,
@@ -122,7 +123,7 @@ export async function GET(_req: Request, { params }: Params) {
 
 // Update profile / clinical notes (care-team clinicians only)
 export async function PATCH(req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(STAFF);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   const body = await readJson(req);
@@ -166,7 +167,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
 // Archive (medical records are never hard-deleted)
 export async function DELETE(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ASSIGNERS);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {

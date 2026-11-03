@@ -6,6 +6,7 @@ import { patientScope } from '@/lib/access';
 import { badRequest, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
 import { dateOnly, isValidDay } from '@/lib/dates';
 import { prescriptionDTO, prescriptionInclude } from '@/lib/prescriptions';
+import { ANYONE_WITH_CHILD, ASSIGNERS, STAFF } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 const STATUSES: PrescriptionStatus[] = ['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'];
@@ -13,7 +14,7 @@ const OUTCOMES: PrescriptionOutcome[] = ['GOAL_MET', 'PARTIAL', 'NOT_IMPROVED', 
 const ENDED: PrescriptionStatus[] = ['COMPLETED', 'CANCELLED'];
 
 export async function GET(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {
@@ -25,10 +26,12 @@ export async function GET(_req: Request, { params }: Params) {
   }
 }
 
-// Update title / notes / status / dates / outcome (care-team clinician).
+// Update title / notes / status / dates / outcome (teacher or expert in the care team).
+// Experts record outcomes (labels for the forecast model); only teachers create
+// mission sets or change their exercises (items routes).
 // An outcome can only be recorded on an ended plan (COMPLETED or CANCELLED).
 export async function PATCH(req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(STAFF);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   const body = await readJson(req);
@@ -83,7 +86,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
 // Cancel (kept for history; quests stop being generated)
 export async function DELETE(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(ASSIGNERS);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {

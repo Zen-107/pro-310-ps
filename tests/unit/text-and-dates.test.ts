@@ -4,7 +4,7 @@ import { cleanClinicalSummary, thaiMeasurementName } from '@/lib/clinical-markdo
 import { allowTts, chunkThai } from '@/lib/tts-server';
 import { addDays, dayOfWeek, isValidDay, localDateString } from '@/lib/dates';
 import { printFileName } from '@/components/physio/report-print';
-import { TERMS_VERSION, hasAcceptedTerms, termsFor } from '@/lib/terms';
+import { TERMS_VERSION, childHasConsent, hasAcceptedTerms, termsFor } from '@/lib/terms';
 
 describe('Thai-safe text', () => {
   test('safeTruncate never splits a Thai character from its marks', () => {
@@ -121,7 +121,17 @@ describe('report file name and terms', () => {
     expect(hasAcceptedTerms({ termsVersion: TERMS_VERSION })).toBe(true);
     expect(hasAcceptedTerms({ termsVersion: 'terms-th-v0' })).toBe(false);
     expect(hasAcceptedTerms(null)).toBe(false);
-    expect(termsFor('PATIENT').some((s) => s.points.some((p) => p.includes('1669')))).toBe(true);
-    expect(termsFor('CLINICIAN').some((s) => s.heading.includes('บุคลากร'))).toBe(true);
+    expect(termsFor('PARENT').some((s) => s.points.some((p) => p.includes('1669')))).toBe(true);
+    expect(termsFor('CLINICIAN').some((s) => s.heading.includes('ผู้เชี่ยวชาญ'))).toBe(true);
+    expect(termsFor('TEACHER').some((s) => s.heading.includes('คุณครู'))).toBe(true);
+    // The app is for prevention, not treatment
+    expect(termsFor('PARENT')[0].points.some((p) => p.includes('ไม่ใช่การรักษา'))).toBe(true);
+  });
+
+  test("a child may play under a parent's consent or the school's paper consent", () => {
+    expect(childHasConsent({ consentVersion: TERMS_VERSION, schoolConsentAt: null })).toBe(true);
+    expect(childHasConsent({ consentVersion: null, schoolConsentAt: new Date() })).toBe(true);
+    expect(childHasConsent({ consentVersion: 'terms-th-v1', schoolConsentAt: null })).toBe(false);
+    expect(childHasConsent(null)).toBe(false);
   });
 });

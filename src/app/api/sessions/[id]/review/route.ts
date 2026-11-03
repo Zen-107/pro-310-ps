@@ -4,13 +4,14 @@ import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
 import { sessionScope } from '@/lib/access';
 import { badRequest, jsonError, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
+import { EXPERTS } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 const STATUSES: ReviewStatus[] = ['APPROVED', 'NEEDS_ATTENTION'];
 
 // Clinician sign-off on a completed session (care team). Re-posting updates it.
 export async function POST(req: Request, { params }: Params) {
-  const auth = await requireApiUser(['CLINICIAN']);
+  const auth = await requireApiUser(EXPERTS);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   const body = await readJson(req);

@@ -9,6 +9,7 @@ import { ANGLE_ALGORITHM_VERSION, ANGLE_DEFINITION } from '@/lib/joint-formulas'
 import { sessionDTO } from '@/lib/presenters';
 import { questDTO, questInclude } from '@/lib/quests';
 import { isSide, targetsForSide } from '@/lib/exercises-data';
+import { ANYONE_WITH_CHILD } from '@/lib/roles';
 
 const STATUSES: SessionStatus[] = ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
 
@@ -16,7 +17,7 @@ const STATUSES: SessionStatus[] = ['IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
 // Optional ?patientId, ?status, ?awaitingReview=true (completed, not yet
 // reviewed — the clinician review queue), ?limit (default 50, max 200).
 export async function GET(req: NextRequest) {
-  const auth = await requireApiUser(['CLINICIAN', 'PATIENT']);
+  const auth = await requireApiUser(ANYONE_WITH_CHILD);
   if ('response' in auth) return auth.response;
 
   const params = req.nextUrl.searchParams;
