@@ -1,8 +1,49 @@
-# 📘 AI Physio — Codebase Documentation
+# 📘 AI Physio Kids — Codebase Documentation
 
 > **สำหรับ developers ที่จะทำต่อ** — โครงสร้างโค้ด, API endpoints, database schema, สูตรคำนวณมุม, pipeline ของหน้าฝึก, การตั้งค่า และประวัติการพัฒนา
 >
 > ⚠️ This repo uses **Next.js 16** (see `AGENTS.md`): APIs and conventions differ from older versions — read `node_modules/next/dist/docs/` before writing framework code. Route handler `params` are a `Promise`.
+
+---
+
+## 🧒 Kids branch (`feature/kids-maintenance`) — read this first
+
+The app now serves **children (7–12) for prevention/maintenance**, with teachers, parents and a physio expert. Table names stayed, so the camera/session/report pipeline is unchanged; the meaning of some models changed. Product flows: [docs/FLOWS.md](docs/FLOWS.md).
+
+| DB name | Means now | Notes |
+|---------|-----------|-------|
+| `UserRole.PATIENT` / `Patient` | child | `nickname`, `avatar`, `kidCode`, `picturePinHash`, `parentLinkCode`, `schoolConsentAt` |
+| `UserRole.CLINICIAN` | physio expert | library, review, reports (old "doctor" screens, reworded) |
+| `UserRole.TEACHER` / `PARENT` | teacher / parent | new roles |
+| `Clinician` | **adult profile** of expert, teacher or parent | `title` = `PHYSIOTHERAPIST` / `TEACHER` / `PARENT` |
+| `CareAssignment` | who may see a child | `TEACHER` (joins class), `GUARDIAN` (parent link), `PRIMARY`/`SUPPORTING` (expert) |
+| `Prescription` | mission set | only teachers create; `classroomId` = assigned to a whole class |
+| `Classroom`, `ClassroomMember` | teacher's class | new (migration `20261104000000_kids_roles_classrooms`) |
+
+**Roles and access** — `src/lib/roles.ts` (`KID`, `ADULTS`, `STAFF`, `ASSIGNERS`, `EXPERTS`, `ANYONE_WITH_CHILD`) is the single list every route guard uses. `patientScope` (`src/lib/access.ts`) gives any adult the children linked by `CareAssignment`.
+
+**Login** (`src/lib/auth.ts`) — three next-auth Credentials providers:
+- `credentials`: adults, email + password
+- `kid-code`: 6-character code + 3 pictures in order (`src/lib/kid-codes.ts` browser-safe formats, `src/lib/kid-login.ts` server: hashing, lockout after 5 wrong tries for 10 min)
+- `ticket`: one-time HMAC-signed ticket (60 s) for "play as child" (`POST /api/me/switch`, needs the adult PIN to be set) and for going back (`POST /api/me/return` checks the adult's 4-digit PIN). The JWT carries `returnUserId`/`returnName` while in kid mode.
+
+**Consent** — adults accept the terms themselves (`TermsGate`). A child never sees legal text: `userAcceptedTerms` passes a child when a parent accepted the current terms for them (`Patient.consentVersion`, `POST /api/kids/[id]/consent`) or the teacher recorded school paper consent (`schoolConsentAt`). Video recording needs the parent's video consent; withdrawing deletes all videos.
+
+**New API routes**
+- `GET/POST /api/classrooms` · `GET/PATCH /api/classrooms/[id]` (detail with today's grid, codes for the teacher only)
+- `POST /api/classrooms/[id]/students` (bulk add → printable cards) · `POST/PATCH /api/classrooms/[id]/plans` (assign / end a class mission set)
+- `POST /api/kids/[id]/codes` (reset pictures / kid code / parent code) · `GET/POST /api/kids/[id]/consent`
+- `POST /api/parent/register` (no session; link code) · `POST /api/parent/link` · `GET /api/parent/children`
+- `GET/POST /api/me/pin` · `POST /api/me/switch` · `POST /api/me/return`
+- Changed: role lists on every route; prescriptions create/items = teacher only, status/outcome = teacher or expert; kid-side `POST /api/me/video-consent` removed; messages = adults only
+
+**New UI** — `src/components/app-shell.tsx` routes by role to `kids/kids-shell.tsx`, `teacher/teacher-shell.tsx`, `parent/parent-shell.tsx`, `expert/expert-shell.tsx` (adult shells share `adult/adult-shell.tsx`). Themes `.theme-kids` / `.theme-adult` in `globals.css`. Mascot: `kids/mascot.tsx`. Kid names/steps per exercise: `KID_EXERCISES` in `src/lib/kids.ts` (also returned as `kidName`/`kidSteps` by the exercise DTO). The camera screen (`physio/live-session-view.tsx`) kept its pipeline; only its three render blocks were restyled for kids.
+
+**Demo data** — `bun run db:seed`: 1 school, expert `pt@`, teachers `teacher1@`/`teacher2@`, parents `parent1@`–`parent3@`, 2 classes, 6 kids (codes and pictures in `src/lib/demo-accounts.ts`, shown on the dev login page). Adult PIN `1234`.
+
+**QA** — `bun run qa` runs typecheck, lint, unit, test-DB migrate, integration and build. Kids flows are covered by `tests/integration/roles.test.ts` and `tests/unit/kids.test.ts`.
+
+The sections below were written for the clinical version; where they say patient/clinician, read child/adult as in the table above.
 
 ---
 
