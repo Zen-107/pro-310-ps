@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { toast } from 'sonner';
-import { Activity, LogOut, ShieldCheck } from 'lucide-react';
+import { LogOut, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Mascot } from '@/components/kids/mascot';
 import { TERMS_ACCEPT_LABEL, TERMS_TITLE, type TermsSection } from '@/lib/terms';
 
 /**
@@ -73,7 +74,7 @@ export function TermsGate({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+    <div className="theme-adult fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-sm" style={{ background: 'rgba(59,42,74,0.55)' }}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -83,15 +84,13 @@ export function TermsGate({
         className="flex max-h-[min(90dvh,760px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl outline-none"
       >
         <div className="flex items-center gap-3 border-b px-5 py-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600">
-            <Activity className="h-5 w-5 text-white" />
-          </div>
+          <Mascot mood="wave" size={48} className="shrink-0" />
           <div className="min-w-0">
             <h2 id="terms-title" className="text-base font-bold leading-tight">
               {TERMS_TITLE}
             </h2>
             <p className="text-xs text-muted-foreground">
-              สวัสดี {userName} · กรุณาอ่านและยอมรับก่อนเข้าใช้งาน AI Physio
+              สวัสดี {userName} · กรุณาอ่านและยอมรับก่อนเข้าใช้งาน AI Physio Kids
             </p>
           </div>
         </div>
@@ -114,7 +113,7 @@ export function TermsGate({
           <label className="flex cursor-pointer items-start gap-2.5 text-sm">
             <input
               type="checkbox"
-              className="mt-0.5 h-4 w-4 shrink-0 accent-teal-600"
+              className="mt-0.5 h-4 w-4 shrink-0"
               checked={checked}
               onChange={(e) => setChecked(e.target.checked)}
             />
@@ -124,7 +123,7 @@ export function TermsGate({
             <Button variant="outline" disabled={saving} onClick={() => signOut({ callbackUrl: '/login' })}>
               <LogOut className="h-4 w-4" /> ไม่ยอมรับและออกจากระบบ
             </Button>
-            <Button className="bg-teal-600 text-white hover:bg-teal-700" disabled={!checked || saving} onClick={accept}>
+            <Button disabled={!checked || saving} onClick={accept}>
               <ShieldCheck className="h-4 w-4" /> {saving ? 'กำลังบันทึก...' : 'ยอมรับและเข้าใช้งาน'}
             </Button>
           </div>

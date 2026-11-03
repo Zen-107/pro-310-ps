@@ -27,25 +27,15 @@ const mali = Mali({
   weight: ["500", "700"],
 });
 
+// Favicon: src/app/icon.svg (the mascot)
 export const metadata: Metadata = {
-  title: "AI Physio — กายภาพบำบัดอัจฉริยะ",
+  title: "AI Physio Kids — ยืด ขยับ แข็งแรง",
   description:
-    "ระบบกายภาพบำบัดผ่านเว็บแคมด้วย AI ตรวจจับท่าทาง คำนวณมุมข้อต่อ และให้ Feedback แบบ Real-time",
-  keywords: [
-    "กายภาพบำบัด",
-    "AI Physio",
-    "Physical Therapy",
-    "Pose Estimation",
-    "MediaPipe",
-    "Rehabilitation",
-  ],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+    "เกมยืดเหยียดสำหรับเด็กผ่านกล้อง AI ช่วยดูท่าทางแบบ Real-time เพื่อดูแลและป้องกันปัญหาท่าทาง สำหรับเด็ก ผู้ปกครอง และคุณครู",
+  keywords: ["ยืดเหยียด", "เด็ก", "ท่าทาง", "AI Physio Kids", "Pose Estimation", "MediaPipe", "โรงเรียน"],
   openGraph: {
-    title: "AI Physio — กายภาพบำบัดอัจฉริยะ",
-    description:
-      "นำ Computer Vision และ AI มาช่วยกายภาพบำบัดที่บ้าน ตรวจจับท่าทาง คำนวณมุมข้อต่อ ให้ Feedback แบบ Real-time",
+    title: "AI Physio Kids — ยืด ขยับ แข็งแรง",
+    description: "เด็กเล่นยืดเหยียดกับน้องยืด กล้อง AI ช่วยดูท่า คุณครูให้ภารกิจ ผู้ปกครองติดตามผล",
     type: "website",
   },
 };

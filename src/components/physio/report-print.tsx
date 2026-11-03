@@ -154,16 +154,16 @@ export function ReportPrintDocument({ report }: { report: PrintableReport }) {
         </table>
       </header>
 
-      <h1 className="rp-title">แบบบันทึกผลการฟื้นฟูสมรรถภาพทางกายภาพบำบัด (ทางไกล)</h1>
+      <h1 className="rp-title">แบบบันทึกผลการยืดเหยียดและการเคลื่อนไหวของเด็ก (เพื่อการป้องกัน)</h1>
       <p className="rp-subtitle">Telerehabilitation Physical Therapy Session Record</p>
 
       {/* ── Patient data ── */}
       <section className="rp-section rp-avoid">
-        <h2>ข้อมูลผู้ป่วย</h2>
+        <h2>ข้อมูลเด็ก</h2>
         <table className="report-table rp-kv">
           <tbody>
             <tr>
-              <th>เลขประจำตัวผู้ป่วย (HN)</th>
+              <th>เลขประจำตัว</th>
               <td>{dash(report.patient.hn)}</td>
               <th>ชื่อ–สกุล</th>
               <td>{report.patient.name}</td>
@@ -186,7 +186,7 @@ export function ReportPrintDocument({ report }: { report: PrintableReport }) {
               </td>
             </tr>
             <tr>
-              <th>แผนการรักษา</th>
+              <th>ชุดภารกิจ</th>
               <td colSpan={3}>{dash(report.prescriptionTitle)}</td>
             </tr>
           </tbody>

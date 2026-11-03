@@ -82,7 +82,7 @@ export function AiInsightsPanel({ patientId }: { patientId: string }) {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium flex flex-wrap items-center gap-2">
           <BrainCircuit className="h-4 w-4 text-violet-600" />
-          ระยะฟื้นตัว แนวโน้ม & ข้อเสนอแนะ (AI Agent)
+          ความก้าวหน้า แนวโน้ม & ข้อเสนอแนะ (AI Agent)
           <span className="text-xs font-normal text-muted-foreground">{sessions} เซสชันล่าสุด</span>
           <Badge variant="outline" className="border-amber-300 text-[10px] font-normal text-amber-800 dark:border-amber-800 dark:text-amber-300">
             ต้นแบบเพื่อการศึกษา · รอข้อมูลผู้ใช้จริง
@@ -98,7 +98,7 @@ export function AiInsightsPanel({ patientId }: { patientId: string }) {
 
         {forecasts.length > 0 && (
           <section className="space-y-2">
-            <h4 className="text-xs font-semibold text-foreground">ประมาณการระยะฟื้นตัว (90 วันล่าสุด)</h4>
+            <h4 className="text-xs font-semibold text-foreground">ประมาณการถึงเป้าหมาย (90 วันล่าสุด)</h4>
             <div className="grid gap-2 md:grid-cols-2">
               {forecasts.map((f) => (
                 <RecoveryForecastCard key={f.key} data={f} />
@@ -169,7 +169,7 @@ export function AiInsightsPanel({ patientId }: { patientId: string }) {
             </div>
             <p className="mt-2 text-[10px] italic text-muted-foreground">
               สร้างโดย AI ({summary.model}) · {new Date(summary.at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} — ตัวเลขคำนวณจากข้อมูลเซสชัน
-              ข้อเสนอแนะเป็นประเด็นให้ผู้ดูแลพิจารณา ไม่ใช่คำสั่งการรักษา
+              ข้อเสนอแนะเป็นประเด็นให้ผู้ดูแลพิจารณา ไม่ใช่การวินิจฉัย
             </p>
           </div>
         )}

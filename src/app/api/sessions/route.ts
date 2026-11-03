@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
       orderBy: awaitingReview ? { endedAt: 'asc' } : { startedAt: 'desc' },
       take: limit,
       include: {
-        exercise: { select: { name: true, nameTh: true, category: true, icon: true } },
+        exercise: { select: { slug: true, name: true, nameTh: true, category: true, icon: true } },
         review: { select: { status: true } },
         patient: { select: { name: true } },
         _count: { select: { faults: true } },

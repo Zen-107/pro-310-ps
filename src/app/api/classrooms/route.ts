@@ -4,6 +4,7 @@ import { requireApiUser } from '@/lib/auth-guard';
 import { badRequest, jsonError, optionalString, readJson, serverError } from '@/lib/api-utils';
 import { dateOnly, localDateString } from '@/lib/dates';
 import { ASSIGNERS, STAFF } from '@/lib/roles';
+import { ensureClassQuestsToday } from '@/lib/classrooms';
 
 // Classrooms: a teacher's own classes; an expert sees every class of their organization.
 export async function GET() {
@@ -12,11 +13,11 @@ export async function GET() {
   const { clinicianId, organizationId, role } = auth.user;
   try {
     const today = dateOnly(localDateString());
+    const scope = role === 'TEACHER' ? { teacherId: clinicianId ?? '__none__' } : { organizationId: organizationId ?? '__none__' };
+    const ids = await db.classroom.findMany({ where: { archivedAt: null, ...scope }, select: { id: true } });
+    await ensureClassQuestsToday(ids.map((c) => c.id));
     const classrooms = await db.classroom.findMany({
-      where: {
-        archivedAt: null,
-        ...(role === 'TEACHER' ? { teacherId: clinicianId ?? '__none__' } : { organizationId: organizationId ?? '__none__' }),
-      },
+      where: { archivedAt: null, ...scope },
       include: {
         teacher: { select: { user: { select: { name: true } } } },
         members: {

@@ -206,7 +206,7 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
       {/* ---- Header ---- */}
       <motion.div variants={item} className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">ภาพรวมผู้ป่วย</h2>
+          <h2 className="text-2xl font-bold tracking-tight">ภาพรวมเด็กในความดูแล</h2>
           <p className="text-muted-foreground mt-1">
             {new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
@@ -214,9 +214,9 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
         <a
           href="/api/analytics/dataset"
           className="inline-flex min-h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          title="ข้อมูลไม่ระบุตัวตน: คุณลักษณะระหว่างการรักษา + ผลการรักษาที่บันทึกเมื่อจบแผน สำหรับพัฒนาแบบจำลองพยากรณ์"
+          title="ข้อมูลไม่ระบุตัวตน: คุณลักษณะระหว่างการเล่น + ผลลัพธ์ที่บันทึกเมื่อจบชุดภารกิจ สำหรับพัฒนาแบบจำลองพยากรณ์"
         >
-          <Download className="h-3.5 w-3.5" /> ส่งออกข้อมูลผลการรักษา (CSV)
+          <Download className="h-3.5 w-3.5" /> ส่งออกข้อมูลผลลัพธ์ (CSV)
         </a>
       </motion.div>
 
@@ -249,7 +249,7 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
           icon={<Users className="h-5 w-5" />}
           label="กำลังฝึก (7 วัน)"
           value={`${stats.activePatients}/${stats.totalPatients}`}
-          hint="ผู้ป่วยที่มีการฝึกล่าสุด"
+          hint="เด็กที่เล่นล่าสุด"
           tone="slate"
         />
       </motion.div>
@@ -306,7 +306,7 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
       {/* ---- Patient Cards Grid ---- */}
       <motion.div variants={item}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-foreground">รายชื่อผู้ป่วย</h3>
+          <h3 className="text-sm font-semibold text-foreground">รายชื่อเด็ก</h3>
           <span className="text-xs text-muted-foreground">{patients.length} คน</span>
         </div>
 
@@ -314,8 +314,8 @@ export function DoctorOverview({ onSelectPatient }: { onSelectPatient: (id: stri
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <User className="h-10 w-10 mb-3 opacity-40" />
-              <p className="text-sm">ยังไม่มีผู้ป่วยในระบบ</p>
-              <p className="text-xs mt-1">เพิ่มผู้ป่วยจากแท็บ &quot;ผู้ป่วย&quot;</p>
+              <p className="text-sm">ยังไม่มีเด็กในความดูแล</p>
+              <p className="text-xs mt-1">คุณครูเพิ่มเด็กเข้าห้องเรียน แล้วเด็กจะแสดงที่นี่</p>
             </CardContent>
           </Card>
         ) : (

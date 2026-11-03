@@ -1,46 +1,27 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
-  Camera,
-  CameraOff,
   Play,
   Pause,
   Square,
   Volume2,
   VolumeX,
   Activity,
-  Target,
   Clock,
   CheckCircle,
   AlertTriangle,
   ChevronLeft,
   RotateCcw,
-  Footprints,
-  ArrowUpFromLine,
-  MoveUp,
-  MoveHorizontal,
-  Mountain,
-  RotateCcw as RotateCcwIcon,
-  RefreshCw,
-  Copy,
-  Minimize2,
   PersonStanding,
-  StretchHorizontal,
   Loader2,
   ChevronDown,
   ChevronUp,
   Video,
-  ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAppStore } from '@/lib/store';
 import { RepCounter, repOptionsFor, type HoldStatus, type IncompleteAttempt, type MotionState, type RepCompletion } from '@/lib/rep-counter';
@@ -52,56 +33,20 @@ import { encodeFrame, REPLAY_CHUNK_FRAMES, REPLAY_FRAME_MS, type ReplayFrame } f
 import { SessionVideoRecorder, pickRecorderMime } from '@/lib/session-video-recorder';
 import { pickThaiVoice, speakThai, stopSpeech, unlockAudio, type SpeechPriority } from '@/lib/speech';
 import { compensationCue, cueState, localCue, phraseForState } from '@/lib/coach-cues';
-import { VIDEO_CONSENT_POINTS, VIDEO_CONSENT_TITLE } from '@/lib/consent';
+import { Mascot, MascotSays } from '@/components/kids/mascot';
+import { starsFor } from '@/lib/kids';
 import {
   calculateAllAngles,
   isAngleCorrect,
   isVisible,
-  formatAngle,
   getAngleStatus,
-  getAngleStatusColor,
   ANGLE_STATUS_HEX,
   type AngleStatus,
   LANDMARKS,
   SKELETON_CONNECTIONS,
   type Landmark,
 } from '@/lib/angle-utils';
-import {
-  CATEGORIES,
-  DIFFICULTY_LABELS,
-  SIDE_LABELS,
-  type Side,
-  type TargetJoint,
-} from '@/lib/exercises-data';
-
-// ─── Icon map for exercises ────────────────────────────────────────────
-const exerciseIconMap: Record<string, React.ReactNode> = {
-  Footprints: <Footprints className="h-5 w-5" />,
-  ArrowUpFromLine: <ArrowUpFromLine className="h-5 w-5" />,
-  MoveUp: <MoveUp className="h-5 w-5" />,
-  MoveHorizontal: <MoveHorizontal className="h-5 w-5" />,
-  Mountain: <Mountain className="h-5 w-5" />,
-  RotateCcw: <RotateCcwIcon className="h-5 w-5" />,
-  RefreshCw: <RefreshCw className="h-5 w-5" />,
-  Copy: <Copy className="h-5 w-5" />,
-  Compress: <Minimize2 className="h-5 w-5" />,
-  PersonStanding: <PersonStanding className="h-5 w-5" />,
-  StretchHorizontal: <StretchHorizontal className="h-5 w-5" />,
-  Activity: <Activity className="h-5 w-5" />,
-};
-
-// ─── Difficulty badge config ───────────────────────────────────────────
-const difficultyConfig: Record<string, { label: string; className: string }> = {
-  beginner: { label: DIFFICULTY_LABELS.beginner, className: 'bg-teal-500/15 text-teal-600 border-teal-500/30' },
-  intermediate: { label: DIFFICULTY_LABELS.intermediate, className: 'bg-amber-500/15 text-amber-600 border-amber-500/30' },
-  advanced: { label: DIFFICULTY_LABELS.advanced, className: 'bg-red-500/15 text-red-600 border-red-500/30' },
-};
-
-const bodyPartLabels: Record<string, string> = {
-  lower: 'ร่างกายล่าง',
-  upper: 'ร่างกายบน',
-  full: 'ทั้งตัว',
-};
+import { SIDE_LABELS, type Side, type TargetJoint } from '@/lib/exercises-data';
 
 // ─── MediaPipe source (CDN) ────────────────────────────────────────────
 // The loader script and its WASM/model files (via locateFile) must come from
@@ -319,15 +264,15 @@ function drawSkeleton(
 }
 
 const GAUGE_STATUS_LABEL: Record<AngleStatus, string> = {
-  good: 'อยู่ในช่วงเป้าหมาย',
-  warn: 'ใกล้ช่วงเป้าหมาย',
-  bad: 'นอกช่วงเป้าหมาย',
+  good: 'พอดีเลย!',
+  warn: 'อีกนิดเดียว!',
+  bad: 'ลองขยับดูนะ',
 };
 
 /**
- * Target ROM gauge for the HUD: a 0–180° dial with the target range as a
- * band, the ideal angle as a tick and the live angle as a needle, coloured
- * by status. Large type so it is readable from a few metres away.
+ * Power dial for the HUD: the target range is a green band and the live
+ * position a needle, coloured by status. Kids see no degree numbers, only
+ * the needle and a word; adults read the angles in the reports.
  */
 function RomGauge({ value, target }: { value: number | undefined; target: { nameTh: string; minAngle: number; maxAngle: number; idealAngle: number } }) {
   const cx = 100;
@@ -350,7 +295,7 @@ function RomGauge({ value, target }: { value: number | undefined; target: { name
 
   return (
     <div className="flex flex-col items-center">
-      <svg viewBox="0 0 200 112" className="w-[clamp(9rem,24vh,17rem)]" role="img" aria-label={`${target.nameTh} ${value === undefined ? 'ไม่พบ' : `${Math.round(value)} องศา`}`}>
+      <svg viewBox="0 0 200 112" className="w-[clamp(9rem,24vh,17rem)]" role="img" aria-label={`${target.nameTh} ${status ? GAUGE_STATUS_LABEL[status] : 'ไม่พบ'}`}>
         <path d={arcPath(0, 180)} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={14} strokeLinecap="round" />
         <path d={arcPath(target.minAngle, target.maxAngle)} fill="none" stroke="#34d399" strokeOpacity={0.45} strokeWidth={14} />
         <line x1={ideal[0].x} y1={ideal[0].y} x2={ideal[1].x} y2={ideal[1].y} stroke="#ffffff" strokeWidth={3} strokeLinecap="round" />
@@ -362,15 +307,10 @@ function RomGauge({ value, target }: { value: number | undefined; target: { name
         )}
         <circle cx={cx} cy={cy} r={6} fill="#fff" />
       </svg>
-      <p className="-mt-1 text-[clamp(1.75rem,6vh,3.75rem)] font-black leading-none tabular-nums" style={{ color }}>
-        {value === undefined ? '—' : `${Math.round(value)}°`}
+      <p className="-mt-1 text-center text-[clamp(1.4rem,4.5vh,2.75rem)] font-black leading-tight" style={{ color }}>
+        {status ? GAUGE_STATUS_LABEL[status] : 'หนูอยู่ไหนน้า'}
       </p>
-      <p className="mt-1 text-center text-[clamp(0.75rem,1.8vh,1rem)] font-semibold text-white/80">
-        {status ? GAUGE_STATUS_LABEL[status] : 'มองไม่เห็นข้อต่อ'}
-      </p>
-      <p className="text-[clamp(0.7rem,1.5vh,0.9rem)] text-white/55 tabular-nums">
-        {target.nameTh} · เป้าหมาย {target.minAngle}°–{target.maxAngle}°
-      </p>
+      <p className="text-[clamp(0.7rem,1.5vh,0.95rem)] text-white/60">{target.nameTh} · เข็มอยู่ในแถบเขียว = เก่งมาก</p>
     </div>
   );
 }
@@ -414,6 +354,8 @@ type TargetFromAPI = TargetJoint & { isPrimary?: boolean; formula?: string | nul
 interface ExerciseFromAPI {
   id: string;
   slug: string;
+  kidName?: string;
+  kidSteps?: string[];
   formChecks?: FormCheck[];
   name: string;
   nameTh: string;
@@ -534,15 +476,12 @@ export function LiveSessionView() {
   // Focus Mode: the info panel starts collapsed; the HUD shows the essentials
   const [panelCollapsed, setPanelCollapsed] = useState(() => readPref('physio.panelCollapsed', true));
   const [demoOpen, setDemoOpen] = useState(true);
-  // Video recording (PDPA): consent is per patient, recording can be turned off per session
+  // Video recording (PDPA): only with the parent's consent for this child (parent screens)
   const [videoConsent, setVideoConsent] = useState<{ consented: boolean; consentedAt: string | null } | null>(null);
   const [consentLoaded, setConsentLoaded] = useState(false); // consent fetch settled (ok or failed)
   const [autoStarting, setAutoStarting] = useState(false); // starting a quest picked on another tab
-  const [recordVideo, setRecordVideo] = useState(true);
+  const [recordVideo] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
-  const [consentOpen, setConsentOpen] = useState(false);
-  const [consentChecked, setConsentChecked] = useState(false);
-  const [savingConsent, setSavingConsent] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [mediaPipeLoaded, setMediaPipeLoaded] = useState(false);
@@ -926,31 +865,6 @@ export function LiveSessionView() {
     });
   }, []);
 
-  const saveVideoConsent = useCallback(async (consent: boolean) => {
-    setSavingConsent(true);
-    try {
-      const res = await fetch('/api/me/video-consent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consent }),
-      });
-      if (!res.ok) throw new Error();
-      const d = await res.json();
-      setVideoConsent({ consented: d.consented, consentedAt: d.consentedAt });
-      setConsentOpen(false);
-      setConsentChecked(false);
-      toast.success(
-        consent
-          ? 'บันทึกความยินยอมแล้ว'
-          : `ถอนความยินยอมแล้ว — ลบวิดีโอที่บันทึกไว้ ${d.videosDeleted ?? 0} รายการ และจะไม่บันทึกวิดีโออีก`
-      );
-    } catch {
-      toast.error('บันทึกความยินยอมไม่สำเร็จ');
-    } finally {
-      setSavingConsent(false);
-    }
-  }, []);
-
   // ─── AI Coach call (throttled, one request in flight) ───────────────
   const callCoach = useCallback(
     (angles: Record<string, number>) => {
@@ -1035,8 +949,8 @@ export function LiveSessionView() {
       const sessionData = await sessionRes.json().catch(() => null);
       if (!sessionRes.ok || !sessionData?.id || !sessionData.exercise) {
         toast.error(sessionData?.error === 'This quest is not due today'
-          ? 'ภารกิจนี้ไม่ได้กำหนดไว้สำหรับวันนี้'
-          : 'ไม่สามารถเริ่มเซสชันได้ กรุณาลองใหม่อีกครั้ง');
+          ? 'ภารกิจนี้ไม่ใช่ของวันนี้นะ'
+          : 'เริ่มเล่นไม่ได้ ลองใหม่อีกทีนะ');
         return;
       }
       const exercise = sessionData.exercise as ExerciseFromAPI;
@@ -1085,7 +999,7 @@ export function LiveSessionView() {
         `เริ่มท่า${exercise.nameTh}${side ? `ข้าง${SIDE_LABELS[side]}` : ''}กันเลยครับ จัดตัวให้กล้องเห็นทั้งตัวนะครับ`
       );
     } catch {
-      toast.error('ไม่สามารถเริ่มเซสชันได้ กรุณาตรวจสอบการเชื่อมต่อ');
+      toast.error('เริ่มเล่นไม่ได้ ลองเช็กอินเทอร์เน็ตแล้วลองใหม่นะ');
     } finally {
       setConnecting(false);
     }
@@ -1200,7 +1114,7 @@ export function LiveSessionView() {
         }
         streamRef.current = stream;
 
-        // Video recording: only with the patient's consent and the session toggle on
+        // Video recording: only with the parent's consent for this child
         const sessionId = useAppStore.getState().currentSessionId;
         if (recordVideoRef.current && sessionId) {
           const recorder = new SessionVideoRecorder(stream, sessionId, (message) => {
@@ -1211,7 +1125,7 @@ export function LiveSessionView() {
             videoRecorderRef.current = recorder;
             setIsRecording(true);
           } else {
-            toast.message('เบราว์เซอร์นี้บันทึกวิดีโอไม่ได้ — ฝึกต่อได้ตามปกติ');
+            toast.message('เครื่องนี้บันทึกวิดีโอไม่ได้ แต่เล่นต่อได้เลยนะ');
           }
         }
 
@@ -1654,222 +1568,121 @@ export function LiveSessionView() {
   // =====================================================================
   if (phase === 'pre-session' && (pendingQuestStart || autoStarting)) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-        <p className="text-sm">กำลังเปิดกล้องเพื่อเริ่มภารกิจ…</p>
+      <div className="theme-kids flex min-h-screen flex-col items-center justify-center gap-3 px-4 text-center">
+        <Mascot mood="stretch" size={150} className="kids-bob" />
+        <p className="text-2xl font-bold">น้องยืดกำลังเปิดกล้อง...</p>
+        <p className="text-lg text-[var(--kids-ink-soft)]">ถอยออกไปให้กล้องเห็นทั้งตัวนะ</p>
       </div>
     );
   }
   if (phase === 'pre-session') {
+    const doneCount = quests.filter((q) => q.status === 'COMPLETED').length;
     return (
-      <div className="min-h-screen bg-background">
-        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-          {/* Header */}
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6"
-          >
-            <h1 className="text-2xl font-bold text-foreground sm:text-3xl">
-              เลือกท่าฝึก
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              ทำภารกิจที่ผู้ดูแลของคุณกำหนดไว้สำหรับวันนี้ ดูท่าตัวอย่างก่อนเริ่มฝึก
+      <div className="theme-kids min-h-screen">
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
+          <div className="flex items-center justify-between gap-3">
+            <button className="kids-btn kids-btn-sky px-4 text-lg" onClick={() => setActiveTab('dashboard')}>
+              <ChevronLeft className="h-6 w-6" /> กลับบ้าน
+            </button>
+            {quests.length > 0 && (
+              <span className="flex items-center gap-1 rounded-full bg-[var(--kids-sun)] px-3 py-1.5 text-lg font-bold">
+                ⭐ {doneCount}/{quests.length}
+              </span>
+            )}
+          </div>
+
+          <MascotSays mood="stretch">เลือกภารกิจเลย! แล้วถอยให้กล้องเห็นทั้งตัวนะ</MascotSays>
+
+          {videoConsent?.consented && pickRecorderMime() !== null && (
+            <p className="kids-card flex items-center gap-3 p-4 text-base">
+              <Video className="h-6 w-6 shrink-0 text-[var(--kids-sky-deep)]" />
+              ผู้ปกครองอนุญาตให้บันทึกวิดีโอ คุณครูจะได้ดูท่าสวย ๆ ของหนู
             </p>
-          </motion.div>
-
-          {/* Video recording consent (PDPA) */}
-          {videoConsent && pickRecorderMime() !== null && (
-            <Card className="mb-6">
-              <CardContent className="space-y-3 p-4">
-                <div className="flex flex-wrap items-start gap-3">
-                  <div className={`rounded-full p-2 ${videoConsent.consented ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300' : 'bg-muted text-muted-foreground'}`}>
-                    {videoConsent.consented ? <ShieldCheck className="h-5 w-5" /> : <Video className="h-5 w-5" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">บันทึกวิดีโอการฝึกให้ทีมผู้ดูแลตรวจสอบ</p>
-                    <p className="text-xs text-muted-foreground">
-                      {videoConsent.consented
-                        ? `ให้ความยินยอมแล้ว${videoConsent.consentedAt ? ` เมื่อ ${new Date(videoConsent.consentedAt).toLocaleDateString('th-TH', { dateStyle: 'medium' })}` : ''} — วิดีโอจะถูกบันทึกเมื่อเปิดสวิตช์ด้านขวา`
-                        : 'ยังไม่ได้ให้ความยินยอม — ไม่มีการบันทึกวิดีโอ (ระบบยังบันทึกเฉพาะข้อมูลมุมข้อต่อ)'}
-                    </p>
-                  </div>
-                  {videoConsent.consented ? (
-                    <label className="flex items-center gap-2 text-xs">
-                      <Switch checked={recordVideo} onCheckedChange={setRecordVideo} aria-label="บันทึกวิดีโอในการฝึกครั้งนี้" />
-                      {recordVideo ? 'บันทึกครั้งนี้' : 'ไม่บันทึกครั้งนี้'}
-                    </label>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => setConsentOpen((o) => !o)}>
-                      อ่านและให้ความยินยอม
-                    </Button>
-                  )}
-                </div>
-
-                {!videoConsent.consented && consentOpen && (
-                  <div className="space-y-3 rounded-lg border bg-muted/40 p-3">
-                    <p className="text-sm font-semibold">{VIDEO_CONSENT_TITLE}</p>
-                    <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed text-muted-foreground">
-                      {VIDEO_CONSENT_POINTS.map((point, i) => (
-                        <li key={i}>{point}</li>
-                      ))}
-                    </ul>
-                    <label className="flex items-start gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5 h-4 w-4 accent-teal-600"
-                        checked={consentChecked}
-                        onChange={(e) => setConsentChecked(e.target.checked)}
-                      />
-                      ข้าพเจ้าได้อ่านและเข้าใจข้อความข้างต้น และยินยอมให้บันทึกวิดีโอการฝึกเพื่อการรักษา
-                    </label>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        className="bg-teal-600 text-white hover:bg-teal-700"
-                        disabled={!consentChecked || savingConsent}
-                        onClick={() => saveVideoConsent(true)}
-                      >
-                        {savingConsent && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                        ยินยอม
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setConsentOpen(false)}>
-                        ไม่ใช่ตอนนี้
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {videoConsent.consented && (
-                  <button
-                    type="button"
-                    className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                    disabled={savingConsent}
-                    onClick={() => {
-                      if (window.confirm('ถอนความยินยอมการบันทึกวิดีโอ?\nวิดีโอการฝึกที่บันทึกไว้ทั้งหมดจะถูกลบถาวรและกู้คืนไม่ได้ และการฝึกครั้งต่อไปจะไม่บันทึกวิดีโอ')) saveVideoConsent(false);
-                    }}
-                  >
-                    ถอนความยินยอม
-                  </button>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Today's quests (prescribed by the care team) */}
-          {!loadingExercises && !loadError && (
-            <section className="mb-8">
-              <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-                <Target className="h-5 w-5 text-teal-600" />
-                ภารกิจวันนี้
-                <span className="text-sm font-normal text-muted-foreground">
-                  ({quests.filter((q) => q.status === 'COMPLETED').length}/{quests.length} สำเร็จ)
-                </span>
-              </h2>
-              {quests.length === 0 ? (
-                <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                  วันนี้ไม่มีภารกิจจากแพทย์/นักกายภาพ — ติดต่อผู้ดูแลผ่านแท็บข้อความได้
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {quests.map((quest) => {
-                    const done = quest.status === 'COMPLETED';
-                    const overridden = quest.exercise.targetJoints.some((t) => t.overridden);
-                    return (
-                      <Card
-                        key={quest.id}
-                        className={`${quest.id === selectedQuestId ? 'ring-2 ring-teal-500' : ''} ${done ? 'opacity-75' : ''}`}
-                      >
-                        <CardContent className="space-y-2 p-4">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="font-semibold leading-tight">{quest.exercise.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {quest.prescription.title} · {quest.prescription.clinicianName}
-                              </p>
-                            </div>
-                            {done ? (
-                              <Badge className="bg-teal-600 text-white">
-                                <CheckCircle className="mr-1 h-3 w-3" /> สำเร็จ
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline">{quest.status === 'IN_PROGRESS' ? 'กำลังทำ' : 'รอทำ'}</Badge>
-                            )}
-                          </div>
-                          <ExerciseDemo slug={quest.exercise.slug} compact target={quest.exercise.targetJoints.find((t) => t.isPrimary)} />
-                          {quest.exercise.holdSeconds && (
-                            <p className="text-xs text-muted-foreground">ค้างไว้ครั้งละ {quest.exercise.holdSeconds} วินาที</p>
-                          )}
-                          <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <RotateCcw className="h-3 w-3" />
-                            {quest.exercise.sets} เซ็ต × {quest.exercise.repsPerSet} ครั้ง · พัก {quest.exercise.restSeconds} วินาที
-                          </p>
-                          {overridden && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400">มุมเป้าหมายปรับโดยผู้ดูแลของคุณ</p>
-                          )}
-                          {quest.exercise.unilateral ? (
-                            // One side at a time: each side is its own session; the quest completes when both are done
-                            <div className="space-y-1.5">
-                              <p className="text-xs font-medium">ทำทีละข้าง เลือกข้างที่จะฝึก</p>
-                              <div className="grid grid-cols-2 gap-2">
-                                {(['left', 'right'] as const).map((side) => {
-                                  const sideDone = quest.sidesDone.includes(side);
-                                  const limb = quest.exercise.bodyPart === 'upper' ? 'แขน' : 'ขา';
-                                  return (
-                                    <Button
-                                      key={side}
-                                      size="sm"
-                                      variant={sideDone ? 'outline' : 'default'}
-                                      className={sideDone ? '' : 'bg-teal-600 text-white hover:bg-teal-700'}
-                                      disabled={connecting}
-                                      onClick={() => handleStartExercise({ questId: quest.id, side })}
-                                      aria-label={`เริ่มฝึก${limb}ข้าง${SIDE_LABELS[side]}${sideDone ? ' (ทำแล้ว ฝึกซ้ำ)' : ''}`}
-                                    >
-                                      {connecting ? (
-                                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                                      ) : sideDone ? (
-                                        <CheckCircle className="mr-1.5 h-4 w-4 text-teal-600" />
-                                      ) : (
-                                        <Play className="mr-1.5 h-4 w-4" />
-                                      )}
-                                      {limb}{SIDE_LABELS[side]}
-                                    </Button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ) : (
-                            <Button
-                              className="w-full bg-teal-600 text-white hover:bg-teal-700"
-                              size="sm"
-                              disabled={connecting}
-                              onClick={() => handleStartExercise({ questId: quest.id })}
-                            >
-                              {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                              {done ? 'ฝึกซ้ำ' : 'เริ่มภารกิจ'}
-                            </Button>
-                          )}
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
           )}
 
           {loadingExercises && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-56 rounded-xl" />
-              ))}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Skeleton className="h-72 rounded-[28px]" />
+              <Skeleton className="h-72 rounded-[28px]" />
             </div>
           )}
+
           {loadError && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <CameraOff className="mb-4 h-12 w-12 text-muted-foreground" />
-              <p className="text-lg font-medium text-muted-foreground">โหลดภารกิจไม่สำเร็จ</p>
-              <p className="text-sm text-muted-foreground">กรุณาตรวจสอบการเชื่อมต่อแล้วลองใหม่</p>
+            <div className="kids-card flex flex-col items-center gap-2 p-8 text-center">
+              <Mascot mood="think" size={96} />
+              <p className="text-lg">โหลดภารกิจไม่สำเร็จ ลองใหม่อีกทีนะ</p>
+            </div>
+          )}
+
+          {!loadingExercises && !loadError && quests.length === 0 && (
+            <div className="kids-card flex flex-col items-center gap-2 p-8 text-center">
+              <Mascot mood="sleepy" size={96} />
+              <p className="text-lg text-[var(--kids-ink-soft)]">วันนี้ไม่มีภารกิจ พักผ่อนได้เลย!</p>
+            </div>
+          )}
+
+          {!loadingExercises && !loadError && quests.length > 0 && (
+            <div className="grid gap-5 sm:grid-cols-2">
+              {quests.map((quest) => {
+                const done = quest.status === 'COMPLETED';
+                const name = quest.exercise.kidName || quest.exercise.nameTh || quest.exercise.name;
+                return (
+                  <article
+                    key={quest.id}
+                    className={`kids-card overflow-hidden ${quest.id === selectedQuestId ? 'ring-4 ring-[var(--kids-sky)]' : ''}`}
+                  >
+                    <div className="bg-[#e3f2fd] p-3">
+                      <div className="rounded-[20px] bg-white/80 p-1">
+                        <ExerciseDemo slug={quest.exercise.slug} compact target={quest.exercise.targetJoints.find((t) => t.isPrimary)} />
+                      </div>
+                    </div>
+                    <div className="space-y-3 p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <h2 className="text-2xl font-bold leading-tight">{name}</h2>
+                        {done && (
+                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--kids-grass)] px-3 py-1 text-base font-bold text-white">
+                            <CheckCircle className="h-4 w-4" /> เสร็จแล้ว
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-lg text-[var(--kids-ink-soft)]">
+                        {quest.exercise.sets} รอบ รอบละ {quest.exercise.repsPerSet} ครั้ง
+                        {quest.exercise.holdSeconds ? ` · ค้าง ${quest.exercise.holdSeconds} วิ` : ''}
+                      </p>
+                      {quest.exercise.unilateral ? (
+                        // One side at a time: each side is its own session; the quest completes when both are done
+                        <div className="grid grid-cols-2 gap-3">
+                          {(['left', 'right'] as const).map((side) => {
+                            const sideDone = quest.sidesDone.includes(side);
+                            const limb = quest.exercise.bodyPart === 'upper' ? 'แขน' : 'ขา';
+                            return (
+                              <button
+                                key={side}
+                                className={`kids-btn ${sideDone ? 'kids-btn-grass' : 'kids-btn-sky'} px-3 text-lg`}
+                                disabled={connecting}
+                                onClick={() => handleStartExercise({ questId: quest.id, side })}
+                                aria-label={`เล่น${limb}ข้าง${SIDE_LABELS[side]}${sideDone ? ' (เล่นแล้ว เล่นอีกรอบ)' : ''}`}
+                              >
+                                {connecting ? <Loader2 className="h-5 w-5 animate-spin" /> : sideDone ? <CheckCircle className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
+                                {limb}{SIDE_LABELS[side]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <button
+                          className={`kids-btn w-full ${done ? 'kids-btn-sun' : ''}`}
+                          disabled={connecting}
+                          onClick={() => handleStartExercise({ questId: quest.id })}
+                        >
+                          {connecting ? <Loader2 className="h-6 w-6 animate-spin" /> : done ? <RotateCcw className="h-6 w-6" /> : <Play className="h-6 w-6 fill-current" />}
+                          {done ? 'เล่นอีกรอบ' : 'เริ่มเลย!'}
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1909,12 +1722,10 @@ export function LiveSessionView() {
 
         {/* Loading overlay while MediaPipe initializes */}
         {!mediaPipeLoaded && !cameraError && !mediaPipeError && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70">
-            <Loader2 className="mb-3 h-10 w-10 animate-spin text-teal-300" />
-            <p className="text-sm font-medium text-white">กำลังเริ่มต้น AI...</p>
-            <p className="mt-1 text-xs text-white/60">
-              กำลังโหลดโมเดลตรวจจับท่าทาง (MediaPipe Pose) — ครั้งแรกอาจใช้เวลา 5-15 วินาที
-            </p>
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/70 px-4 text-center">
+            <Mascot mood="stretch" size={130} className="kids-bob" />
+            <p className="mt-2 text-xl font-bold text-white">น้องยืดกำลังวอร์มอัพ...</p>
+            <p className="mt-1 text-sm text-white/70">ครั้งแรกอาจรอสักครู่ ระหว่างนี้ยืนให้กล้องเห็นทั้งตัวนะ</p>
           </div>
         )}
 
@@ -1922,7 +1733,7 @@ export function LiveSessionView() {
         {mediaPipeLoaded && !detectionActive && !cameraError && !mediaPipeError && (
           <div className="absolute inset-x-4 top-20 z-20 mx-auto flex max-w-md items-center gap-2 rounded-full bg-amber-500/90 px-4 py-2 text-sm font-medium text-black shadow-lg lg:right-[22rem]">
             <AlertTriangle className="h-4 w-4 shrink-0" />
-            ยังไม่ได้รับผลตรวจจับจาก AI — ตรวจสอบว่าอยู่ในที่แสงเพียงพอและเห็นร่างกายชัดเจน
+            น้องยืดยังมองไม่เห็น ลองเปิดไฟให้สว่างขึ้นนะ
           </div>
         )}
 
@@ -1930,23 +1741,19 @@ export function LiveSessionView() {
         {detectionActive && !personVisible && (
           <div className="absolute inset-x-4 top-20 z-20 mx-auto flex max-w-md items-center justify-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm text-white backdrop-blur-sm lg:right-[22rem]">
             <PersonStanding className="h-4 w-4 text-teal-300" />
-            ถอยหลังให้เห็นลำตัว/ขาทั้งข้างในกรอบกล้อง
+            ถอยหลังอีกนิด ให้กล้องเห็นทั้งตัวนะ
           </div>
         )}
 
         {/* Error overlay */}
         {(cameraError || mediaPipeError) && (
-          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80">
-            <AlertTriangle className="mb-3 h-10 w-10 text-amber-400" />
-            <p className="text-sm font-medium text-white">{cameraError || mediaPipeError}</p>
-            <Button
-              variant="outline"
-              className="mt-4 border-white/30 text-white hover:bg-white/10"
-              onClick={handleStopSession}
-            >
-              <ChevronLeft className="mr-2 h-4 w-4" />
-              กลับ
-            </Button>
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80 px-6 text-center">
+            <Mascot mood="think" size={120} />
+            <p className="mt-2 text-lg font-bold text-white">{cameraError || mediaPipeError}</p>
+            <p className="mt-1 text-sm text-white/70">ถ้าไม่แน่ใจ ให้ผู้ใหญ่ช่วยกดอนุญาตกล้องนะ</p>
+            <button className="kids-btn kids-btn-sky mt-4" onClick={handleStopSession}>
+              <ChevronLeft className="h-5 w-5" /> กลับ
+            </button>
           </div>
         )}
 
@@ -1955,17 +1762,17 @@ export function LiveSessionView() {
           <button
             onClick={handleStopSession}
             className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition-colors hover:bg-white/20"
-            aria-label="หยุดเซสชัน"
+            aria-label="จบรอบนี้"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
           <div className="min-w-0 text-center">
             <p className="truncate text-sm font-semibold text-white">
-              {selectedExercise?.nameTh || selectedExercise?.name || 'Exercise'}
+              {selectedExercise?.kidName || selectedExercise?.nameTh || selectedExercise?.name}
               {sessionSide && ` · ข้าง${SIDE_LABELS[sessionSide]}`}
             </p>
             <p className="text-xs text-white/70">
-              เซ็ต {currentSet}/{selectedExercise?.sets || 3} • ครั้งที่ {currentRep}/{repsPerSet}
+              รอบ {currentSet}/{selectedExercise?.sets || 3} • ครั้งที่ {currentRep}/{repsPerSet}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1997,12 +1804,11 @@ export function LiveSessionView() {
         {/* ─── Pause overlay ────────────────────────────────────────── */}
         {isPaused && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
-            <Pause className="mb-3 h-12 w-12 text-amber-400" />
-            <p className="text-lg font-semibold text-white">หยุดชั่วคราว</p>
-            <Button className="mt-4 bg-teal-600 text-white hover:bg-teal-700" onClick={handleTogglePause}>
-              <Play className="mr-2 h-4 w-4" />
-              ดำเนินการต่อ
-            </Button>
+            <Mascot mood="sleepy" size={120} />
+            <p className="mt-2 text-2xl font-bold text-white">พักแป๊บนึง</p>
+            <button className="kids-btn mt-4" onClick={handleTogglePause}>
+              <Play className="h-6 w-6 fill-current" /> เล่นต่อ
+            </button>
           </div>
         )}
 
@@ -2013,11 +1819,11 @@ export function LiveSessionView() {
             aria-live="polite"
           >
             <div className="flex min-w-[clamp(6.5rem,16vh,11rem)] flex-col justify-between rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:px-5">
-              <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-teal-300">ครั้ง</p>
+              <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-amber-300">ครั้ง</p>
               <p className="whitespace-nowrap leading-none tabular-nums">
                 <motion.span
                   key={`rep-${currentSet}-${currentRep}`}
-                  initial={{ scale: 1.35, color: '#5eead4' }}
+                  initial={{ scale: 1.5, color: '#ffc93c' }}
                   animate={{ scale: 1, color: '#ffffff' }}
                   transition={{ type: 'spring', stiffness: 300, damping: 18 }}
                   className="inline-block origin-bottom-left text-[clamp(2.75rem,10vh,6.5rem)] font-black"
@@ -2028,14 +1834,14 @@ export function LiveSessionView() {
               </p>
               <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/15">
                 <div
-                  className="h-full rounded-full bg-teal-400 transition-[width] duration-300"
+                  className="h-full rounded-full bg-amber-300 transition-[width] duration-300"
                   style={{ width: `${Math.min(100, (currentRep / repsPerSet) * 100)}%` }}
                 />
               </div>
             </div>
 
             <div className="flex min-w-[clamp(5.5rem,13vh,9rem)] flex-col justify-between rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:px-5">
-              <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-teal-300">เซ็ต</p>
+              <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-sky-300">รอบ</p>
               <p className="whitespace-nowrap leading-none tabular-nums">
                 <span className="text-[clamp(2.75rem,10vh,6.5rem)] font-black">{currentSet}</span>
                 <span className="text-[clamp(1.1rem,3.6vh,2.4rem)] font-bold text-white/55">/{totalSets}</span>
@@ -2044,7 +1850,7 @@ export function LiveSessionView() {
                 {Array.from({ length: totalSets }).map((_, i) => (
                   <span
                     key={i}
-                    className={`h-2.5 flex-1 rounded-full ${i < currentSet - 1 ? 'bg-teal-400' : i === currentSet - 1 ? 'bg-teal-400/50' : 'bg-white/15'}`}
+                    className={`h-2.5 flex-1 rounded-full ${i < currentSet - 1 ? 'bg-sky-400' : i === currentSet - 1 ? 'bg-sky-400/50' : 'bg-white/15'}`}
                   />
                 ))}
               </div>
@@ -2052,8 +1858,8 @@ export function LiveSessionView() {
 
             {selectedExercise?.holdSeconds && (
               <div className="flex min-w-[clamp(5.5rem,13vh,9rem)] flex-col justify-between rounded-3xl border border-white/15 bg-slate-950/75 px-4 py-3 text-white shadow-2xl backdrop-blur-md sm:px-5">
-                <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-teal-300">
-                  {holdStatus?.done && selectedExercise.isometric ? 'ผ่อนแรง' : 'ค้างไว้'}
+                <p className="text-[clamp(0.8rem,2vh,1.15rem)] font-bold tracking-wide text-emerald-300">
+                  {holdStatus?.done && selectedExercise.isometric ? 'พักแป๊บนึง' : 'ค้างไว้'}
                 </p>
                 <p className="whitespace-nowrap leading-none tabular-nums">
                   <span className="text-[clamp(2.75rem,10vh,6.5rem)] font-black">
@@ -2090,11 +1896,7 @@ export function LiveSessionView() {
                 formCue ? 'border-amber-300/60 bg-amber-500/85 text-slate-950' : 'border-white/15 bg-slate-950/75'
               }`}
             >
-              {formCue ? (
-                <AlertTriangle className="mt-1 h-[clamp(1.25rem,3vh,2rem)] w-[clamp(1.25rem,3vh,2rem)] shrink-0" />
-              ) : (
-                <Volume2 className="mt-1 h-[clamp(1.25rem,3vh,2rem)] w-[clamp(1.25rem,3vh,2rem)] shrink-0 text-teal-300" />
-              )}
+              <Mascot mood={formCue ? 'think' : 'cheer'} size={52} className="-my-1 shrink-0" />
               <p className={`text-[clamp(1.1rem,3.2vh,2rem)] font-bold leading-snug ${formCue ? 'text-slate-950' : 'text-white'}`}>
                 {formCue ?? aiFeedback}
               </p>
@@ -2114,12 +1916,12 @@ export function LiveSessionView() {
             <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2.5">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">
-                  {selectedExercise?.nameTh || selectedExercise?.name}
+                  {selectedExercise?.kidName || selectedExercise?.nameTh || selectedExercise?.name}
                   {sessionSide && ` · ข้าง${SIDE_LABELS[sessionSide]}`}
                 </p>
                 <p className="text-[11px] text-white/60 tabular-nums">
-                  เซ็ต {currentSet}/{selectedExercise?.sets || 3} · ครั้งที่ {currentRep}/{repsPerSet}
-                  {avgAccuracy !== null && <> · แม่นยำ {avgAccuracy}%</>}
+                  รอบ {currentSet}/{selectedExercise?.sets || 3} · ครั้งที่ {currentRep}/{repsPerSet}
+                  {avgAccuracy !== null && <> · {'⭐'.repeat(starsFor(avgAccuracy))}</>}
                 </p>
               </div>
               <button
@@ -2147,63 +1949,25 @@ export function LiveSessionView() {
                 <section>
                   <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
                     <Activity className="h-3.5 w-3.5 text-amber-400" />
-                    โค้ช
+                    น้องยืดบอกว่า
                     {coachLoading && <Loader2 className="h-3 w-3 animate-spin text-amber-400" />}
                   </h4>
-                  <p className="rounded-lg bg-white/5 p-3 text-sm leading-relaxed text-white/90">
-                    {aiFeedback || 'โค้ชจะแนะนำเมื่อเริ่มตรวจจับท่าทาง'}
-                  </p>
-                </section>
-
-                {/* Joint angles */}
-                <section>
-                  <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-white/80">
-                    <Target className="h-3.5 w-3.5 text-teal-300" />
-                    มุมข้อต่อปัจจุบัน
-                  </h4>
-                  <div className="space-y-2">
-                    {targets.map((tj) => {
-                      const current = liveAngles[tj.name];
-                      if (current === undefined) return null;
-                      const colorHex = ANGLE_STATUS_HEX[getAngleStatus(current, tj.minAngle, tj.maxAngle)];
-                      return (
-                        <div key={tj.name} className="rounded-lg bg-white/5 p-2.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-white/60">{tj.nameTh}</span>
-                            <span className={`text-lg font-bold ${getAngleStatusColor(current, tj.minAngle, tj.maxAngle)}`}>
-                              {formatAngle(current)}
-                            </span>
-                          </div>
-                          <div className="mt-1.5 flex items-center justify-between text-[10px] text-white/40">
-                            <span>เป้าหมาย {tj.idealAngle}°</span>
-                            <span>
-                              {tj.minAngle}°–{tj.maxAngle}°
-                            </span>
-                          </div>
-                          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                            <div
-                              className="h-full rounded-full transition-all duration-200"
-                              style={{ width: `${Math.min(100, (current / (tj.maxAngle + 20)) * 100)}%`, backgroundColor: colorHex }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {hiddenTargets.length > 0 && (
-                      <p className="text-xs text-white/50">
-                        {hiddenTargets.length === targets.length ? 'ยังมองไม่เห็น' : 'มองไม่เห็น'}{' '}
-                        {hiddenTargets.map((t) => t.nameTh).join(', ')} — ถอยห่างจากกล้องให้เห็นไหล่ สะโพก และแขนขาทั้งหมด
-                      </p>
-                    )}
+                  <div className="flex items-center gap-2 rounded-lg bg-white/5 p-2">
+                    <Mascot mood="happy" size={44} className="shrink-0" />
+                    <p className="text-sm leading-relaxed text-white/90">{aiFeedback || 'เริ่มขยับเมื่อไหร่ น้องยืดจะช่วยดูให้นะ'}</p>
                   </div>
                 </section>
+
+                {hiddenTargets.length > 0 && (
+                  <p className="rounded-lg bg-white/5 p-2.5 text-xs text-white/70">ถอยห่างจากกล้องอีกนิด ให้เห็นไหล่ สะโพก แขนและขาทั้งหมดนะ</p>
+                )}
 
                 {/* Set / rep progress */}
                 <section>
                   <div className="mb-1.5 flex items-center justify-between text-xs text-white/60">
                     <span className="flex items-center gap-1.5 font-semibold text-white/80">
                       <CheckCircle className="h-3.5 w-3.5 text-teal-300" />
-                      ความคืบหน้า (เซ็ต {currentSet})
+                      รอบที่ {currentSet}
                     </span>
                     <span className="font-mono font-bold text-white">
                       {currentRep} / {repsPerSet}
@@ -2220,7 +1984,7 @@ export function LiveSessionView() {
                     className="flex w-full items-center justify-between text-xs font-semibold text-white/80"
                     aria-expanded={demoOpen}
                   >
-                    ท่าตัวอย่างและวิธีทำ
+                    ดูท่าตัวอย่าง
                     {demoOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                   </button>
                   {demoOpen && selectedExercise && (
@@ -2233,8 +1997,8 @@ export function LiveSessionView() {
                         className="mt-2 bg-white/90 dark:bg-slate-900/80"
                       />
                       {selectedExercise.instructions.length > 0 && (
-                        <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-xs leading-relaxed text-white/60">
-                          {selectedExercise.instructions.map((step, i) => (
+                        <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-sm leading-relaxed text-white/75">
+                          {(selectedExercise.kidSteps ?? selectedExercise.instructions).map((step, i) => (
                             <li key={i}>{step}</li>
                           ))}
                         </ol>
@@ -2256,7 +2020,7 @@ export function LiveSessionView() {
                 }`}
               >
                 {ttsEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
-                {ttsEnabled ? 'เสียงเปิด' : 'เสียงปิด'}
+                {ttsEnabled ? 'น้องยืดพูด' : 'ปิดเสียง'}
               </button>
               <div className="flex items-center gap-2">
                 <button
@@ -2269,7 +2033,7 @@ export function LiveSessionView() {
                 <button
                   onClick={handleStopSession}
                   className="flex h-11 w-11 items-center justify-center rounded-full bg-red-500/85 text-white transition-colors hover:bg-red-500"
-                  aria-label="จบเซสชัน"
+                  aria-label="จบรอบนี้"
                 >
                   <Square className="h-4 w-4" />
                 </button>
@@ -2285,117 +2049,68 @@ export function LiveSessionView() {
   // RENDER: Session Summary Screen
   // =====================================================================
   if (phase === 'summary' && summaryData) {
-    const avgAcc = summaryData.avgAccuracy;
-    const accColor =
-      avgAcc >= 80
-        ? 'text-teal-500'
-        : avgAcc >= 60
-        ? 'text-amber-500'
-        : 'text-red-500';
+    // Kids see stars, not percentages (docs/KIDS-ART-UI.md §8)
+    const stars = summaryData.totalReps > 0 ? starsFor(summaryData.avgAccuracy) : 0;
+    const praise = stars === 3 ? 'สุดยอดไปเลย!' : stars === 2 ? 'เก่งมาก!' : stars === 1 ? 'ทำได้ดี! รอบหน้าลองช้า ๆ นะ' : 'ไม่เป็นไร มาลองใหม่กัน';
+    const name = selectedExercise?.kidName || selectedExercise?.nameTh || selectedExercise?.name || 'ภารกิจ';
 
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md"
-        >
-          <Card className="overflow-hidden">
-            {/* Header */}
-            <div className="bg-teal-600 px-6 py-8 text-center text-white">
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
+      <div className="theme-kids flex min-h-screen items-center justify-center p-4">
+        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="kids-card w-full max-w-md space-y-5 p-6 text-center">
+          <Mascot mood={stars > 0 ? 'cheer' : 'happy'} size={150} className="kids-bob mx-auto" />
+          <div>
+            <h2 className="text-3xl font-bold">{praise}</h2>
+            <p className="mt-1 text-lg text-[var(--kids-ink-soft)]">{name}</p>
+          </div>
+
+          <div className="flex justify-center gap-2" aria-label={`ได้ ${stars} ดาว`}>
+            {[1, 2, 3].map((n) => (
+              <motion.span
+                key={n}
+                initial={{ scale: 0, rotate: -40 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ delay: 0.25 + n * 0.2, type: 'spring', stiffness: 260, damping: 14 }}
+                className={`text-6xl ${n <= stars ? '' : 'opacity-20 grayscale'}`}
               >
-                <CheckCircle className="mx-auto mb-3 h-14 w-14" />
-              </motion.div>
-              <h2 className="text-xl font-bold">ฝึกเสร็จสิ้น!</h2>
-              <p className="mt-1 text-sm text-white/80">
-                {selectedExercise?.name || 'Exercise'}
-              </p>
+                ⭐
+              </motion.span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-[20px] bg-[#e3f2fd] p-3">
+              <p className="text-3xl font-bold">{summaryData.totalReps}</p>
+              <p className="text-base text-[var(--kids-ink-soft)]">ครั้ง</p>
             </div>
+            <div className="rounded-[20px] bg-[#fff4d6] p-3">
+              <p className="text-3xl font-bold">{formatTime(summaryData.totalTime)}</p>
+              <p className="text-base text-[var(--kids-ink-soft)]">เวลาที่เล่น</p>
+            </div>
+          </div>
 
-            <CardContent className="space-y-4 p-6">
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="rounded-xl bg-muted/50 p-3">
-                  <p className="text-2xl font-bold text-teal-600">
-                    {summaryData.totalReps}
-                  </p>
-                  <p className="text-xs text-muted-foreground">ครั้งทั้งหมด</p>
-                </div>
-                <div className="rounded-xl bg-muted/50 p-3">
-                  <p className={`text-2xl font-bold ${accColor}`}>
-                    {summaryData.avgAccuracy}%
-                  </p>
-                  <p className="text-xs text-muted-foreground">ความแม่นยำ</p>
-                </div>
-                <div className="rounded-xl bg-muted/50 p-3">
-                  <p className="text-2xl font-bold text-foreground">
-                    {formatTime(summaryData.totalTime)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">เวลา</p>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Per-rep accuracy */}
-              {summaryData.perRepAccuracy.length > 0 && (
-                <div>
-                  <h4 className="mb-2 text-xs font-semibold text-muted-foreground">
-                    ความแม่นยำต่อซ้ำ
-                  </h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {summaryData.perRepAccuracy.map((acc, idx) => (
-                      <span
-                        key={idx}
-                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold text-white ${
-                          acc >= 80
-                            ? 'bg-teal-500'
-                            : acc >= 60
-                            ? 'bg-amber-500'
-                            : 'bg-red-500'
-                        }`}
-                      >
-                        {acc}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {summaryData.perRepAccuracy.length === 0 && (
-                <p className="text-center text-sm text-muted-foreground">
-                  ยังไม่มีข้อมูลความแม่นยำรายซ้ำ
-                </p>
-              )}
-
-              <Separator />
-
-              {/* Action buttons */}
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={handleBackToHome}
-                >
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  ฝึกอีกครั้ง
-                </Button>
-                <Button
-                  className="flex-1 bg-teal-600 text-white hover:bg-teal-700"
-                  onClick={() => {
-                    handleBackToHome();
-                    setActiveTab('dashboard');
-                  }}
-                >
-                  กลับหน้าหลัก
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="flex flex-col gap-3">
+            <button
+              className="kids-btn w-full"
+              onClick={() => {
+                handleBackToHome();
+                setActiveTab('dashboard');
+              }}
+            >
+              กลับบ้าน
+            </button>
+            <button
+              className="kids-btn kids-btn-grape w-full"
+              onClick={() => {
+                handleBackToHome();
+                setActiveTab('history');
+              }}
+            >
+              ดูสติกเกอร์ของฉัน
+            </button>
+            <button className="kids-btn kids-btn-sky w-full" onClick={handleBackToHome}>
+              <RotateCcw className="h-5 w-5" /> เล่นอีกรอบ
+            </button>
+          </div>
         </motion.div>
       </div>
     );

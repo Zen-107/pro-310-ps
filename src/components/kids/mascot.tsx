@@ -1,130 +1,180 @@
 'use client';
 
-// "น้องยืด" — the kids UI mascot. Placeholder vector drawing until the final
-// art lands in public/kids/mascot/ (spec: docs/KIDS-ART-UI.md §3 and §10).
+import { avatarColors } from '@/lib/kids';
 
-export type MascotMood = 'happy' | 'cheer' | 'stretch' | 'sleepy' | 'think';
+// "น้องยืด" — the kids mascot: a soft round mochi with a leaf sprout that
+// sways, big shiny eyes that blink, and stretchy little arms.
+// Spec: docs/KIDS-ART-UI.md §3. Body colour follows the child's avatar.
+
+export type MascotMood = 'happy' | 'cheer' | 'stretch' | 'sleepy' | 'think' | 'wave';
 
 const INK = '#3B2A4A';
-const BODY = '#FF9F5A';
-const BELLY = '#FFE7C7';
-const CHEEK = '#FF7A9A';
+const CHEEK = '#FF8FA8';
+const LEAF = '#6CCB8A';
+const LEAF_DARK = '#3E9E62';
 
 export function Mascot({
   mood = 'happy',
   size = 120,
+  avatar,
   className = '',
+  title = 'น้องยืด',
 }: {
   mood?: MascotMood;
   size?: number;
+  /** Avatar colour key (lib/kids.ts AVATARS); default peach */
+  avatar?: string | null;
   className?: string;
+  title?: string;
 }) {
-  // "stretch" makes the body taller; everything else hangs off these numbers
+  const { body, belly } = avatarColors(avatar);
   const stretch = mood === 'stretch';
-  const top = stretch ? 46 : 70;
-  const bodyRy = stretch ? 88 : 72;
-  const cy = top + bodyRy;
-  const eyeY = top + 52;
+  // Body geometry: "stretch" is taller and thinner
+  const cy = stretch ? 134 : 146;
+  const rx = stretch ? 66 : 76;
+  const ry = stretch ? 80 : 66;
+  const top = cy - ry;
+  const eyeY = cy - (stretch ? 22 : 14);
+  const footY = cy + ry - 6;
 
   return (
-    <svg
-      viewBox="0 0 240 240"
-      width={size}
-      height={size}
-      className={className}
-      role="img"
-      aria-label="น้องยืด"
-    >
-      <g stroke={INK} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round">
-        {/* Arms */}
-        {mood === 'cheer' || stretch ? (
-          <>
-            <path d={`M70 ${cy - 30} Q50 ${cy - 80} 60 ${top - 10}`} fill="none" />
-            <path d={`M170 ${cy - 30} Q190 ${cy - 80} 180 ${top - 10}`} fill="none" />
-          </>
-        ) : mood === 'happy' ? (
-          <>
-            <path d={`M62 ${cy} Q40 ${cy + 10} 42 ${cy + 30}`} fill="none" />
-            <path d={`M178 ${cy - 10} Q205 ${cy - 30} 200 ${cy - 60}`} fill="none" />
-          </>
-        ) : mood === 'think' ? (
-          <>
-            <path d={`M62 ${cy} Q40 ${cy + 10} 42 ${cy + 30}`} fill="none" />
-            <path d={`M176 ${cy} Q170 ${cy - 20} 150 ${eyeY + 32}`} fill="none" />
-          </>
-        ) : (
-          <>
-            <path d={`M62 ${cy} Q48 ${cy + 20} 56 ${cy + 36}`} fill="none" />
-            <path d={`M178 ${cy} Q192 ${cy + 20} 184 ${cy + 36}`} fill="none" />
-          </>
-        )}
+    <svg viewBox="0 0 240 240" width={size} height={size} className={className} role="img" aria-label={title}>
+      {/* Ground shadow */}
+      <ellipse cx={120} cy={226} rx={stretch ? 52 : 62} ry={7} fill={INK} opacity={0.1} />
 
-        {/* Feet */}
-        <ellipse cx={95} cy={cy + bodyRy - 4} rx={18} ry={10} fill={BODY} />
-        <ellipse cx={145} cy={cy + bodyRy - 4} rx={18} ry={10} fill={BODY} />
-
-        {/* Body */}
-        <ellipse cx={120} cy={cy} rx={66} ry={bodyRy} fill={BODY} />
-        <ellipse cx={120} cy={cy + bodyRy * 0.35} rx={40} ry={bodyRy * 0.45} fill={BELLY} strokeWidth={0} />
+      {/* Sprout (sways) */}
+      <g className="mascot-sway" style={{ transformOrigin: `120px ${top + 4}px` }}>
+        <path d={`M120 ${top + 4} Q118 ${top - 14} 122 ${top - 26}`} stroke={LEAF_DARK} strokeWidth={5} fill="none" strokeLinecap="round" />
+        <path d={`M122 ${top - 22} Q140 ${top - 44} 160 ${top - 30} Q142 ${top - 14} 122 ${top - 22} Z`} fill={LEAF} stroke={INK} strokeWidth={4} strokeLinejoin="round" />
+        <path d={`M120 ${top - 16} Q104 ${top - 36} 86 ${top - 26} Q100 ${top - 10} 120 ${top - 16} Z`} fill={LEAF} stroke={INK} strokeWidth={4} strokeLinejoin="round" />
       </g>
+
+      {/* Arms (outlined capsules) */}
+      <Arms mood={mood} cy={cy} rx={rx} top={top} body={body} />
+
+      {/* Feet */}
+      <g stroke={INK} strokeWidth={5}>
+        <ellipse cx={92} cy={footY} rx={20} ry={11} fill={body} />
+        <ellipse cx={148} cy={footY} rx={20} ry={11} fill={body} />
+      </g>
+
+      {/* Body + belly */}
+      <ellipse cx={120} cy={cy} rx={rx} ry={ry} fill={body} stroke={INK} strokeWidth={6} />
+      <ellipse cx={120} cy={cy + ry * 0.38} rx={rx * 0.55} ry={ry * 0.42} fill={belly} />
+      {/* Soft shine */}
+      <ellipse cx={86} cy={cy - ry * 0.55} rx={14} ry={8} fill="#fff" opacity={0.45} transform={`rotate(-30 86 ${cy - ry * 0.55})`} />
 
       {/* Cheeks */}
-      <ellipse cx={84} cy={eyeY + 20} rx={10} ry={6} fill={CHEEK} opacity={0.7} />
-      <ellipse cx={156} cy={eyeY + 20} rx={10} ry={6} fill={CHEEK} opacity={0.7} />
+      <ellipse cx={80} cy={eyeY + 26} rx={12} ry={7} fill={CHEEK} opacity={0.75} />
+      <ellipse cx={160} cy={eyeY + 26} rx={12} ry={7} fill={CHEEK} opacity={0.75} />
 
-      {/* Eyes */}
-      {mood === 'cheer' ? (
-        <g stroke={INK} strokeWidth={6} strokeLinecap="round" fill="none">
-          <path d={`M90 ${eyeY + 4} L98 ${eyeY - 6} L106 ${eyeY + 4}`} />
-          <path d={`M134 ${eyeY + 4} L142 ${eyeY - 6} L150 ${eyeY + 4}`} />
-        </g>
-      ) : mood === 'sleepy' ? (
-        <g stroke={INK} strokeWidth={6} strokeLinecap="round" fill="none">
-          <path d={`M88 ${eyeY} Q98 ${eyeY + 8} 108 ${eyeY}`} />
-          <path d={`M132 ${eyeY} Q142 ${eyeY + 8} 152 ${eyeY}`} />
-        </g>
-      ) : (
-        <g>
-          <ellipse cx={98} cy={eyeY} rx={9} ry={11} fill={INK} />
-          <ellipse cx={142} cy={eyeY} rx={9} ry={11} fill={INK} />
-          <circle cx={101} cy={eyeY - 4} r={3.5} fill="#fff" />
-          <circle cx={145} cy={eyeY - 4} r={3.5} fill="#fff" />
-        </g>
-      )}
-
-      {/* Mouth */}
-      <g stroke={INK} strokeWidth={5} strokeLinecap="round" fill="none">
-        {mood === 'cheer' ? (
-          <path d={`M106 ${eyeY + 22} Q120 ${eyeY + 42} 134 ${eyeY + 22} Z`} fill={INK} />
-        ) : mood === 'sleepy' ? (
-          <ellipse cx={120} cy={eyeY + 26} rx={5} ry={4} />
-        ) : mood === 'think' ? (
-          <path d={`M110 ${eyeY + 26} L130 ${eyeY + 24}`} />
-        ) : (
-          <path d={`M108 ${eyeY + 22} Q120 ${eyeY + 34} 132 ${eyeY + 22}`} />
-        )}
-      </g>
+      <Eyes mood={mood} y={eyeY} />
+      <Mouth mood={mood} y={eyeY + 24} />
 
       {/* Extras */}
       {mood === 'sleepy' && (
         <g fill={INK} fontFamily="var(--font-mali), sans-serif" fontWeight={700}>
-          <text x={180} y={60} fontSize={26}>z</text>
-          <text x={200} y={36} fontSize={20}>z</text>
+          <text x={186} y={70} fontSize={28}>z</text>
+          <text x={206} y={46} fontSize={20}>z</text>
         </g>
       )}
       {mood === 'think' && (
-        <text x={186} y={62} fontSize={40} fontWeight={700} fill="#9B7BEA" fontFamily="var(--font-mali), sans-serif">
+        <text x={190} y={76} fontSize={44} fontWeight={700} fill="#9B7BEA" stroke={INK} strokeWidth={2} fontFamily="var(--font-mali), sans-serif">
           ?
         </text>
       )}
       {mood === 'cheer' && (
         <g fill="#FFC93C" stroke={INK} strokeWidth={3} strokeLinejoin="round">
-          <Star cx={30} cy={60} r={14} />
-          <Star cx={212} cy={86} r={11} />
+          <Star cx={34} cy={74} r={15} />
+          <Star cx={206} cy={92} r={12} />
+          <Star cx={196} cy={30} r={8} />
         </g>
       )}
     </svg>
   );
+}
+
+function Arms({ mood, cy, rx, top, body }: { mood: MascotMood; cy: number; rx: number; top: number; body: string }) {
+  const lx = 120 - rx + 6;
+  const rxx = 120 + rx - 6;
+  let left: string;
+  let right: string;
+  switch (mood) {
+    case 'cheer':
+    case 'stretch':
+      left = `M${lx + 4} ${cy - 10} Q${lx - 22} ${cy - 50} ${lx - 6} ${top - 6}`;
+      right = `M${rxx - 4} ${cy - 10} Q${rxx + 22} ${cy - 50} ${rxx + 6} ${top - 6}`;
+      break;
+    case 'wave':
+    case 'happy':
+      left = `M${lx + 4} ${cy + 6} Q${lx - 18} ${cy + 16} ${lx - 12} ${cy + 34}`;
+      right = `M${rxx - 4} ${cy - 4} Q${rxx + 24} ${cy - 20} ${rxx + 16} ${cy - 52}`;
+      break;
+    case 'think':
+      left = `M${lx + 4} ${cy + 6} Q${lx - 18} ${cy + 16} ${lx - 12} ${cy + 34}`;
+      right = `M${rxx - 4} ${cy + 10} Q${rxx - 4} ${cy - 6} ${rxx - 30} ${cy - 2}`;
+      break;
+    default:
+      left = `M${lx + 4} ${cy + 6} Q${lx - 14} ${cy + 22} ${lx - 4} ${cy + 38}`;
+      right = `M${rxx - 4} ${cy + 6} Q${rxx + 14} ${cy + 22} ${rxx + 4} ${cy + 38}`;
+  }
+  const waving = mood === 'wave';
+  return (
+    <g fill="none" strokeLinecap="round">
+      {[left, right].map((d, i) => (
+        <g key={i} className={waving && i === 1 ? 'mascot-wave' : undefined} style={waving && i === 1 ? { transformOrigin: `${rxx}px ${cy}px` } : undefined}>
+          <path d={d} stroke={INK} strokeWidth={20} />
+          <path d={d} stroke={body} strokeWidth={11} />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function Eyes({ mood, y }: { mood: MascotMood; y: number }) {
+  if (mood === 'cheer') {
+    return (
+      <g stroke={INK} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" fill="none">
+        <path d={`M86 ${y + 4} L96 ${y - 7} L106 ${y + 4}`} />
+        <path d={`M134 ${y + 4} L144 ${y - 7} L154 ${y + 4}`} />
+      </g>
+    );
+  }
+  if (mood === 'sleepy') {
+    return (
+      <g stroke={INK} strokeWidth={6} strokeLinecap="round" fill="none">
+        <path d={`M84 ${y} Q96 ${y + 9} 108 ${y}`} />
+        <path d={`M132 ${y} Q144 ${y + 9} 156 ${y}`} />
+      </g>
+    );
+  }
+  // Big shiny eyes that blink
+  return (
+    <g className="mascot-blink" style={{ transformOrigin: `120px ${y}px` }}>
+      {[96, 144].map((x) => (
+        <g key={x}>
+          <ellipse cx={x} cy={y} rx={12} ry={15} fill={INK} />
+          <circle cx={x + 4} cy={y - 6} r={5} fill="#fff" />
+          <circle cx={x - 4} cy={y + 5} r={2.4} fill="#fff" />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function Mouth({ mood, y }: { mood: MascotMood; y: number }) {
+  switch (mood) {
+    case 'cheer':
+    case 'wave':
+      return <path d={`M106 ${y - 2} Q120 ${y + 18} 134 ${y - 2} Z`} fill="#E65A6E" stroke={INK} strokeWidth={4} strokeLinejoin="round" />;
+    case 'sleepy':
+      return <ellipse cx={120} cy={y + 2} rx={5} ry={4} fill="none" stroke={INK} strokeWidth={4} />;
+    case 'think':
+      return <path d={`M112 ${y + 2} Q120 ${y - 2} 128 ${y + 2}`} fill="none" stroke={INK} strokeWidth={4.5} strokeLinecap="round" />;
+    default:
+      // Little "w" cat smile
+      return <path d={`M108 ${y - 1} Q114 ${y + 7} 120 ${y} Q126 ${y + 7} 132 ${y - 1}`} fill="none" stroke={INK} strokeWidth={4.5} strokeLinecap="round" strokeLinejoin="round" />;
+  }
 }
 
 function Star({ cx, cy, r }: { cx: number; cy: number; r: number }) {
@@ -141,14 +191,16 @@ export function MascotSays({
   mood,
   children,
   size = 110,
+  avatar,
 }: {
   mood?: MascotMood;
   children: React.ReactNode;
   size?: number;
+  avatar?: string | null;
 }) {
   return (
     <div className="flex items-end gap-3">
-      <Mascot mood={mood} size={size} className="kids-bob shrink-0" />
+      <Mascot mood={mood} size={size} avatar={avatar} className="kids-bob shrink-0" />
       <div className="relative mb-6 rounded-[24px] border-2 border-[var(--border)] bg-white px-4 py-3 text-lg font-bold leading-snug shadow-[0_4px_0_rgba(59,42,74,0.08)]">
         <span
           aria-hidden

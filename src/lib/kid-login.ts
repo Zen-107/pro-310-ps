@@ -1,47 +1,19 @@
-import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto';
-import { hashPassword, verifyPassword } from '@/lib/password';
-
+// Server side of the kid login (codes, picture hashes, switch tickets).
 // Kids sign in without email or typing a password:
 //  1. kid code (6 characters, printed on a card by the teacher) + 3 pictures in order
 //  2. an adult switches to the child ("play as …") with a signed one-time ticket;
 //     going back needs the adult's 4-digit PIN, again through a ticket.
 // Tickets are HMAC-signed with NEXTAUTH_SECRET and expire after 60 seconds.
+// Browser-safe formats live in src/lib/kid-codes.ts (re-exported here).
 
-/** No 0/O, 1/I/L: easy for a child to read and type */
-const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-export const KID_CODE_LENGTH = 6;
-export const PARENT_CODE_LENGTH = 8;
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto';
+import { hashPassword, verifyPassword } from '@/lib/password';
+import { CODE_ALPHABET, KID_CODE_LENGTH, PICTURE_PIN_LENGTH, PICTURES, type PictureId } from '@/lib/kid-codes';
+
+export * from '@/lib/kid-codes';
 
 export function newCode(length = KID_CODE_LENGTH): string {
   return Array.from({ length }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
-}
-
-/** Upper-cases and drops spaces/dashes ("ab3-k9q" → "AB3K9Q") */
-export function normalizeCode(raw: unknown): string {
-  return typeof raw === 'string' ? raw.toUpperCase().replace(/[\s-]/g, '') : '';
-}
-
-export const isKidCode = (code: string) => code.length === KID_CODE_LENGTH && [...code].every((c) => CODE_ALPHABET.includes(c));
-
-// ─── Picture password ────────────────────────────────────────────────
-export const PICTURES = [
-  { id: 'cat', emoji: '🐱', label: 'แมว' },
-  { id: 'dog', emoji: '🐶', label: 'หมา' },
-  { id: 'rabbit', emoji: '🐰', label: 'กระต่าย' },
-  { id: 'bear', emoji: '🐻', label: 'หมี' },
-  { id: 'frog', emoji: '🐸', label: 'กบ' },
-  { id: 'fish', emoji: '🐟', label: 'ปลา' },
-  { id: 'bird', emoji: '🐦', label: 'นก' },
-  { id: 'elephant', emoji: '🐘', label: 'ช้าง' },
-  { id: 'turtle', emoji: '🐢', label: 'เต่า' },
-] as const;
-export type PictureId = (typeof PICTURES)[number]['id'];
-export const PICTURE_PIN_LENGTH = 3;
-
-const PICTURE_IDS = new Set<string>(PICTURES.map((p) => p.id));
-
-export function isPicturePin(value: unknown): value is PictureId[] {
-  return Array.isArray(value) && value.length === PICTURE_PIN_LENGTH && value.every((v) => typeof v === 'string' && PICTURE_IDS.has(v));
 }
 
 export function randomPicturePin(): PictureId[] {
@@ -54,9 +26,6 @@ export const verifyPicturePin = (pin: PictureId[], stored: string) => verifyPass
 /** Wrong picture attempts before the code locks, and for how long */
 export const MAX_PIN_FAILS = 5;
 export const PIN_LOCK_MS = 10 * 60_000;
-
-// ─── Adult PIN (leave kid mode) ──────────────────────────────────────
-export const isAdultPin = (value: unknown): value is string => typeof value === 'string' && /^\d{4}$/.test(value);
 
 // ─── Switch tickets ──────────────────────────────────────────────────
 export interface SwitchTicket {

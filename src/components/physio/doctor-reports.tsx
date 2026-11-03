@@ -360,10 +360,10 @@ export function DoctorReports() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <FileText className="h-6 w-6 text-teal-600" />
-            รายงานคลินิก
+            รายงานผลการเล่น
           </h2>
           <p className="text-muted-foreground mt-1">
-            สร้างและดูรายงานสรุปผลการฝึกโดย AI สำหรับผู้ป่วยแต่ละราย
+            สร้างและดูรายงานสรุปผลการเล่นโดย AI สำหรับเด็กแต่ละคน
           </p>
         </div>
       </div>
@@ -374,11 +374,11 @@ export function DoctorReports() {
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground shrink-0">
               <UserSearch className="h-4 w-4 text-teal-600" />
-              <span>ผู้ป่วย:</span>
+              <span>เด็ก:</span>
             </div>
             <Select value={activePatientId} onValueChange={handlePatientChange}>
               <SelectTrigger className="w-full sm:w-72">
-                <SelectValue placeholder="เลือกผู้ป่วย" />
+                <SelectValue placeholder="เลือกเด็ก" />
               </SelectTrigger>
               <SelectContent>
                 {patients.map((p) => (
@@ -411,9 +411,9 @@ export function DoctorReports() {
         <Card className="border-dashed border-2 border-muted">
           <CardContent className="py-16 flex flex-col items-center text-center">
             <UserSearch className="h-12 w-12 text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground font-medium">ไม่มีรายชื่อผู้ป่วย</p>
+            <p className="text-muted-foreground font-medium">ไม่มีรายชื่อเด็ก</p>
             <p className="text-xs text-muted-foreground/70 mt-1">
-              กรุณาเพิ่มผู้ป่วยก่อนเริ่มสร้างรายงาน
+              เมื่อคุณครูเพิ่มเด็กเข้าห้องเรียน รายงานจะแสดงที่นี่
             </p>
           </CardContent>
         </Card>
@@ -501,7 +501,7 @@ export function DoctorReports() {
                       <Sparkles className="h-5 w-5 text-amber-400 absolute -top-1 -right-1 animate-pulse" />
                     </div>
                     <p className="text-sm font-medium text-foreground">
-                      AI กำลังสร้างรายงานคลินิก...
+                      AI กำลังสร้างรายงาน...
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       กรุณารอสักครู่ ระบบกำลังวิเคราะห์ข้อมูลข้อต่อทั้งหมด
@@ -624,7 +624,7 @@ export function DoctorReports() {
                         >
                           <h4 className="text-sm font-semibold flex items-center gap-2 mb-3">
                             <Sparkles className="h-4 w-4 text-amber-500" />
-                            สรุปคลินิก (AI)
+                            สรุปโดย AI
                           </h4>
                           <div className="rounded-xl border bg-muted/30 p-5 text-sm text-foreground/90">
                             {report.clinicalSummary ? (
@@ -634,7 +634,7 @@ export function DoctorReports() {
                               />
                             ) : (
                               <div className="not-prose flex flex-col items-center gap-2 py-4 text-center">
-                                <p className="text-sm text-muted-foreground">ยังไม่มีสรุปคลินิกสำหรับเซสชันนี้</p>
+                                <p className="text-sm text-muted-foreground">ยังไม่มีสรุปโดย AI สำหรับเซสชันนี้</p>
                                 <Button data-print-hide size="sm" variant="outline" onClick={() => generateReport(report.sessionId)}>
                                   <Sparkles className="h-3.5 w-3.5 mr-1.5" /> สร้างสรุปด้วย AI
                                 </Button>
@@ -799,7 +799,7 @@ export function DoctorReports() {
                 <ClipboardList className="h-10 w-10 text-teal-500/60" />
               </div>
               <p className="text-sm font-medium text-muted-foreground">
-                เลือกเซสชันจากรายการด้านล่างเพื่อดูรายงานคลินิก
+                เลือกเซสชันจากรายการด้านล่างเพื่อดูรายงาน
               </p>
               <p className="text-xs text-muted-foreground/70 mt-1">
                 แสดงสูตรคำนวณ ผลรายข้อต่อ/รายครั้ง สรุป AI และการรับรองผล
@@ -830,7 +830,7 @@ export function DoctorReports() {
               <div className="py-10 text-center">
                 <ClipboardList className="h-8 w-8 mx-auto text-muted-foreground/30 mb-2" />
                 <p className="text-sm text-muted-foreground">
-                  ยังไม่มีเซสชันที่สำเร็จสำหรับผู้ป่วยท่านนี้
+                  เด็กคนนี้ยังไม่มีรอบที่เล่นเสร็จ
                 </p>
               </div>
             ) : (

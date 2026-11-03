@@ -20,7 +20,7 @@ export async function GET(_req: Request, { params }: Params) {
     const s = await db.exerciseSession.findFirst({
       where: { AND: [{ id }, sessionScope(auth.user)] },
       include: {
-        exercise: { select: { name: true, nameTh: true, category: true, icon: true } },
+        exercise: { select: { slug: true, name: true, nameTh: true, category: true, icon: true } },
         reps: { orderBy: { repNumber: 'asc' } },
         logs: { orderBy: { timestamp: 'asc' }, take: 5000 },
         review: { include: { clinician: { select: { title: true, user: { select: { name: true } } } } } },
@@ -89,7 +89,7 @@ export async function PATCH(req: Request, { params }: Params) {
           primaryJoint: primaryJoint as JointName | null,
           notes: optionalString(body.notes) ?? null,
         },
-        include: { exercise: { select: { name: true, nameTh: true, category: true, icon: true } } },
+        include: { exercise: { select: { slug: true, name: true, nameTh: true, category: true, icon: true } } },
       });
 
       if (s.questId) {

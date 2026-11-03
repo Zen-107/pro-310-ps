@@ -27,6 +27,8 @@ interface Exercise {
   slug: string;
   name: string;
   nameTh?: string;
+  kidName?: string;
+  kidSteps?: string[];
   instructions: string[];
   targetJoints: Target[];
 }
@@ -120,7 +122,7 @@ export function KidsMissions() {
 
               <div className="space-y-4 p-5">
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="text-2xl font-bold leading-tight">{ex.nameTh || ex.name}</h3>
+                  <h3 className="text-2xl font-bold leading-tight">{ex.kidName || ex.nameTh || ex.name}</h3>
                   {done && (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--kids-grass)] px-3 py-1 text-base font-bold text-white">
                       <Check className="h-4 w-4" strokeWidth={3} /> เสร็จแล้ว
@@ -129,7 +131,7 @@ export function KidsMissions() {
                 </div>
 
                 <ol className="space-y-2">
-                  {ex.instructions.slice(0, 3).map((step, i) => (
+                  {(ex.kidSteps ?? ex.instructions.slice(0, 3)).map((step, i) => (
                     <li key={i} className="flex gap-3 text-lg leading-snug">
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--kids-sun)] font-bold">
                         {i + 1}

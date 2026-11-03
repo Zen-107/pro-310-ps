@@ -8,14 +8,19 @@ import { dateOnly, localDateString } from '@/lib/dates';
 import { computeStreak } from '@/lib/presenters';
 import { childHasConsent, TERMS_VERSION } from '@/lib/terms';
 import { starsFor } from '@/lib/kids';
+import { ensureQuestsForDay } from '@/lib/quests';
 
 // The signed-in parent's children: today's missions, streak, week stars, consent and class
 export async function GET() {
   const auth = await requireApiUser(['PARENT']);
   if ('response' in auth) return auth.response;
   try {
-    const today = dateOnly(localDateString());
+    const day = localDateString();
+    const today = dateOnly(day);
     const since = new Date(Date.now() - 7 * 86_400_000);
+    // Today's missions are generated lazily; make them exist for the parent's view
+    const ids = await db.patient.findMany({ where: patientScope(auth.user), select: { id: true } });
+    for (const { id } of ids) await ensureQuestsForDay(id, day);
     const kids = await db.patient.findMany({
       where: patientScope(auth.user),
       include: {

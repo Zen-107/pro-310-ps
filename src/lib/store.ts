@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 
+// Kid (PATIENT), expert (CLINICIAN, "doctor" screens), teacher and parent tabs
 export type PatientTab = 'dashboard' | 'exercises' | 'camera' | 'history' | 'chat';
 export type DoctorTab = 'overview' | 'patients' | 'reports' | 'plans' | 'messages';
+export type TeacherTab = 'classes' | 'library' | 'messages' | 'account';
+export type ParentTab = 'children' | 'messages' | 'account';
 
-export type ActiveTab = PatientTab | DoctorTab;
+export type ActiveTab = PatientTab | DoctorTab | TeacherTab | ParentTab;
 
 interface AppState {
   // Navigation

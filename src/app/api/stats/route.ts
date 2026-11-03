@@ -57,6 +57,8 @@ export async function GET(req: NextRequest) {
       profile: {
         id: patient.id,
         name: patient.name,
+        nickname: patient.nickname,
+        avatar: patient.avatar,
         streak: computeStreak(allCompleted),
         totalSessions: allCompleted.length,
         totalMinutes: totalMinutes(allCompleted),

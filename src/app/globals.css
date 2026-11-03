@@ -225,6 +225,52 @@ video {
   color: var(--kids-ink);
 }
 
+/* Adult screens (teacher, parent, expert): same family as the kids palette,
+   calmer — regular type size, Sarabun body, sky primary on a warm paper
+   background. Light only, like the kids theme. */
+.theme-adult {
+  --kids-sky: #3ba7f5;
+  --kids-sky-deep: #1f7fcc;
+  --kids-sun: #ffc93c;
+  --kids-sun-deep: #e0a51a;
+  --kids-grass: #4cc38a;
+  --kids-grass-deep: #2f9d68;
+  --kids-coral: #ff7a6b;
+  --kids-coral-deep: #e0574a;
+  --kids-grape: #9b7bea;
+  --kids-ink: #3b2a4a;
+  --kids-ink-soft: #6b5a78;
+  --kids-paper: #fffaf2;
+
+  --background: var(--kids-paper);
+  --foreground: var(--kids-ink);
+  --card: #ffffff;
+  --card-foreground: var(--kids-ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--kids-ink);
+  --primary: var(--kids-sky-deep);
+  --primary-foreground: #ffffff;
+  --secondary: #f6eddf;
+  --secondary-foreground: var(--kids-ink);
+  --muted: #f6eddf;
+  --muted-foreground: #6b5a78;
+  --accent: #e3f2fd;
+  --accent-foreground: #164e7a;
+  --border: #eadcc6;
+  --input: #d9c7ab;
+  --ring: var(--kids-sky);
+  --radius: 1rem;
+
+  color-scheme: light;
+  background: var(--kids-paper);
+  color: var(--kids-ink);
+}
+.theme-adult h1,
+.theme-adult h2,
+.theme-adult .font-display {
+  font-family: var(--font-mali), var(--font-sarabun), sans-serif;
+}
+
 /* Chunky "toy" button: solid bottom edge that squashes when pressed */
 .kids-btn {
   --btn-bg: var(--kids-coral);
@@ -262,6 +308,10 @@ video {
   --btn-bg: var(--kids-grass);
   --btn-edge: var(--kids-grass-deep);
 }
+.kids-btn-grape {
+  --btn-bg: var(--kids-grape);
+  --btn-edge: #7a5bc9;
+}
 .kids-btn-sun {
   --btn-bg: var(--kids-sun);
   --btn-edge: var(--kids-sun-deep);
@@ -282,8 +332,28 @@ video {
 .kids-bob {
   animation: kids-bob 2.4s ease-in-out infinite;
 }
+/* Mascot idle motion: sprout sways, eyes blink, waving hand */
+@keyframes mascot-sway {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes mascot-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+@keyframes mascot-wave {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-16deg); }
+}
+.mascot-sway { animation: mascot-sway 3s ease-in-out infinite; }
+.mascot-blink { animation: mascot-blink 4.5s ease-in-out infinite; }
+.mascot-wave { animation: mascot-wave 0.9s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .kids-bob {
+  .kids-bob,
+  .mascot-sway,
+  .mascot-blink,
+  .mascot-wave {
     animation: none;
   }
 }

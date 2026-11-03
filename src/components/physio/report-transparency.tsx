@@ -237,7 +237,7 @@ export function ReviewPanel({
       )}
       <Textarea
         data-print-hide
-        placeholder="ความเห็นของแพทย์/นักกายภาพ (ไม่บังคับ)"
+        placeholder="ความเห็นของผู้เชี่ยวชาญ (ไม่บังคับ)"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
         className="text-sm"
@@ -471,7 +471,7 @@ function SessionVideoPlayer({
         }}
       />
       <span className="absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
-        วิดีโอ (ผู้ป่วยให้ความยินยอม){!meta.complete && ' · บันทึกไม่ครบ'}
+        วิดีโอ (ผู้ปกครองให้ความยินยอม){!meta.complete && ' · บันทึกไม่ครบ'}
       </span>
     </div>
   );

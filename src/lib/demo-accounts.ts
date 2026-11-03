@@ -1,4 +1,4 @@
-import type { PictureId } from '@/lib/kid-login';
+import type { PictureId } from '@/lib/kid-codes';
 
 // Demo accounts created by prisma/seed.ts. Listed on the login page in
 // development only. Adult password: SEED_DEMO_PASSWORD (.env).

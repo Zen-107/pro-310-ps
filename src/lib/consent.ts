@@ -1,17 +1,18 @@
-// Video-recording consent shown to the patient before any video is captured.
+// Video-recording consent, given by a parent for their child before any
+// video is captured (POST /api/kids/[id]/consent { video }).
 // Bump VIDEO_CONSENT_VERSION whenever the text changes: consent given to an
-// older version no longer counts, so the patient is asked again.
+// older version no longer counts, so the parent is asked again.
 
-export const VIDEO_CONSENT_VERSION = 'video-consent-th-v2';
+export const VIDEO_CONSENT_VERSION = 'video-consent-kids-th-v1';
 
-export const VIDEO_CONSENT_TITLE = 'ความยินยอมให้บันทึกวิดีโอการฝึกกายภาพบำบัด';
+export const VIDEO_CONSENT_TITLE = 'ความยินยอมให้บันทึกวิดีโอขณะเด็กเล่น';
 
 export const VIDEO_CONSENT_POINTS = [
-  'ระบบจะบันทึกวิดีโอจากกล้องระหว่างการฝึก (ไม่บันทึกเสียง) เพื่อให้แพทย์และนักกายภาพบำบัดในทีมผู้ดูแลของคุณตรวจสอบท่าทางย้อนหลัง',
-  'วิดีโอเป็นข้อมูลสุขภาพซึ่งเป็นข้อมูลส่วนบุคคลที่มีความอ่อนไหวตาม พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล (PDPA) จะเข้าถึงได้เฉพาะคุณและทีมผู้ดูแลของคุณเท่านั้น และจัดเก็บเป็นส่วนหนึ่งของเวชระเบียน',
-  'ระหว่างบันทึกจะมีสัญลักษณ์ REC แสดงบนหน้าจอ และคุณปิดการบันทึกได้ในแต่ละครั้งก่อนเริ่มฝึก',
-  'คุณถอนความยินยอมได้ทุกเมื่อ เมื่อถอนแล้วระบบจะลบวิดีโอที่บันทึกไว้ทั้งหมดอย่างถาวร และหยุดบันทึกวิดีโอในการฝึกครั้งต่อไปทันที',
-  'การไม่ให้ความยินยอมไม่มีผลต่อการรักษา คุณยังฝึกและได้รับการติดตามผลจากข้อมูลมุมข้อต่อได้ตามปกติ',
+  'ระบบจะบันทึกวิดีโอจากกล้องระหว่างที่เด็กเล่น (ไม่บันทึกเสียง) เพื่อให้คุณครูและผู้เชี่ยวชาญดูท่าทางย้อนหลังและให้คำแนะนำได้ถูกต้อง',
+  'วิดีโอของเด็กเป็นข้อมูลส่วนบุคคลที่ต้องดูแลเป็นพิเศษ เข้าถึงได้เฉพาะผู้ปกครอง คุณครูประจำชั้น และผู้เชี่ยวชาญที่ได้รับมอบหมายเท่านั้น',
+  'ระหว่างบันทึกจะมีสัญลักษณ์ REC แสดงบนหน้าจอ',
+  'ผู้ปกครองถอนความยินยอมได้ทุกเมื่อ เมื่อถอนแล้วระบบจะลบวิดีโอที่บันทึกไว้ทั้งหมดอย่างถาวร',
+  'ถ้าไม่ยินยอม เด็กยังเล่นได้ตามปกติ ระบบใช้เฉพาะตำแหน่งข้อต่อจากกล้อง (ไม่มีภาพ) ในการนับและตรวจท่า',
 ];
 
 export function hasValidVideoConsent(p: { videoConsentAt: Date | string | null; videoConsentVersion: string | null } | null | undefined): boolean {

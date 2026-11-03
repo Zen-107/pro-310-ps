@@ -43,13 +43,13 @@ export function DoctorMessages() {
     <div className="space-y-4">
       <div>
         <h2 className="text-2xl font-bold tracking-tight">ข้อความ</h2>
-        <p className="text-muted-foreground mt-1">สนทนากับผู้ป่วยในความดูแล (ทีมผู้ดูแลทุกคนเห็นข้อความเดียวกัน)</p>
+        <p className="text-muted-foreground mt-1">สนทนาเรื่องเด็กแต่ละคนระหว่างผู้ปกครอง คุณครู และผู้เชี่ยวชาญ (ทุกคนในทีมเห็นข้อความเดียวกัน)</p>
       </div>
 
       {threads === null ? (
         <Skeleton className="h-[60vh] w-full rounded-xl" />
       ) : threads.length === 0 ? (
-        <p className="text-sm text-muted-foreground">ยังไม่มีผู้ป่วยในความดูแล</p>
+        <p className="text-sm text-muted-foreground">ยังไม่มีเด็กในความดูแล</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-[16rem_1fr]">
           <div className="space-y-1">
@@ -79,7 +79,7 @@ export function DoctorMessages() {
             <CareChat key={active} patientId={active} viewer="CLINICIAN" />
           ) : (
             <div className="flex items-center justify-center rounded-xl border text-sm text-muted-foreground">
-              <MessageCircle className="mr-2 h-4 w-4" /> เลือกผู้ป่วยเพื่อเริ่มสนทนา
+              <MessageCircle className="mr-2 h-4 w-4" /> เลือกเด็กเพื่อเริ่มสนทนา
             </div>
           )}
         </div>

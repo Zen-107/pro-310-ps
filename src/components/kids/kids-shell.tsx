@@ -1,8 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { signOut } from 'next-auth/react';
-import { Camera, House, LogOut, Map, Star } from 'lucide-react';
+import { Camera, House, Map, Star } from 'lucide-react';
 import { useAppStore, type PatientTab } from '@/lib/store';
 import type { SessionUser } from '@/lib/auth-guard';
 import { LiveSessionView } from '@/components/physio/live-session-view';
@@ -10,6 +10,7 @@ import { Mascot } from '@/components/kids/mascot';
 import { KidsHome } from '@/components/kids/kids-home';
 import { KidsMissions } from '@/components/kids/kids-missions';
 import { KidsRewards } from '@/components/kids/kids-rewards';
+import { ExitKidMode } from '@/components/kids/exit-kid-mode';
 
 // Patient side of the kids branch (docs/KIDS-ART-UI.md §9). Reuses the patient
 // tab ids so the store and the camera session work unchanged. The care-team
@@ -25,7 +26,19 @@ const kidsTabs: { id: PatientTab; label: string; icon: React.ComponentType<{ cla
 export function KidsShell({ user }: { user: SessionUser }) {
   const activeTab = useAppStore((s) => s.activeTab);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
+  const isSessionActive = useAppStore((s) => s.isSessionActive);
+  const setCurrentPatientId = useAppStore((s) => s.setCurrentPatientId);
   const tab: PatientTab = kidsTabs.some((t) => t.id === activeTab) ? (activeTab as PatientTab) : 'dashboard';
+
+  // The child identity comes from the login, not from a picker
+  useEffect(() => {
+    setCurrentPatientId(user.patientId);
+  }, [user.patientId, setCurrentPatientId]);
+
+  // A running camera session keeps the camera tab open
+  useEffect(() => {
+    if (isSessionActive && activeTab !== 'camera') setActiveTab('camera');
+  }, [isSessionActive, activeTab, setActiveTab]);
 
   // The camera session keeps its own full-screen layout (kids version: §12 of the guide)
   if (tab === 'camera') {
@@ -44,15 +57,7 @@ export function KidsShell({ user }: { user: SessionUser }) {
             </div>
           </div>
           {/* Small and plain on purpose: a grown-up control, not a game button */}
-          <button
-            onClick={() => signOut({ callbackUrl: '/login' })}
-            className="flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm text-[var(--kids-ink-soft)] hover:bg-[var(--muted)]"
-            aria-label={`ออกจากระบบ (${user.name})`}
-            title="ออกจากระบบ (สำหรับผู้ปกครอง)"
-          >
-            <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">ออก</span>
-          </button>
+          <ExitKidMode returnName={user.returnName} />
         </div>
       </header>
 

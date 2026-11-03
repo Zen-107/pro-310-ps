@@ -15,11 +15,13 @@ import { kidsGreeting, nickname } from '@/lib/kids';
 interface Quest {
   id: string;
   status: string;
-  exercise: { name: string; nameTh?: string; sets: number; repsPerSet: number; unilateral?: boolean };
+  exercise: { name: string; nameTh?: string; kidName?: string; sets: number; repsPerSet: number; unilateral?: boolean };
 }
 
 interface Profile {
   name: string;
+  nickname: string | null;
+  avatar: string | null;
   streak: number;
 }
 
@@ -72,7 +74,7 @@ export function KidsHome({ onPlay }: { onPlay: () => void }) {
     return { key: format(d, 'yyyy-MM-dd'), label: i === 6 ? 'วันนี้' : DAY_LETTERS[d.getDay()] };
   });
 
-  const name = nickname(profile?.name);
+  const name = profile?.nickname || nickname(profile?.name);
   const bubble = loading
     ? 'รอแป๊บนึงนะ...'
     : quests.length === 0
@@ -83,7 +85,7 @@ export function KidsHome({ onPlay }: { onPlay: () => void }) {
 
   return (
     <div className="space-y-6">
-      <MascotSays mood={loading ? 'think' : quests.length === 0 ? 'sleepy' : allDone ? 'cheer' : 'happy'}>
+      <MascotSays avatar={profile?.avatar} mood={loading ? 'think' : quests.length === 0 ? 'sleepy' : allDone ? 'cheer' : 'wave'}>
         {bubble}
       </MascotSays>
 
@@ -156,7 +158,7 @@ export function KidsHome({ onPlay }: { onPlay: () => void }) {
                       {complete ? <Check className="h-8 w-8" strokeWidth={3} /> : i + 1}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xl font-bold">{q.exercise.nameTh || q.exercise.name}</span>
+                      <span className="block truncate text-xl font-bold">{q.exercise.kidName || q.exercise.nameTh || q.exercise.name}</span>
                       <span className="block text-base text-[var(--kids-ink-soft)]">
                         {complete ? 'เสร็จแล้ว เก่งมาก!' : `${q.exercise.sets} รอบ รอบละ ${q.exercise.repsPerSet} ครั้ง`}
                       </span>

@@ -1,268 +1,60 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useSyncExternalStore } from 'react';
 import { signOut } from 'next-auth/react';
-import { useAppStore, type ActiveTab, type DoctorTab, type PatientTab } from '@/lib/store';
+import { LogOut, ShieldAlert } from 'lucide-react';
 import type { SessionUser } from '@/lib/auth-guard';
-import { DoctorOverview } from '@/components/physio/doctor-overview';
-import { DoctorPatients } from '@/components/physio/doctor-patients';
-import { DoctorReports } from '@/components/physio/doctor-reports';
-import { DoctorPlans } from '@/components/physio/doctor-plans';
-import { DoctorMessages } from '@/components/physio/doctor-messages';
-import { KidsShell } from '@/components/kids/kids-shell';
-import {
-  LayoutDashboard, Dumbbell, Camera, History, Activity,
-  Stethoscope, Users, FileText, ClipboardList, LogOut, UserCircle, ShieldAlert, MessageCircle,
-} from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Mascot } from '@/components/kids/mascot';
+import { KidsShell } from '@/components/kids/kids-shell';
+import { TeacherShell } from '@/components/teacher/teacher-shell';
+import { ParentShell } from '@/components/parent/parent-shell';
+import { ExpertShell } from '@/components/expert/expert-shell';
 
-const patientTabs: { id: PatientTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 'dashboard', label: 'หน้าหลัก', icon: LayoutDashboard },
-  { id: 'exercises', label: 'ท่ากายภาพ', icon: Dumbbell },
-  { id: 'camera', label: 'เริ่มฝึก', icon: Camera },
-  { id: 'history', label: 'ประวัติ', icon: History },
-  { id: 'chat', label: 'ข้อความ', icon: MessageCircle },
-];
-
-const doctorTabs: { id: DoctorTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 'overview', label: 'ภาพรวม', icon: LayoutDashboard },
-  { id: 'patients', label: 'ผู้ป่วย', icon: Users },
-  { id: 'reports', label: 'รายงาน', icon: FileText },
-  { id: 'plans', label: 'แผนรักษา', icon: ClipboardList },
-  { id: 'messages', label: 'ข้อความ', icon: MessageCircle },
-];
-
-const handleSignOut = () => signOut({ callbackUrl: '/login' });
-
+// Role router: every role has its own shell (docs/FLOWS.md).
+//   PATIENT → kid screens · TEACHER → classes · PARENT → my children · CLINICIAN → expert
 export function AppShell({ user }: { user: SessionUser }) {
-  const { activeTab, setActiveTab, isSessionActive, setCurrentPatientId, setSelectedPatientId } = useAppStore();
+  // Client-only rendering (the shells read browser APIs and the store)
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
     () => false
   );
 
-  const isDoctor = user.role === 'CLINICIAN';
-  // Clinicians work with tables and charts: wider content on large screens
-  const width = isDoctor ? 'max-w-7xl' : 'max-w-5xl';
-  const currentTabs = isDoctor ? doctorTabs : patientTabs;
-  // Fall back to the role's first tab if the store holds a tab from the other role
-  const tab: ActiveTab = currentTabs.some((t) => t.id === activeTab) ? activeTab : currentTabs[0].id;
-
-  // The patient identity comes from the login, not from a picker
-  useEffect(() => {
-    setCurrentPatientId(user.patientId);
-  }, [user.patientId, setCurrentPatientId]);
-
-  // Unread care-team messages for the tab badge
-  const [unread, setUnread] = useState(0);
-  useEffect(() => {
-    if (user.role === 'ADMIN') return;
-    let cancelled = false;
-    const load = () =>
-      fetch('/api/messages/threads')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => !cancelled && d && setUnread(d.totalUnread ?? 0))
-        .catch(() => {});
-    load();
-    const id = setInterval(load, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [user.role, tab]);
-
-  useEffect(() => {
-    if (isSessionActive && activeTab !== 'camera') {
-      setActiveTab('camera');
-    }
-  }, [isSessionActive, activeTab, setActiveTab]);
-
   if (!mounted) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="theme-kids flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <div className="relative w-16 h-16 mx-auto mb-4">
-            <div className="absolute inset-0 rounded-full bg-teal-500/20 animate-ping" />
-            <div className="relative w-16 h-16 rounded-full bg-teal-500/10 flex items-center justify-center">
-              <Activity className="h-8 w-8 text-teal-600" />
-            </div>
-          </div>
-          <p className="text-sm text-muted-foreground">กำลังโหลด...</p>
+          <Mascot mood="happy" size={96} className="kids-bob mx-auto" />
+          <p className="mt-2 text-lg font-bold">กำลังโหลด...</p>
         </div>
       </div>
     );
   }
 
-  // Admin accounts have no screens yet
-  if (user.role === 'ADMIN') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="text-center max-w-sm space-y-4">
-          <ShieldAlert className="h-10 w-10 text-muted-foreground mx-auto" />
-          <p className="text-sm text-muted-foreground">
-            บัญชีผู้ดูแลระบบยังไม่มีหน้าจัดการ กรุณาเข้าสู่ระบบด้วยบัญชีแพทย์/นักกายภาพ หรือผู้ป่วย
-          </p>
-          <Button variant="outline" onClick={handleSignOut}>
-            <LogOut className="h-4 w-4" /> ออกจากระบบ
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Kids branch: patients (children) get their own shell and screens
-  if (!isDoctor) {
-    return <KidsShell user={user} />;
-  }
-
-  return (
-    <div className="min-h-screen flex flex-col bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-lg">
-        <div className={`${width} mx-auto px-4 sm:px-6 h-14 flex items-center justify-between`}>
-          <div className="flex items-center gap-2.5">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDoctor ? 'bg-slate-800' : 'bg-teal-600'}`}>
-              {isDoctor ? <Stethoscope className="h-4.5 w-4.5 text-white" /> : <Activity className="h-4.5 w-4.5 text-white" />}
-            </div>
-            <div>
-              <h1 className="text-base font-bold leading-tight">
-                {isDoctor ? 'AI Physio — Dashboard' : 'AI Physio'}
-              </h1>
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                {isDoctor ? 'แผงควบคุมแพทย์/นักกายภาพ' : 'กายภาพบำบัดอัจฉริยะ'}
-              </p>
-            </div>
-          </div>
-          <UserChip name={user.name} isDoctor={isDoctor} />
-        </div>
-      </header>
-
-      {/* Desktop Tab Navigation */}
-      <nav className="hidden md:block border-b bg-background/60 backdrop-blur-sm sticky top-14 z-40">
-        <div className={`${width} mx-auto px-4 sm:px-6`}>
-          <div className="flex gap-1 overflow-x-auto">
-            {currentTabs.map((t) => {
-              const Icon = t.icon;
-              const isActive = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id)}
-                  className={`relative flex min-h-12 shrink-0 items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
-                    isActive ? 'text-teal-700 dark:text-teal-400' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {t.label}
-                  {(t.id === 'chat' || t.id === 'messages') && unread > 0 && t.id !== tab && (
-                    <span className="ml-1 rounded-full bg-teal-600 px-1.5 text-[10px] font-semibold text-white">{unread}</span>
-                  )}
-                  {isActive && (
-                    <motion.div
-                      layoutId="desktop-tab-indicator"
-                      className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-teal-600"
-                      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                    />
-                  )}
-                </button>
-              );
-            })}
+  switch (user.role) {
+    case 'PATIENT':
+      return <KidsShell user={user} />;
+    case 'TEACHER':
+      return <TeacherShell user={user} />;
+    case 'PARENT':
+      return <ParentShell user={user} />;
+    case 'CLINICIAN':
+      return <ExpertShell user={user} />;
+    default:
+      // Admin accounts have no screens yet
+      return (
+        <div className="theme-adult flex min-h-screen items-center justify-center px-4">
+          <div className="max-w-sm space-y-4 text-center">
+            <ShieldAlert className="mx-auto h-10 w-10 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              บัญชีผู้ดูแลระบบยังไม่มีหน้าจัดการ กรุณาเข้าสู่ระบบด้วยบัญชีคุณครู ผู้ปกครอง หรือผู้เชี่ยวชาญ
+            </p>
+            <Button variant="outline" onClick={() => signOut({ callbackUrl: '/login' })}>
+              <LogOut className="h-4 w-4" /> ออกจากระบบ
+            </Button>
           </div>
         </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="flex-1">
-        <div className={`${width} mx-auto px-4 sm:px-6 py-6`}>
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`${user.role}-${tab}`}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {/* Clinician Views */}
-              {isDoctor && tab === 'overview' && (
-                <DoctorOverview onSelectPatient={(id) => { setSelectedPatientId(id); setActiveTab('patients'); }} />
-              )}
-              {isDoctor && tab === 'patients' && <DoctorPatients />}
-              {isDoctor && tab === 'reports' && <DoctorReports />}
-              {isDoctor && tab === 'plans' && <DoctorPlans />}
-              {isDoctor && tab === 'messages' && <DoctorMessages />}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-      </main>
-
-      {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur-lg safe-area-bottom">
-        <div className="flex items-center justify-around h-16 pb-[env(safe-area-inset-bottom)]">
-          {currentTabs.map((t) => {
-            const Icon = t.icon;
-            const isActive = tab === t.id;
-            const isCamera = !isDoctor && t.id === 'camera';
-
-            return (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                className={`relative flex flex-col items-center justify-center gap-0.5 w-16 h-full transition-colors ${
-                  isActive ? (isCamera ? 'text-white' : 'text-teal-700 dark:text-teal-400') : 'text-muted-foreground'
-                }`}
-              >
-                {isCamera ? (
-                  <div className={`w-12 h-12 -mt-5 rounded-full flex items-center justify-center shadow-lg transition-all ${isActive ? 'bg-teal-600 shadow-teal-600/30 scale-110' : 'bg-teal-500/80 shadow-teal-500/20'}`}>
-                    <Icon className="h-5 w-5 text-white" />
-                  </div>
-                ) : (
-                  <>
-                    <span className="relative">
-                      <Icon className="h-5 w-5" />
-                      {(t.id === 'chat' || t.id === 'messages') && unread > 0 && t.id !== tab && (
-                        <span className="absolute -right-2 -top-1 rounded-full bg-teal-600 px-1 text-[9px] font-semibold text-white">{unread}</span>
-                      )}
-                    </span>
-                    <span className="text-[10px] font-medium">{t.label}</span>
-                    {isActive && (
-                      <motion.div
-                        layoutId="mobile-tab-indicator"
-                        className={`absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full ${isDoctor ? 'bg-slate-600' : 'bg-teal-600'}`}
-                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                      />
-                    )}
-                  </>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
-      <div className="md:hidden h-16" />
-    </div>
-  );
-}
-
-// Signed-in user's name + sign-out (name hidden on small screens)
-function UserChip({ name, isDoctor }: { name: string; isDoctor: boolean }) {
-  const tone = isDoctor
-    ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-    : 'bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-400';
-  return (
-    <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${tone}`}>
-      <UserCircle className="h-3.5 w-3.5" />
-      <span className="hidden sm:inline text-xs font-medium max-w-[160px] truncate">{name}</span>
-      <button
-        onClick={handleSignOut}
-        className="ml-1 hover:text-red-500 transition-colors"
-        title="ออกจากระบบ"
-        aria-label="ออกจากระบบ"
-      >
-        <LogOut className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
+      );
+  }
 }

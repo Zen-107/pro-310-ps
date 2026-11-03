@@ -83,9 +83,9 @@ function headline(data: ExerciseForecastDTO): string {
     case 'plateau':
       return 'ไม่มีพัฒนาการที่วัดได้ใน 14 วันล่าสุด — พิจารณาปรับแผน';
     case 'declining':
-      return 'มุมที่ทำได้ห่างจากเป้าหมายมากขึ้น — ควรประเมินผู้ป่วย';
+      return 'มุมที่ทำได้ห่างจากเป้าหมายมากขึ้น — ควรดูท่าของเด็ก';
     case 'insufficient':
-      if (data.population?.etaDays) return `ประมาณการเบื้องต้น (เทียบผู้ป่วยที่ฝึกท่าเดียวกัน): ${formatEta(data.population.etaDays, data.population.etaCapped)}`;
+      if (data.population?.etaDays) return `ประมาณการเบื้องต้น (เทียบเด็กที่เล่นท่าเดียวกัน): ${formatEta(data.population.etaDays, data.population.etaCapped)}`;
       return f.daysNeeded ? `ต้องฝึกเพิ่มอีกอย่างน้อย ${f.daysNeeded} วันจึงจะประมาณการได้` : 'แนวโน้มยังไม่ชัดเจนพอจะประมาณการ';
   }
 }
@@ -290,7 +290,7 @@ function PopulationNote({ data }: { data: ExerciseForecastDTO }) {
       <p className="flex items-start gap-1.5 text-muted-foreground">
         <Users className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         {data.referencePatients < MIN_REFERENCE_PATIENTS
-          ? `แบบจำลองประชากร: ผู้ป่วยอ้างอิงที่ฝึกท่านี้ยังมีไม่พอ (${data.referencePatients}/${MIN_REFERENCE_PATIENTS} คน)`
+          ? `แบบจำลองประชากร: เด็กอ้างอิงที่เล่นท่านี้ยังมีไม่พอ (${data.referencePatients}/${MIN_REFERENCE_PATIENTS} คน)`
           : 'แบบจำลองประชากร: ต้องมีข้อมูลการฝึกอย่างน้อย 2 วัน'}
       </p>
     );
@@ -300,17 +300,17 @@ function PopulationNote({ data }: { data: ExerciseForecastDTO }) {
     <div className={`space-y-1 rounded-md border p-2 ${pop.slowResponder ? 'border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20' : 'bg-muted/40'}`}>
       <p className="flex items-center gap-1.5 font-medium text-foreground">
         <Users className="h-3.5 w-3.5 shrink-0" />
-        เทียบกับผู้ป่วยอื่น {pop.k} คนที่ฝึกท่านี้
+        เทียบกับเด็กอื่น {pop.k} คนที่ฝึกท่านี้
       </p>
       <ul className="space-y-0.5 pl-5 text-muted-foreground">
-        {pop.typicalHalfLifeDays !== null && <li>ผู้ป่วยทั่วไปลดองศาที่ยังขาดลงครึ่งหนึ่งในราว {pop.typicalHalfLifeDays} วัน</li>}
+        {pop.typicalHalfLifeDays !== null && <li>เด็กทั่วไปลดองศาที่ยังขาดลงครึ่งหนึ่งในราว {pop.typicalHalfLifeDays} วัน</li>}
         {pop.fasterThanPercent !== null && (
           <li className={pop.slowResponder ? 'font-medium text-amber-800 dark:text-amber-300' : undefined}>
-            รายนี้ฟื้นตัวเร็วกว่าผู้ป่วยอ้างอิง {pop.fasterThanPercent}%{pop.slowResponder ? ' — ช้ากว่าส่วนใหญ่ ควรทบทวนแผน' : ''}
+            คนนี้พัฒนาเร็วกว่าเด็กอ้างอิง {pop.fasterThanPercent}%{pop.slowResponder ? ' — ช้ากว่าส่วนใหญ่ ควรทบทวนแผน' : ''}
           </li>
         )}
         <li>
-          น้ำหนักข้อมูลของผู้ป่วยรายนี้ {own}%{own < 50 ? ' (ข้อมูลยังน้อย ตัวเลขจึงใกล้ค่าเฉลี่ยของผู้ป่วยอื่น)' : ''}
+          น้ำหนักข้อมูลของเด็กคนนี้ {own}%{own < 50 ? ' (ข้อมูลยังน้อย ตัวเลขจึงใกล้ค่าเฉลี่ยของเด็กอื่น)' : ''}
         </li>
       </ul>
     </div>
@@ -322,9 +322,9 @@ export function ForecastCaveat() {
   return (
     <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
       <Hourglass className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      ประมาณการจากแนวโน้มของผู้ป่วยรายนี้เท่านั้น (Theil–Sen + bootstrap) ช่วงเร็วสุดคือกรณีพัฒนาการคงที่ ช่วงช้าสุดคือกรณีพัฒนาการช้าลงตามธรรมชาติ
+      ประมาณการจากแนวโน้มของเด็กคนนี้เท่านั้น (Theil–Sen + bootstrap) ช่วงเร็วสุดคือกรณีพัฒนาการคงที่ ช่วงช้าสุดคือกรณีพัฒนาการช้าลงตามธรรมชาติ
       ในการทดสอบด้วยข้อมูลจำลอง ช่วงนี้ครอบคลุมวันที่ถึงเป้าหมายจริงประมาณ 63–95% ของกรณี ถือว่าการฝึกสม่ำเสมอเท่าปัจจุบัน และกล้องคลาดเคลื่อนได้ราว 5–10°
-      ประมาณการเบื้องต้น (ก่อนมีข้อมูลพอ) ใช้แบบจำลองประชากรจากผู้ป่วยอื่นที่ฝึกท่าเดียวกัน ซึ่งแม่นในข้อมูลจำลองเฉพาะเมื่อการฟื้นตัวเป็นเส้นโค้งอิ่มตัวตามที่สมมติไว้
+      ประมาณการเบื้องต้น (ก่อนมีข้อมูลพอ) ใช้แบบจำลองประชากรจากเด็กอื่นที่เล่นท่าเดียวกัน ซึ่งแม่นในข้อมูลจำลองเฉพาะเมื่อพัฒนาการเป็นเส้นโค้งอิ่มตัวตามที่สมมติไว้
       — <strong className="font-semibold">ต้นแบบเพื่อการศึกษา ยังไม่ได้ตรวจสอบกับข้อมูลผู้ใช้จริง</strong> ใช้ประกอบการตัดสินใจของผู้ดูแลเท่านั้น
       (ผลทางสถิติ: docs/PREDICTIVE-ANALYTICS.md)
     </p>

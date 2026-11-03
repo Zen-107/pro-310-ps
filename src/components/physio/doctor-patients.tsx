@@ -259,12 +259,12 @@ export function DoctorPatients() {
     return (
       <div className="space-y-6">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">ข้อมูลผู้ป่วย</h2>
+          <h2 className="text-2xl font-bold tracking-tight">ข้อมูลเด็ก</h2>
           <p className="text-muted-foreground mt-1">ดูข้อมูลเชิงลึกและกราฟพัฒนาการ</p>
         </div>
         <Card className="p-8 text-center">
           <Stethoscope className="h-12 w-12 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="text-muted-foreground">ยังไม่มีข้อมูลผู้ป่วย</p>
+          <p className="text-muted-foreground">ยังไม่มีข้อมูลเด็ก</p>
         </Card>
       </div>
     );
@@ -326,7 +326,7 @@ export function DoctorPatients() {
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">ข้อมูลผู้ป่วย</h2>
+          <h2 className="text-2xl font-bold tracking-tight">ข้อมูลเด็ก</h2>
           <p className="text-muted-foreground text-sm mt-0.5">ดูข้อมูลเชิงลึกและกราฟพัฒนาการ</p>
         </div>
       </motion.div>
@@ -338,7 +338,7 @@ export function DoctorPatients() {
           onValueChange={(val) => setSelectedPatientId(val)}
         >
           <SelectTrigger className="w-full sm:w-80">
-            <SelectValue placeholder="เลือกผู้ป่วย..." />
+            <SelectValue placeholder="เลือกเด็ก..." />
           </SelectTrigger>
           <SelectContent>
             {patientList.map((p) => (
@@ -410,7 +410,7 @@ export function DoctorPatients() {
                           setNotes(e.target.value);
                           setNotesSaved(false);
                         }}
-                        placeholder="บันทึกหมายเหตุสำหรับผู้ป่วย..."
+                        placeholder="บันทึกหมายเหตุของผู้เชี่ยวชาญ..."
                         className="min-h-[80px] resize-y text-sm"
                       />
                       <div className="flex items-center justify-end gap-2">
@@ -844,7 +844,7 @@ export function DoctorPatients() {
       {!detailLoading && !data && selectedPatientId && (
         <motion.div variants={FADE_UP}>
           <Card className="p-8 text-center">
-            <p className="text-muted-foreground">ไม่พบข้อมูลผู้ป่วย</p>
+            <p className="text-muted-foreground">ไม่พบข้อมูลเด็ก</p>
           </Card>
         </motion.div>
       )}

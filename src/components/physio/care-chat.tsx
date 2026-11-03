@@ -124,7 +124,7 @@ export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'P
           </div>
         ) : messages.length === 0 ? (
           <p className="pt-10 text-center text-sm text-muted-foreground">
-            {viewer === 'PATIENT' ? 'ยังไม่มีข้อความ — ส่งคำถามถึงทีมผู้ดูแลของคุณได้เลย' : 'ยังไม่มีข้อความกับผู้ป่วยรายนี้'}
+            {viewer === 'PATIENT' ? 'ยังไม่มีข้อความ — ส่งคำถามถึงทีมผู้ดูแลของคุณได้เลย' : 'ยังไม่มีข้อความเรื่องเด็กคนนี้'}
           </p>
         ) : (
           messages.map((m) => {

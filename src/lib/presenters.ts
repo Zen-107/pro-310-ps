@@ -13,7 +13,7 @@ import type {
 import { ageFromDob, localDateString } from '@/lib/dates';
 import { parseFormChecks } from '@/lib/form-checks';
 import { exerciseMeta } from '@/lib/exercises-data';
-import { kidExercise } from '@/lib/kids';
+import { KID_EXERCISES, kidExercise } from '@/lib/kids';
 import { safeTruncate, sanitizeText } from '@/lib/text-safe';
 
 // Display limits (grapheme clusters) for free text that reaches report screens
@@ -128,7 +128,7 @@ export const exerciseInclude = {
 } as const;
 
 type SessionWithExercise = ExerciseSession & {
-  exercise?: Pick<Exercise, 'name' | 'nameTh' | 'category' | 'icon'> | null;
+  exercise?: (Pick<Exercise, 'name' | 'nameTh' | 'category' | 'icon'> & { slug?: string }) | null;
   review?: { status: string } | null;
   _count?: { faults: number };
 };
@@ -154,7 +154,13 @@ export function sessionDTO(s: SessionWithExercise) {
     reviewStatus: s.review?.status ?? null,
     faultCount: s._count?.faults ?? null,
     exercise: s.exercise
-      ? { name: s.exercise.name, nameTh: s.exercise.nameTh, category: s.exercise.category, icon: s.exercise.icon }
+      ? {
+          name: s.exercise.name,
+          nameTh: s.exercise.nameTh,
+          category: s.exercise.category,
+          icon: s.exercise.icon,
+          kidName: s.exercise.slug ? KID_EXERCISES[s.exercise.slug]?.name ?? s.exercise.nameTh : s.exercise.nameTh,
+        }
       : undefined,
   };
 }

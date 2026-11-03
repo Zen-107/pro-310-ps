@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth-guard';
 import { hashPassword } from '@/lib/password';
 import { dateOnly, localDateString } from '@/lib/dates';
+import { ensureQuestsForDay } from '@/lib/quests';
 import { computeStreak } from '@/lib/presenters';
 import { childHasConsent } from '@/lib/terms';
 import { hasValidVideoConsent } from '@/lib/consent';
@@ -170,8 +171,22 @@ export async function assignToClassroom(
   return members.length;
 }
 
+/**
+ * Today's quests exist only once generated (lazily, when a child opens the
+ * app); generate them for every child so the teacher's "today" is complete.
+ */
+export async function ensureClassQuestsToday(classroomIds: string[]) {
+  const members = await db.classroomMember.findMany({
+    where: { classroomId: { in: classroomIds }, patient: { archivedAt: null } },
+    select: { patientId: true },
+  });
+  const day = localDateString();
+  for (const m of members) await ensureQuestsForDay(m.patientId, day);
+}
+
 /** Classroom page data: students with today's progress and the active class mission sets */
 export async function classroomDetail(classroomId: string) {
+  await ensureClassQuestsToday([classroomId]);
   const today = dateOnly(localDateString());
   const since = new Date(Date.now() - 7 * 86_400_000);
   const classroom = await db.classroom.findUniqueOrThrow({

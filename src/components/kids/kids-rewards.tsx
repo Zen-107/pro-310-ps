@@ -23,7 +23,7 @@ interface SessionRecord {
   startedAt: string;
   avgAccuracy: number;
   status: string;
-  exercise?: { name: string; nameTh: string };
+  exercise?: { name: string; nameTh: string; kidName?: string };
 }
 
 const stickerIcons: Record<string, React.ElementType> = {
@@ -123,7 +123,7 @@ export function KidsRewards() {
               return (
                 <li key={s.id} className="flex items-center gap-3 px-5 py-4">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-lg font-bold">{s.exercise?.nameTh || s.exercise?.name || 'ภารกิจ'}</p>
+                    <p className="truncate text-lg font-bold">{s.exercise?.kidName || s.exercise?.nameTh || s.exercise?.name || 'ภารกิจ'}</p>
                     <p className="text-base text-[var(--kids-ink-soft)]">
                       {format(new Date(s.startedAt), 'EEEE d MMM', { locale: th })}
                     </p>
