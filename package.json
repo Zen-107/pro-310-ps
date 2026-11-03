@@ -21,7 +21,8 @@
     "db:backup": "bun scripts/db-backup.ts",
     "eval:forecast": "bun scripts/evaluate-forecast.ts",
     "test": "bun test tests/unit",
-    "test:integration": "bun test --preload ./tests/integration/preload.ts tests/integration"
+    "test:integration": "bun test --preload ./tests/integration/preload.ts tests/integration",
+    "qa": "bun scripts/qa.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

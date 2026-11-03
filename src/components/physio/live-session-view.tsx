@@ -1640,8 +1640,13 @@ export function LiveSessionView() {
   useEffect(() => {
     if (!pendingQuestStart || !consentLoaded || phase !== 'pre-session') return;
     useAppStore.getState().setPendingQuestStart(null);
-    setAutoStarting(true);
-    void handleStartExercise(pendingQuestStart).finally(() => setAutoStarting(false));
+    // State changes run after the effect (not synchronously inside it)
+    void Promise.resolve()
+      .then(() => {
+        setAutoStarting(true);
+        return handleStartExercise(pendingQuestStart);
+      })
+      .finally(() => setAutoStarting(false));
   }, [pendingQuestStart, consentLoaded, phase, handleStartExercise]);
 
   // =====================================================================
