@@ -714,3 +714,30 @@ export const BADGES = [
   { id: "perfect_score", name: "ท่าสมบูรณ์", description: "ทำท่าได้ถูกต้อง 100%", icon: "CheckCircle", requirement: 100 },
   { id: "all_categories", name: "ครบทุกส่วน", description: "ทำท่าในทุกหมวดหมู่", icon: "LayoutGrid", requirement: 6 },
 ];
+
+type Badge = (typeof BADGES)[number];
+
+// Whether a badge is earned from the profile counters alone
+export function isBadgeEarned(
+  badge: Badge,
+  streak: number,
+  totalSessions: number
+): boolean {
+  switch (badge.id) {
+    case 'first_session':
+      return totalSessions >= 1;
+    case 'streak_3':
+    case 'streak_7':
+    case 'streak_30':
+      return streak >= badge.requirement;
+    case 'sessions_10':
+    case 'sessions_50':
+      return totalSessions >= badge.requirement;
+    case 'perfect_score':
+    case 'all_categories':
+      // These require more complex logic; default to locked for now
+      return false;
+    default:
+      return false;
+  }
+}

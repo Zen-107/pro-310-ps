@@ -181,6 +181,112 @@
 video {
   image-rendering: auto;
 }
+
+/* ─── Kids theme (patient side of the kids branch) ──────────────────
+   Spec and the reasoning behind every value: docs/KIDS-ART-UI.md.
+   Light only on purpose; shadcn tokens are remapped so existing
+   components (Button, Card, Badge…) pick up the palette inside it. */
+.theme-kids {
+  --kids-sky: #3ba7f5;
+  --kids-sky-deep: #1f7fcc;
+  --kids-sun: #ffc93c;
+  --kids-sun-deep: #e0a51a;
+  --kids-grass: #4cc38a;
+  --kids-grass-deep: #2f9d68;
+  --kids-coral: #ff7a6b;
+  --kids-coral-deep: #e0574a;
+  --kids-grape: #9b7bea;
+  --kids-ink: #3b2a4a;
+  --kids-ink-soft: #6b5a78;
+  --kids-paper: #fff8ec;
+  --kids-card: #ffffff;
+
+  --background: var(--kids-paper);
+  --foreground: var(--kids-ink);
+  --card: var(--kids-card);
+  --card-foreground: var(--kids-ink);
+  --popover: var(--kids-card);
+  --popover-foreground: var(--kids-ink);
+  --primary: var(--kids-sky-deep);
+  --primary-foreground: #ffffff;
+  --muted: #fdeed5;
+  --muted-foreground: var(--kids-ink-soft);
+  --accent: #e3f2fd;
+  --accent-foreground: var(--kids-ink);
+  --border: #f1dfc4;
+  --ring: var(--kids-sky);
+  --radius: 1.75rem;
+
+  color-scheme: light;
+  font-family: var(--font-mali), var(--font-sarabun), ui-rounded, system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 18px;
+  background: var(--kids-paper);
+  color: var(--kids-ink);
+}
+
+/* Chunky "toy" button: solid bottom edge that squashes when pressed */
+.kids-btn {
+  --btn-bg: var(--kids-coral);
+  --btn-edge: var(--kids-coral-deep);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 56px;
+  padding: 0 1.5rem;
+  border-radius: 999px;
+  background: var(--btn-bg);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.25rem;
+  box-shadow: 0 5px 0 var(--btn-edge);
+  transition: transform 80ms ease, box-shadow 80ms ease, filter 120ms ease;
+}
+.kids-btn:hover {
+  filter: brightness(1.05);
+}
+.kids-btn:active {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 var(--btn-edge);
+}
+.kids-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.kids-btn-sky {
+  --btn-bg: var(--kids-sky);
+  --btn-edge: var(--kids-sky-deep);
+}
+.kids-btn-grass {
+  --btn-bg: var(--kids-grass);
+  --btn-edge: var(--kids-grass-deep);
+}
+.kids-btn-sun {
+  --btn-bg: var(--kids-sun);
+  --btn-edge: var(--kids-sun-deep);
+  color: var(--kids-ink);
+}
+
+.kids-card {
+  background: var(--kids-card);
+  border: 2px solid var(--border);
+  border-radius: 28px;
+  box-shadow: 0 6px 0 rgba(59, 42, 74, 0.08);
+}
+
+@keyframes kids-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.kids-bob {
+  animation: kids-bob 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kids-bob {
+    animation: none;
+  }
+}
 /* ─── Print / PDF export (clinical report) ──────────────────────────
    Only the element marked [data-print-root] is printed. Elements that are
    neither inside it nor its ancestors leave the layout, and ancestors drop

@@ -5,16 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { signOut } from 'next-auth/react';
 import { useAppStore, type ActiveTab, type DoctorTab, type PatientTab } from '@/lib/store';
 import type { SessionUser } from '@/lib/auth-guard';
-import { DashboardView } from '@/components/physio/dashboard-view';
-import { ExercisesView } from '@/components/physio/exercises-view';
-import { LiveSessionView } from '@/components/physio/live-session-view';
-import { HistoryView } from '@/components/physio/history-view';
 import { DoctorOverview } from '@/components/physio/doctor-overview';
 import { DoctorPatients } from '@/components/physio/doctor-patients';
 import { DoctorReports } from '@/components/physio/doctor-reports';
 import { DoctorPlans } from '@/components/physio/doctor-plans';
 import { DoctorMessages } from '@/components/physio/doctor-messages';
-import { CareChat } from '@/components/physio/care-chat';
+import { KidsShell } from '@/components/kids/kids-shell';
 import {
   LayoutDashboard, Dumbbell, Camera, History, Activity,
   Stethoscope, Users, FileText, ClipboardList, LogOut, UserCircle, ShieldAlert, MessageCircle,
@@ -116,9 +112,9 @@ export function AppShell({ user }: { user: SessionUser }) {
     );
   }
 
-  // Full-screen camera mode
-  if (!isDoctor && tab === 'camera') {
-    return <LiveSessionView />;
+  // Kids branch: patients (children) get their own shell and screens
+  if (!isDoctor) {
+    return <KidsShell user={user} />;
   }
 
   return (
@@ -188,22 +184,6 @@ export function AppShell({ user }: { user: SessionUser }) {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
-              {/* Patient Views */}
-              {!isDoctor && tab === 'dashboard' && (
-                <DashboardView onStartSession={() => setActiveTab('camera')} />
-              )}
-              {!isDoctor && tab === 'exercises' && <ExercisesView />}
-              {!isDoctor && tab === 'history' && <HistoryView />}
-              {!isDoctor && tab === 'chat' && (
-                <div className="space-y-4">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">ข้อความถึงทีมผู้ดูแล</h2>
-                    <p className="text-muted-foreground mt-1">แพทย์และนักกายภาพในทีมของคุณเห็นข้อความเดียวกัน</p>
-                  </div>
-                  <CareChat viewer="PATIENT" />
-                </div>
-              )}
-
               {/* Clinician Views */}
               {isDoctor && tab === 'overview' && (
                 <DoctorOverview onSelectPatient={(id) => { setSelectedPatientId(id); setActiveTab('patients'); }} />

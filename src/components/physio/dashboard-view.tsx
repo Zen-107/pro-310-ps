@@ -36,7 +36,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { BADGES } from '@/lib/exercises-data';
+import { BADGES, isBadgeEarned } from '@/lib/exercises-data';
 import { useAppStore } from '@/lib/store';
 
 // ---------------------------------------------------------------------------
@@ -224,34 +224,6 @@ function BadgesSkeleton() {
       </CardContent>
     </Card>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Determine if a badge is earned
-// ---------------------------------------------------------------------------
-
-function isBadgeEarned(
-  badge: (typeof BADGES)[number],
-  streak: number,
-  totalSessions: number
-): boolean {
-  switch (badge.id) {
-    case 'first_session':
-      return totalSessions >= 1;
-    case 'streak_3':
-    case 'streak_7':
-    case 'streak_30':
-      return streak >= badge.requirement;
-    case 'sessions_10':
-    case 'sessions_50':
-      return totalSessions >= badge.requirement;
-    case 'perfect_score':
-    case 'all_categories':
-      // These require more complex logic; default to locked for now
-      return false;
-    default:
-      return false;
-  }
 }
 
 // ---------------------------------------------------------------------------
