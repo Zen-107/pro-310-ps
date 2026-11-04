@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { EXERCISES, exerciseIdFromName, exerciseMeta, targetsForSide } from '@/lib/exercises-data';
+import { ACTIVE_EXERCISES, EXERCISES, exerciseIdFromName, exerciseMeta, targetsForSide } from '@/lib/exercises-data';
 import { JOINT_FORMULAS } from '@/lib/joint-formulas';
 import { parseFormChecks } from '@/lib/form-checks';
 import { EXERCISE_DEMOS, buildSkeleton, measure, demoProgress, type DemoMeasurement } from '@/lib/exercise-poses';
@@ -36,6 +36,22 @@ describe('exercise catalogue', () => {
       });
     });
   }
+
+  // Decision 0002: the kids' library is five standing moves, each with a demo
+  test("kids' library: five active exercises, standing, each with a demo", () => {
+    expect(ACTIVE_EXERCISES.map((e) => exerciseIdFromName(e.name))).toEqual([
+      'ex_shoulder_abduction',
+      'ex_arm_circles',
+      'ex_trunk_lateral_flexion',
+      'ex_squat',
+      'ex_standing_hip_abduction',
+    ]);
+    for (const ex of ACTIVE_EXERCISES) {
+      expect(EXERCISE_DEMOS[exerciseIdFromName(ex.name)]).toBeDefined();
+      expect(ex.posture).toBeUndefined();
+      expect(ex.holdSeconds).toBeUndefined();
+    }
+  });
 
   // Floor exercises are hard for one webcam to see. Heel Slides is the one
   // deliberate exception (requested by the clinical team; camera at floor level).
@@ -76,6 +92,8 @@ describe('exercise demos', () => {
     hip_flexion: 'hip_flexion',
     shoulder: 'shoulder',
     hip_opening: 'hip_opening',
+    trunk_lateral_flexion: 'trunk_lateral_flexion',
+    hip_abduction: 'hip_abduction',
   };
   for (const [slug, demo] of Object.entries(EXERCISE_DEMOS)) {
     test(`${slug}: end pose lies in the exercise's primary target range`, () => {
@@ -112,7 +130,8 @@ describe('one side at a time', () => {
     expect(exerciseMeta('ex_seated_heel_slides')).toMatchObject({ holdSeconds: null, isometric: false, unilateral: false });
     expect(exerciseMeta('ex_seated_heel_slides').posture?.measurement).toBe('trunk_inclination');
     expect(exerciseMeta('ex_cross_body_shoulder_stretch')).toMatchObject({ holdSeconds: 10, unilateral: true });
-    expect(exerciseMeta('ex_shoulder_abduction').unilateral).toBe(true);
+    expect(exerciseMeta('ex_shoulder_abduction').unilateral).toBe(false);
+    expect(exerciseMeta('ex_standing_hip_abduction').unilateral).toBe(false); // either leg counts, no side picker
     expect(exerciseMeta('ex_unknown')).toEqual({ holdSeconds: null, isometric: false, unilateral: false, posture: null });
   });
 

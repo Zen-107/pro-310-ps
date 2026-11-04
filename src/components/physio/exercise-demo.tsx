@@ -180,7 +180,7 @@ export function ExerciseDemo({
   const active = 'fill-teal-400 dark:fill-teal-500';
   const outline = 'stroke-slate-500/40 dark:stroke-slate-900/50';
 
-  const highlightLegNear = ['knee', 'hip', 'hip_flexion', 'hip_opening'].includes(demo.measurement);
+  const highlightLegNear = ['knee', 'hip', 'hip_flexion', 'hip_opening', 'hip_abduction'].includes(demo.measurement);
   const highlightLegFar = demo.measurement === 'hip_opening';
   const highlightArm = demo.measurement === 'shoulder';
 

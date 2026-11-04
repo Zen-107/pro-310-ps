@@ -134,7 +134,7 @@ export function angleAt2D(a: Pt, b: Pt, c: Pt): number {
   return deg(Math.acos(Math.min(1, Math.max(-1, cos))));
 }
 
-export type DemoMeasurement = 'knee' | 'hip' | 'hip_flexion' | 'shoulder' | 'hip_opening';
+export type DemoMeasurement = 'knee' | 'hip' | 'hip_flexion' | 'shoulder' | 'hip_opening' | 'trunk_lateral_flexion' | 'hip_abduction';
 
 export function measure(s: Skeleton, m: DemoMeasurement): { value: number; vertex: Pt; from: Pt; to: Pt } {
   const shoulderNear = s.armNear.root;
@@ -149,6 +149,16 @@ export function measure(s: Skeleton, m: DemoMeasurement): { value: number; verte
       return { value: angleAt2D(s.legNear.root, shoulderNear, s.armNear.mid), vertex: shoulderNear, from: s.legNear.root, to: s.armNear.mid };
     case 'hip_opening':
       return { value: angleAt2D(s.legFar.mid, s.hip, s.legNear.mid), vertex: s.hip, from: s.legFar.mid, to: s.legNear.mid };
+    case 'trunk_lateral_flexion': {
+      // Trunk line vs vertical (arc drawn from straight up)
+      const up = { x: s.hip.x, y: s.hip.y - SEG.torso };
+      return { value: angleAt2D(up, s.hip, s.neck), vertex: s.hip, from: up, to: s.neck };
+    }
+    case 'hip_abduction': {
+      // angle(other hip, hip, knee) − 90 (arc drawn from straight down)
+      const down = { x: s.legNear.root.x, y: s.legNear.root.y + SEG.thigh };
+      return { value: angleAt2D(s.legFar.root, s.legNear.root, s.legNear.mid) - 90, vertex: s.legNear.root, from: down, to: s.legNear.mid };
+    }
   }
 }
 
@@ -253,14 +263,13 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
     },
   },
 
-  // Standing (front view), one arm raised out to the side to shoulder height
+  // Standing (front view), both arms raised out to the side to shoulder height
   ex_shoulder_abduction: {
     slug: 'ex_shoulder_abduction',
     view: 'front',
     measurement: 'shoulder',
     props: {},
-    unilateral: true,
-    caption: 'Standing tall, raise one straight arm out to the side',
+    caption: 'Standing tall, raise both straight arms out to the side',
     pose: (t) => {
       const a = lerp(6, 80, t); // hips narrower than shoulders → measured ≈ a + 10°
       return {
@@ -269,8 +278,53 @@ export const EXERCISE_DEMOS: Record<string, ExerciseDemo> = {
         torso: -90,
         head: -90,
         armNear: { upper: 90 + a, lower: 90 + a, end: 90 + a },
-        armFar: { upper: 84, lower: 84, end: 84 },
+        armFar: { upper: 90 - a, lower: 90 - a, end: 90 - a },
         ...frontLegs,
+      };
+    },
+  },
+
+  // Standing (front view), arms overhead, trunk bends to the side and back
+  ex_trunk_lateral_flexion: {
+    slug: 'ex_trunk_lateral_flexion',
+    view: 'front',
+    measurement: 'trunk_lateral_flexion',
+    props: {},
+    caption: 'Arms overhead, bend the trunk to the side, hips still',
+    pose: (t) => {
+      const bend = lerp(0, 26, t);
+      const torso = -90 - bend; // leans towards the near (left of screen) side
+      const up = torso - 4;
+      return {
+        view: 'front',
+        hip: { x: 130, y: standingHipY },
+        torso,
+        head: torso - 4,
+        armNear: { upper: up - 8, lower: up - 6, end: up - 6 },
+        armFar: { upper: up + 8, lower: up + 6, end: up + 6 },
+        ...frontLegs,
+      };
+    },
+  },
+
+  // Standing (front view), one straight leg lifted out to the side
+  ex_standing_hip_abduction: {
+    slug: 'ex_standing_hip_abduction',
+    view: 'front',
+    measurement: 'hip_abduction',
+    props: {},
+    caption: 'Standing tall, lift one straight leg out to the side',
+    pose: (t) => {
+      const a = lerp(3, 26, t);
+      return {
+        view: 'front',
+        hip: { x: 130, y: standingHipY },
+        torso: -90,
+        head: -90,
+        armNear: hang,
+        armFar: { upper: 88, lower: 90, end: 90 },
+        legNear: { upper: 90 + a, lower: 90 + a, end: 180 },
+        legFar: frontLegs.legFar,
       };
     },
   },

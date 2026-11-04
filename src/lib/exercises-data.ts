@@ -34,6 +34,8 @@ export interface ExerciseData {
   unilateral?: boolean;
   /** Body position required before reps count (e.g. lying down), with the spoken hint when it is not met */
   posture?: PostureGate & { hintTh: string };
+  /** Taken out of the kids' library (seeded RETIRED, kept for old sessions): why */
+  retired?: string;
 }
 
 /** A measurement range the body must be in for reps to count */
@@ -83,6 +85,7 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "Footprints",
     bodyPart: "lower",
+    retired: "Not in the kids' library (decision 0002): lying on the floor, the camera must sit at floor level.",
     // A seated or standing knee bends too: count only while lying (trunk ≈ 90° from vertical)
     posture: { measurement: "trunk_inclination", min: 60, hintTh: "นอนหงายราบกับพื้น ให้กล้องเห็นด้านข้างลำตัวก่อนนะครับ" },
     formChecks: [
@@ -135,6 +138,7 @@ export const EXERCISES: ExerciseData[] = [
     icon: "MoveHorizontal",
     bodyPart: "upper",
     holdSeconds: 10,
+    retired: "Not in the kids' library (decision 0002): the arm crosses in front of the chest so the camera loses the elbow, and any arm raised to shoulder height also counts.",
     unilateral: true,
     formChecks: [
       {
@@ -157,30 +161,31 @@ export const EXERCISES: ExerciseData[] = [
     name: "Shoulder Abduction",
     nameTh: "กางแขนข้าง",
     category: "shoulder",
-    description: "การฝึกกางแขนออกด้านข้างเพื่อเสริมกล้ามเนื้อ Deltoid และฟื้นฟูข้อไหล่",
+    description: "กางแขนทั้งสองข้างออกด้านข้างจนขนานพื้น เสริมกล้ามเนื้อหัวไหล่ (Deltoid) และการเคลื่อนไหวของข้อไหล่",
     instructions: [
-      "ยืนหรือนั่งตรง หันหน้าเข้ากล้อง แขนวางข้างลำตัว",
-      "ค่อยๆ กางแขนข้างที่ฝึกออกด้านข้าง แขนเหยียดตรง",
+      "ยืนตรง หันหน้าเข้ากล้อง ให้กล้องเห็นตั้งแต่หัวถึงเข่า แขนวางข้างลำตัว",
+      "ค่อยๆ กางแขนทั้งสองข้างออกด้านข้างพร้อมกัน แขนเหยียดตรง",
       "กางจนแขนขนานกับพื้น",
       "ค้างไว้ 2-3 วินาที แล้วค่อยลง",
-      "ทำครบแล้วสลับทำแขนอีกข้าง",
     ],
     targetJoints: [
       {
         name: "left_shoulder",
         nameTh: "ไหล่ซ้าย",
         idealAngle: 90,
-        minAngle: 80,
-        maxAngle: 100,
+        minAngle: 75,
+        maxAngle: 115,
         unit: "°",
+        rationale: "Developer estimate. A level arm reads about 90° from the front. Kids' library (decision 0002): widened from 80–100° to 75–115° so an arm that stops a little low or swings a little high still counts; leaving the range by overshooting ended reps early.",
       },
       {
         name: "right_shoulder",
         nameTh: "ไหล่ขวา",
         idealAngle: 90,
-        minAngle: 80,
-        maxAngle: 100,
+        minAngle: 75,
+        maxAngle: 115,
         unit: "°",
+        rationale: "Same as left side.",
       },
     ],
     difficulty: "beginner",
@@ -189,14 +194,20 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "MoveHorizontal",
     bodyPart: "upper",
-    unilateral: true,
     formChecks: [
       {
         "id": "elbow_straight",
         "type": "min",
-        "measurement": "{side}_elbow",
-        "threshold": 150,
-        "message": "Keep your elbow straight"
+        "measurement": "left_elbow",
+        "threshold": 140,
+        "message": "Keep your elbows straight"
+      },
+      {
+        "id": "elbow_straight_right",
+        "type": "min",
+        "measurement": "right_elbow",
+        "threshold": 140,
+        "message": "Keep your elbows straight"
       },
       {
         "id": "trunk_upright",
@@ -243,6 +254,7 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 45,
     icon: "PersonStanding",
     bodyPart: "lower",
+    retired: "Not in the kids' library (decision 0002): needs a free wall and a side view; the free-standing squat trains the same muscles.",
     formChecks: [
       {
         "id": "weight_even",
@@ -262,26 +274,26 @@ export const EXERCISES: ExerciseData[] = [
     instructions: [
       "ยืนตรง หันหน้าเข้ากล้อง",
       "กางแขนทั้งสองข้างออกด้านข้าง ให้ขนานกับพื้น แขนเหยียดตรง",
-      "หมุนแขนเป็นวงกลมเล็กๆ แล้วค่อยๆ ขยายวงให้ใหญ่ขึ้น จนรู้สึกตึงที่ต้นแขน",
-      "หมุนประมาณ 10 วินาที แล้วหมุนกลับทิศทาง",
+      "หมุนแขนเป็นวงกลมช้าๆ วงใหญ่ ให้มือผ่านเหนือระดับไหล่ทุกรอบ",
+      "หมุนครบแล้วหมุนกลับทิศทาง",
     ],
     targetJoints: [
       {
         name: "left_shoulder",
         nameTh: "ไหล่ซ้าย",
-        idealAngle: 120,
-        minAngle: 110,
-        maxAngle: 140,
+        idealAngle: 125,
+        minAngle: 105,
+        maxAngle: 170,
         unit: "°",
         rationale:
-          "Powell Orthopedics arm circles (arms out at shoulder height, circles growing from tiny to large). Developer estimate: a level arm reads ≈95–100° from the front (hips are narrower than shoulders); a circle passing over the top reaches ≈110–140°, so one counted rep = one circle that rises ≥10–15° above the level arm.",
+          "Powell Orthopedics arm circles (arms out at shoulder height, circles growing from tiny to large). Developer estimate: a level arm reads ≈95–100° from the front (hips are narrower than shoulders); one counted rep = one circle that rises above the level arm. Kids' library (decision 0002): the upper bound is raised from 140° to 170° so a big circle no longer leaves the range over the top and loses the rep; kids are told to circle slowly and big.",
       },
       {
         name: "right_shoulder",
         nameTh: "ไหล่ขวา",
-        idealAngle: 120,
-        minAngle: 110,
-        maxAngle: 140,
+        idealAngle: 125,
+        minAngle: 105,
+        maxAngle: 170,
         unit: "°",
         rationale: "Same as left side.",
       },
@@ -310,8 +322,8 @@ export const EXERCISES: ExerciseData[] = [
     instructions: [
       "ยืนตรง เท้ากว้างเท่าสะโพก หันหน้าเข้ากล้อง",
       "ยกแขนทั้งสองข้างเหยียดตรงเหนือศีรษะ",
-      "ค่อยๆ เอียงลำตัวไปด้านข้าง สะโพกอยู่กับที่",
-      "ค้างไว้ 2-3 วินาที แล้วกลับมาตรง",
+      "ค่อยๆ เอียงลำตัวไปด้านข้าง สะโพกอยู่กับที่ ไม่บิดตัว",
+      "ค้างไว้ 2-3 วินาที แล้วกลับมาตรงกลาง",
       "สลับทำอีกข้าง",
     ],
     targetJoints: [
@@ -319,11 +331,11 @@ export const EXERCISES: ExerciseData[] = [
         name: "trunk_lateral_flexion",
         nameTh: "เอียงลำตัวด้านข้าง",
         idealAngle: 25,
-        minAngle: 15,
-        maxAngle: 35,
+        minAngle: 12,
+        maxAngle: 45,
         unit: "°",
         rationale:
-          "KIMORE Ex2 (lateral tilt of the trunk with the arms extended). Developer estimate bounded by normal thoracolumbar lateral flexion ≈35° (AAOS). Unsigned, so bending to either side counts.",
+          "Leeds Teaching Hospitals NASS sheet 'Side Bend in Standing' (arms overhead, bend to one side, back to the middle, then the other side) and KIMORE Ex2. Developer estimate around normal thoracolumbar lateral flexion ≈35° (AAOS). Kids' library (decision 0002): widened from 15–35° to 12–45° because children are usually more flexible and a deep bend should not lose the rep. Unsigned, so bending to either side counts.",
       },
     ],
     difficulty: "beginner",
@@ -345,14 +357,14 @@ export const EXERCISES: ExerciseData[] = [
         "id": "left_arm_overhead",
         "type": "min",
         "measurement": "left_shoulder",
-        "threshold": 140,
+        "threshold": 130,
         "message": "Keep your arms extended overhead"
       },
       {
         "id": "right_arm_overhead",
         "type": "min",
         "measurement": "right_shoulder",
-        "threshold": 140,
+        "threshold": 130,
         "message": "Keep your arms extended overhead"
       }
     ],
@@ -387,6 +399,7 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 30,
     icon: "RefreshCw",
     bodyPart: "upper",
+    retired: "Not in the kids' library (decision 0002): rotation is measured from camera depth, the noisiest part of pose tracking.",
     formChecks: [
       {
         "id": "no_side_bend",
@@ -415,17 +428,17 @@ export const EXERCISES: ExerciseData[] = [
         nameTh: "เข่าซ้าย",
         idealAngle: 95,
         minAngle: 80,
-        maxAngle: 110,
+        maxAngle: 120,
         unit: "°",
         rationale:
-          "KIMORE Ex5 / REHAB24-6 Ex6. Developer estimate: a parallel-depth squat ≈90° interior knee angle; the upper bound allows a partial squat for rehabilitation.",
+          "KIMORE Ex5 / REHAB24-6 Ex6 / AAOS half squat. Developer estimate: a parallel-depth squat ≈90° interior knee angle. Kids' library (decision 0002): the upper bound is raised from 110° to 120° so a shallower half squat counts.",
       },
       {
         name: "right_knee",
         nameTh: "เข่าขวา",
         idealAngle: 95,
         minAngle: 80,
-        maxAngle: 110,
+        maxAngle: 120,
         unit: "°",
         rationale: "Same as left side.",
       },
@@ -500,6 +513,7 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 45,
     icon: "Footprints",
     bodyPart: "lower",
+    retired: "Not in the kids' library (decision 0002): side view and balance on one leg; the legs hide each other from the camera.",
     formChecks: [
       {
         "id": "trunk_upright",
@@ -556,6 +570,7 @@ export const EXERCISES: ExerciseData[] = [
     restSeconds: 45,
     icon: "MoveHorizontal",
     bodyPart: "lower",
+    retired: "Not in the kids' library (decision 0002): advanced, needs a wide space, and the squat already trains the legs.",
     formChecks: [
       {
         "id": "other_leg_straight",
@@ -579,7 +594,7 @@ export const EXERCISES: ExerciseData[] = [
     category: "hip",
     description: "ยืนแล้วกางขาออกด้านข้างโดยขาเหยียดตรง เสริมกล้ามเนื้อ Gluteus Medius",
     instructions: [
-      "ยืนตรง หันหน้าเข้ากล้อง จับพนักเก้าอี้เพื่อทรงตัวได้",
+      "ยืนตรง หันหน้าเข้ากล้อง ให้กล้องเห็นทั้งตัว จับพนักเก้าอี้ด้านข้างเพื่อทรงตัวได้",
       "เหยียดเข่าข้างที่ฝึกให้ตรง ปลายเท้าชี้ไปด้านหน้า",
       "ค่อยๆ กางขาออกด้านข้าง",
       "ลำตัวตั้งตรง ไม่เอียงไปฝั่งตรงข้าม",
@@ -590,18 +605,18 @@ export const EXERCISES: ExerciseData[] = [
         name: "left_hip_abduction",
         nameTh: "กางสะโพกซ้าย",
         idealAngle: 25,
-        minAngle: 20,
-        maxAngle: 35,
+        minAngle: 15,
+        maxAngle: 45,
         unit: "°",
         rationale:
-          "REHAB24-6 Ex4 (leg abduction). Developer estimate bounded by normal hip abduction ≈40–45° (AAOS); beyond ~35° standing usually needs trunk lean (compensation).",
+          "University Hospitals Birmingham NHS 'Standing hip abduction' (hold a chair, lift the leg out to the side, upper body still) and REHAB24-6 Ex4. Developer estimate bounded by normal hip abduction ≈40–45° (AAOS). Kids' library (decision 0002): widened from 20–35° to 15–45° so a small lift counts and a high kick does not lose the rep; the trunk-upright check still flags leaning.",
       },
       {
         name: "right_hip_abduction",
         nameTh: "กางสะโพกขวา",
         idealAngle: 25,
-        minAngle: 20,
-        maxAngle: 35,
+        minAngle: 15,
+        maxAngle: 45,
         unit: "°",
         rationale: "Same as left side.",
       },
@@ -624,7 +639,7 @@ export const EXERCISES: ExerciseData[] = [
         "id": "lifted_knee_straight",
         "type": "min",
         "measurement": "{side}_knee",
-        "threshold": 160,
+        "threshold": 150,
         "message": "Keep the lifted knee straight"
       }
     ],
@@ -664,6 +679,9 @@ export const DIFFICULTY_COLORS: Record<string, string> = {
 export function exerciseIdFromName(name: string): string {
   return `ex_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
 }
+
+/** Exercises in the kids' library (not retired), in catalogue order */
+export const ACTIVE_EXERCISES = EXERCISES.filter((e) => !e.retired);
 
 export interface ExerciseMeta {
   holdSeconds: number | null;
