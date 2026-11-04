@@ -132,7 +132,7 @@ export function AssignForm({ classroomId, onDone }: { classroomId: string; onDon
                 <div key={ex.id} className={`rounded-2xl border-2 p-3 transition ${p ? 'border-[var(--kids-sky)] bg-[#f2f9ff]' : 'border-transparent bg-muted/40'}`}>
                   <button type="button" onClick={() => toggle(ex)} className="flex w-full items-start gap-3 text-left">
                     <div className="w-24 shrink-0 overflow-hidden rounded-xl bg-white">
-                      <ExerciseDemo slug={ex.slug} target={primary} compact />
+                      <ExerciseDemo slug={ex.slug} target={primary} compact size="sm" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold">{ex.kidName}</p>

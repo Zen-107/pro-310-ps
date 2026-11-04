@@ -47,6 +47,7 @@ export function KidsMissions() {
   const setPendingQuestStart = useAppStore((s) => s.setPendingQuestStart);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [quests, setQuests] = useState<QuestToday[]>([]);
+  const [avatar, setAvatar] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -62,6 +63,11 @@ export function KidsMissions() {
       })
       .catch(() => !cancelled && setError(true))
       .finally(() => !cancelled && setLoading(false));
+    // The child's own mascot colours for the demos (nice to have: ignore failures)
+    fetch('/api/stats?days=1')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => !cancelled && setAvatar(s?.profile?.avatar ?? null))
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -116,7 +122,7 @@ export function KidsMissions() {
             >
               <div className="p-4" style={{ background: CARD_TINTS[idx % CARD_TINTS.length] }}>
                 <div className="rounded-[20px] bg-white/80 p-2">
-                  <ExerciseDemo slug={ex.slug} target={primary} compact />
+                  <ExerciseDemo slug={ex.slug} target={primary} compact avatar={avatar} />
                 </div>
               </div>
 

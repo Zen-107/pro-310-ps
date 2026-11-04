@@ -15,9 +15,12 @@ import {
   type Limb,
   type Pt,
 } from '@/lib/exercise-poses';
+import { MASCOT_VIEWBOX, MascotFigure, chibi } from '@/components/kids/mascot-demo';
 
-// Vector exercise demo: an anatomical silhouette driven by joint-angle
-// keyframes (lib/exercise-poses.ts). No video/GIF assets.
+// Vector exercise demo driven by joint-angle keyframes (lib/exercise-poses.ts).
+// No video/GIF assets. Two looks on the same pose:
+// - 'mascot' (default): น้องยืด doing the move, big and cute, no degrees (decision 0003)
+// - 'anatomy': grey silhouette with the measured angle and the target band
 
 interface Target {
   minAngle: number;
@@ -107,6 +110,9 @@ export function ExerciseDemo({
   side: trainingSide,
   compact = false,
   className = '',
+  look = 'mascot',
+  size = 'md',
+  avatar,
 }: {
   slug: string;
   target?: Target;
@@ -114,6 +120,12 @@ export function ExerciseDemo({
   side?: 'left' | 'right';
   compact?: boolean;
   className?: string;
+  /** 'mascot' = น้องยืด for kids and teachers; 'anatomy' = silhouette with angles */
+  look?: 'mascot' | 'anatomy';
+  /** Mascot look only: sm for thumbnails, md for cards, lg for the camera screen */
+  size?: 'sm' | 'md' | 'lg';
+  /** Mascot look only: the child's own mascot colours */
+  avatar?: string | null;
 }) {
   const demo = EXERCISE_DEMOS[slug];
   const [sec, setSec] = useState(0);
@@ -172,6 +184,44 @@ export function ExerciseDemo({
 
   const { skel, m, guides } = frame;
   const mirrored = !!demo.unilateral && trainingSide === 'right';
+
+  if (look === 'mascot') {
+    const t = demoProgress(demo, sec);
+    const cheer = !demo.continuous && t > 0.97;
+    const v = MASCOT_VIEWBOX;
+    const small = chibi(skel);
+    const height = size === 'sm' ? 'h-28' : size === 'lg' ? 'h-72' : 'h-52 sm:h-60';
+    return (
+      <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-b from-[#FFF9EE] to-[#FFEFD9] ${className}`}>
+        <svg
+          viewBox={`${v.x} ${v.y} ${v.w} ${v.h}`}
+          className={`w-full ${height}`}
+          role="img"
+          aria-label={`น้องยืดทำท่าให้ดู${demo.unilateral && trainingSide ? ` (ข้าง${trainingSide === 'left' ? 'ซ้าย' : 'ขวา'})` : ''}`}
+        >
+          {/* stage: soft spotlight and floor */}
+          <ellipse cx={130} cy={110} rx={78} ry={92} fill="#fff" opacity={0.55} />
+          <ellipse cx={130} cy={GROUND + 4} rx={86} ry={9} fill="#FFE2B8" />
+          <g transform={mirrored ? `translate(${SCENE_W},0) scale(-1,1)` : undefined}>
+            <MascotFigure skel={small.skel} sec={sec} cheer={cheer} avatar={avatar} />
+            {guides.map((g, i) => (
+              <GuidePath key={i} g={small.guide(g)} />
+            ))}
+          </g>
+        </svg>
+        {size !== 'sm' && (
+          <button
+            type="button"
+            onClick={() => setPlaying((p) => !p)}
+            className="absolute right-2 top-2 rounded-full bg-white/85 p-2 text-[#3B2A4A] shadow-sm"
+            aria-label={playing ? 'หยุดท่าตัวอย่าง' : 'เล่นท่าตัวอย่าง'}
+          >
+            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+          </button>
+        )}
+      </div>
+    );
+  }
   const viewY = demo.frame?.y ?? 0;
   const viewH = demo.frame?.h ?? 200;
   const side = skel.view === 'side';
