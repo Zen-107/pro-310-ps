@@ -15,7 +15,10 @@ export const VIDEO_MIME_TYPES: Record<string, string> = {
 
 export function storageDir(): string {
   // Runtime data directory: excluded from build tracing (see next.config.ts)
-  return path.resolve(/* turbopackIgnore: true */ process.cwd(), process.env.VIDEO_STORAGE_DIR || 'storage/session-videos');
+  // On Vercel only /tmp is writable (and it is wiped between instances): fine
+  // for the online demo, not for real data
+  const fallback = process.env.VERCEL ? '/tmp/session-videos' : 'storage/session-videos';
+  return path.resolve(/* turbopackIgnore: true */ process.cwd(), process.env.VIDEO_STORAGE_DIR || fallback);
 }
 
 /** Absolute path for a storage key; rejects anything that could escape the directory */

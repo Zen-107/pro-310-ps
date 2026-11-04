@@ -18,5 +18,5 @@ export default async function LoginPage({
 
   if (await getSessionUser()) redirect(callbackUrl);
 
-  return <LoginForm callbackUrl={callbackUrl} showDemoAccounts={process.env.NODE_ENV !== 'production'} />;
+  return <LoginForm callbackUrl={callbackUrl} showDemoAccounts={process.env.NODE_ENV !== 'production' || process.env.SHOW_DEMO_ACCOUNTS === '1'} />;
 }
