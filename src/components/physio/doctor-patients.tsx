@@ -26,6 +26,7 @@ import {
 import { toast } from 'sonner';
 import { useAppStore } from '@/lib/store';
 import { AiInsightsPanel } from '@/components/physio/ai-insights-panel';
+import { KidMissionsCard } from '@/components/expert/kid-missions-card';
 import { categoryLabel } from '@/lib/exercises-data';
 import { getAccuracyTextColor, getAccuracyBarColor } from '@/lib/angle-utils';
 
@@ -436,6 +437,11 @@ export function DoctorPatients() {
                 </div>
               </CardContent>
             </Card>
+          </motion.div>
+
+          {/* ── Missions: the expert can give this child missions (decision 0005) ── */}
+          <motion.div variants={FADE_UP}>
+            <KidMissionsCard key={patient.id} patientId={patient.id} kidName={patient.name} />
           </motion.div>
 
           {/* ── 4. Stats Row (4 cards) ── */}

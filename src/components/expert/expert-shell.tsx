@@ -11,8 +11,8 @@ import { CareMessages } from '@/components/adult/care-messages';
 import { ClassesView } from '@/components/teacher/classes-view';
 
 // Expert (physio, role CLINICIAN): overview and review queue, children and
-// their trends, classes (read-only), session reports and messages. Mission
-// sets are created by teachers, so there is no plans tab here.
+// their trends and missions (gives one child missions, decision 0005), classes
+// (read-only: class sets belong to the teacher), session reports and messages.
 
 type ExpertTab = Extract<DoctorTab, 'overview' | 'patients' | 'reports' | 'messages'> | 'plans';
 

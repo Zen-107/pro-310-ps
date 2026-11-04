@@ -3,19 +3,22 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope } from '@/lib/access';
-import { badRequest, notFound, readJson, serverError } from '@/lib/api-utils';
+import { badRequest, jsonError, notFound, readJson, serverError } from '@/lib/api-utils';
 import { prescriptionDTO, prescriptionInclude, validateItemInput } from '@/lib/prescriptions';
-import { ASSIGNERS } from '@/lib/roles';
+import { CLASS_SET_MESSAGE, PLAN_EDITORS, mayEditPlan } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string; itemId: string }> };
 
 async function findItem(userScope: Prisma.PatientWhereInput, id: string, itemId: string) {
-  return db.prescriptionItem.findFirst({ where: { id: itemId, prescriptionId: id, prescription: { patient: userScope } } });
+  return db.prescriptionItem.findFirst({
+    where: { id: itemId, prescriptionId: id, prescription: { patient: userScope } },
+    include: { prescription: { select: { classroomId: true } } },
+  });
 }
 
 // Update dose / schedule / notes; `targetOverrides` (if given) replaces all overrides
 export async function PATCH(req: Request, { params }: Params) {
-  const auth = await requireApiUser(ASSIGNERS);
+  const auth = await requireApiUser(PLAN_EDITORS);
   if ('response' in auth) return auth.response;
   const { id, itemId } = await params;
   const body = await readJson(req);
@@ -24,6 +27,7 @@ export async function PATCH(req: Request, { params }: Params) {
   try {
     const item = await findItem(patientScope(auth.user), id, itemId);
     if (!item) return notFound('Prescription item not found');
+    if (!mayEditPlan(auth.user.role, item.prescription)) return jsonError(CLASS_SET_MESSAGE, 403);
 
     const result = await validateItemInput(body, item.exerciseId);
     if (!result.ok) return badRequest(result.error);
@@ -49,12 +53,13 @@ export async function PATCH(req: Request, { params }: Params) {
 // Remove an exercise from the prescription. Past sessions are kept
 // (their quest link is cleared); future quests for it stop being generated.
 export async function DELETE(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(ASSIGNERS);
+  const auth = await requireApiUser(PLAN_EDITORS);
   if ('response' in auth) return auth.response;
   const { id, itemId } = await params;
   try {
     const item = await findItem(patientScope(auth.user), id, itemId);
     if (!item) return notFound('Prescription item not found');
+    if (!mayEditPlan(auth.user.role, item.prescription)) return jsonError(CLASS_SET_MESSAGE, 403);
     await db.prescriptionItem.delete({ where: { id: itemId } });
     const updated = await db.prescription.findUniqueOrThrow({ where: { id }, include: prescriptionInclude });
     return NextResponse.json(prescriptionDTO(updated));

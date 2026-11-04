@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ExerciseDemo } from '@/components/physio/exercise-demo';
 
-// Build a mission set from the expert's library and give it to the whole class.
+// Build a mission set from the expert's library and give it to the whole class
+// (teacher) or to one child (teacher or expert, decision 0005).
 
 export interface LibraryExercise {
   id: string;
@@ -43,7 +44,10 @@ interface Pick {
   repsPerSet: number;
 }
 
-export function AssignForm({ classroomId, onDone }: { classroomId: string; onDone: () => void }) {
+type AssignTarget = { classroomId: string } | { patientId: string; kidName: string };
+
+export function AssignForm({ onDone, ...target }: AssignTarget & { onDone: () => void }) {
+  const forKid = 'patientId' in target;
   const library = useKidLibrary();
   const [title, setTitle] = useState('');
   const [picks, setPicks] = useState<Record<string, Pick>>({});
@@ -67,13 +71,11 @@ export function AssignForm({ classroomId, onDone }: { classroomId: string; onDon
     }
     setSaving(true);
     try {
-      const res = await fetch(`/api/classrooms/${classroomId}/plans`, {
+      const items = ids.map((exerciseId, i) => ({ exerciseId, ...picks[exerciseId], daysOfWeek: days.length === 7 ? [] : days, sortOrder: i }));
+      const res = await fetch(forKid ? '/api/prescriptions' : `/api/classrooms/${target.classroomId}/plans`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          items: ids.map((exerciseId, i) => ({ exerciseId, ...picks[exerciseId], daysOfWeek: days.length === 7 ? [] : days, sortOrder: i })),
-        }),
+        body: JSON.stringify(forKid ? { patientId: target.patientId, title, items } : { title, items }),
       });
       const body = await res.json().catch(() => null);
       if (res.status === 409) {
@@ -84,7 +86,7 @@ export function AssignForm({ classroomId, onDone }: { classroomId: string; onDon
         toast.error(`ให้ภารกิจไม่สำเร็จ ${body?.error ?? ''}`);
         return;
       }
-      toast.success(`ให้ภารกิจ "${title}" กับนักเรียน ${body.kids} คนแล้ว`);
+      toast.success(forKid ? `ให้ภารกิจ "${title}" กับ${target.kidName}แล้ว` : `ให้ภารกิจ "${title}" กับนักเรียน ${body.kids} คนแล้ว`);
       onDone();
     } finally {
       setSaving(false);
@@ -160,7 +162,7 @@ export function AssignForm({ classroomId, onDone }: { classroomId: string; onDon
           ยกเลิก
         </Button>
         <Button type="submit" disabled={saving || days.length === 0}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} ให้ภารกิจทั้งห้อง
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} {forKid ? 'ให้ภารกิจเด็กคนนี้' : 'ให้ภารกิจทั้งห้อง'}
         </Button>
       </div>
     </form>

@@ -3,10 +3,10 @@ import type { Prisma, PrescriptionOutcome, PrescriptionStatus } from '@prisma/cl
 import { db } from '@/lib/db';
 import { requireApiUser } from '@/lib/auth-guard';
 import { patientScope } from '@/lib/access';
-import { badRequest, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
+import { badRequest, jsonError, notFound, optionalString, readJson, serverError } from '@/lib/api-utils';
 import { dateOnly, isValidDay } from '@/lib/dates';
 import { prescriptionDTO, prescriptionInclude } from '@/lib/prescriptions';
-import { ANYONE_WITH_CHILD, ASSIGNERS, STAFF } from '@/lib/roles';
+import { ANYONE_WITH_CHILD, CLASS_SET_MESSAGE, PLAN_EDITORS, STAFF, mayEditPlan } from '@/lib/roles';
 
 type Params = { params: Promise<{ id: string }> };
 const STATUSES: PrescriptionStatus[] = ['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'];
@@ -66,6 +66,7 @@ export async function PATCH(req: Request, { params }: Params) {
   try {
     const existing = await db.prescription.findFirst({ where: { id, patient: patientScope(auth.user) } });
     if (!existing) return notFound('Prescription not found');
+    if (!mayEditPlan(auth.user.role, existing)) return jsonError(CLASS_SET_MESSAGE, 403);
     const start = (data.startDate as Date | undefined) ?? existing.startDate;
     const end = data.endDate === undefined ? existing.endDate : (data.endDate as Date | null);
     if (end && end < start) return badRequest('endDate cannot be before startDate');
@@ -86,12 +87,13 @@ export async function PATCH(req: Request, { params }: Params) {
 
 // Cancel (kept for history; quests stop being generated)
 export async function DELETE(_req: Request, { params }: Params) {
-  const auth = await requireApiUser(ASSIGNERS);
+  const auth = await requireApiUser(PLAN_EDITORS);
   if ('response' in auth) return auth.response;
   const { id } = await params;
   try {
     const existing = await db.prescription.findFirst({ where: { id, patient: patientScope(auth.user) } });
     if (!existing) return notFound('Prescription not found');
+    if (!mayEditPlan(auth.user.role, existing)) return jsonError(CLASS_SET_MESSAGE, 403);
     const updated = await db.prescription.update({ where: { id }, data: { status: 'CANCELLED' }, include: prescriptionInclude });
     return NextResponse.json(prescriptionDTO(updated));
   } catch (error) {

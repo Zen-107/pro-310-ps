@@ -89,18 +89,38 @@ describe.skipIf(!enabled)('Kids roles (integration)', () => {
       expect((await students.POST(req('/x', { method: 'POST', body: { students: [{ name: 'x' }] } }), params({ id: classroomId }))).status).toBe(404);
     });
 
-    test('only a teacher assigns missions; the class set reaches every child', async () => {
+    test('only a teacher assigns class sets; the class set reaches every child', async () => {
       const plans = await import('@/app/api/classrooms/[id]/plans/route');
-      const rx = await import('@/app/api/prescriptions/route');
       const body = { title: 'ยืดเช้า', items: [{ exerciseId: f.exercise.id, sets: 1, repsPerSet: 5 }] };
       signInAs(f.doctorA.user);
       expect((await plans.POST(req('/x', { method: 'POST', body }), params({ id: classroomId }))).status).toBe(403);
-      expect((await rx.POST(req('/api/prescriptions', { method: 'POST', body: { patientId: f.p1.id, title: 'x' } }))).status).toBe(403);
       signInAs(teacher);
       const res = await json(await plans.POST(req('/x', { method: 'POST', body }), params({ id: classroomId })));
       expect(res.status).toBe(201);
       expect(res.body.kids).toBe(2);
       expect((await plans.POST(req('/x', { method: 'POST', body }), params({ id: classroomId }))).status).toBe(409);
+    });
+
+    // Decision 0005: the expert gives one child missions, but never changes a class set
+    test("the expert gives one child missions but cannot change the class set", async () => {
+      const rx = await import('@/app/api/prescriptions/route');
+      const one = await import('@/app/api/prescriptions/[id]/route');
+      const items = await import('@/app/api/prescriptions/[id]/items/route');
+      const item = { exerciseId: f.exercise.id, sets: 1, repsPerSet: 5 };
+      signInAs(f.doctorA.user);
+      const made = await json(await rx.POST(req('/api/prescriptions', { method: 'POST', body: { patientId: f.p1.id, title: 'เพิ่มจากผู้เชี่ยวชาญ', items: [item] } })));
+      expect(made.status).toBe(201);
+      expect(made.body.classroomId).toBeNull();
+      expect((await items.POST(req('/x', { method: 'POST', body: item }), params({ id: made.body.id }))).status).toBe(201);
+      expect((await one.DELETE(req('/x', { method: 'DELETE' }), params({ id: made.body.id }))).status).toBe(200);
+
+      const classSet = await db.prescription.findFirstOrThrow({ where: { classroomId, status: 'ACTIVE' } });
+      // The expert advises this child too, so a refusal is about the class set, not access
+      await db.careAssignment.create({ data: { clinicianId: f.doctorA.id, patientId: classSet.patientId, role: 'SUPPORTING' } });
+      expect((await items.POST(req('/x', { method: 'POST', body: item }), params({ id: classSet.id }))).status).toBe(403);
+      expect((await one.DELETE(req('/x', { method: 'DELETE' }), params({ id: classSet.id }))).status).toBe(403);
+      expect((await one.PATCH(req('/x', { method: 'PATCH', body: { title: 'x' } }), params({ id: classSet.id }))).status).toBe(403);
+      await db.careAssignment.deleteMany({ where: { clinicianId: f.doctorA.id, patientId: classSet.patientId } });
     });
 
     test('a child added later gets the active class set', async () => {

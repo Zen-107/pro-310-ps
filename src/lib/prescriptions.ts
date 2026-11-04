@@ -21,6 +21,8 @@ export function prescriptionDTO(p: PrescriptionWithRelations) {
   return {
     id: p.id,
     patientId: p.patientId,
+    /** Set when the plan is the child's copy of a class mission set (teacher-owned) */
+    classroomId: p.classroomId,
     title: p.title,
     notes: p.notes,
     status: p.status,
