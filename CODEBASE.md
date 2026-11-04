@@ -35,7 +35,7 @@ The app now serves **children (7–12) for prevention/maintenance**, with teache
 - `POST /api/kids/[id]/codes` (reset pictures / kid code / parent code) · `GET/POST /api/kids/[id]/consent`
 - `POST /api/parent/register` (no session; link code) · `POST /api/parent/link` · `GET /api/parent/children`
 - `GET/POST /api/me/pin` · `POST /api/me/switch` · `POST /api/me/return`
-- Changed: role lists on every route; prescriptions create/items = teacher only, status/outcome = teacher or expert; kid-side `POST /api/me/video-consent` removed; messages = adults only
+- Changed: role lists on every route; prescriptions create/items = teacher only, status/outcome = teacher or expert; kid-side `POST /api/me/video-consent` removed; chat = expert ↔ parents only (`CHAT` role set; teachers and kids get 403); `GET /api/messages/threads` returns the child (nickname, age, class, consent) and the registered parents / experts; withdrawing the terms also withdraws video consent and deletes videos; the video stream 404s without current video consent; `GET/PUT /api/me/avatar` (kid dresses their mascot, look format in `src/lib/mascot-look.ts`, unlocks checked server side)
 
 **New UI** — `src/components/app-shell.tsx` routes by role to `kids/kids-shell.tsx`, `teacher/teacher-shell.tsx`, `parent/parent-shell.tsx`, `expert/expert-shell.tsx` (adult shells share `adult/adult-shell.tsx`). Themes `.theme-kids` / `.theme-adult` in `globals.css`. Mascot: `kids/mascot.tsx`. Kid names/steps per exercise: `KID_EXERCISES` in `src/lib/kids.ts` (also returned as `kidName`/`kidSteps` by the exercise DTO). The camera screen (`physio/live-session-view.tsx`) kept its pipeline; only its three render blocks were restyled for kids.
 
@@ -99,7 +99,6 @@ project-root/
 │   │       ├── doctor-reports.tsx        # Clinician: tabbed session report, print, PDF download
 │   │       ├── report-transparency.tsx   # Formulas, reps, faults, review panel, ClinicalSessionReplay
 │   │       ├── report-print.tsx          # Official Thai A4 print document, AI-summary markdown
-│   │       └── doctor-messages.tsx       # Clinician: message threads
 │   │
 │   ├── lib/
 │   │   ├── auth.ts, auth-guard.ts, password.ts, access.ts   # next-auth config, API guards, scrypt, care-team scope

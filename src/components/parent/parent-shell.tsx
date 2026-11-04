@@ -5,11 +5,11 @@ import { useAppStore, type ParentTab } from '@/lib/store';
 import type { SessionUser } from '@/lib/auth-guard';
 import { AdultShell, useUnreadMessages, type AdultTab } from '@/components/adult/adult-shell';
 import { AccountSettings } from '@/components/adult/account-settings';
-import { DoctorMessages } from '@/components/physio/doctor-messages';
+import { CareMessages } from '@/components/adult/care-messages';
 import { ChildrenView } from '@/components/parent/children-view';
 
 // Parent: my children (consent, progress, play at home), messages with the
-// teacher and expert, account (PIN for leaving kid mode).
+// expert, account (PIN for leaving kid mode).
 export function ParentShell({ user }: { user: SessionUser }) {
   const { activeTab, setActiveTab } = useAppStore();
   const unread = useUnreadMessages(activeTab);
@@ -24,7 +24,7 @@ export function ParentShell({ user }: { user: SessionUser }) {
   return (
     <AdultShell user={user} tabs={tabs} active={tab} onChange={setActiveTab}>
       {tab === 'children' && <ChildrenView />}
-      {tab === 'messages' && <DoctorMessages />}
+      {tab === 'messages' && <CareMessages viewer="PARENT" />}
       {tab === 'account' && <AccountSettings user={user} />}
     </AdultShell>
   );

@@ -119,10 +119,13 @@ export async function GET(req: NextRequest, { params }: Params) {
   try {
     const session = await db.exerciseSession.findFirst({
       where: { AND: [{ id }, sessionScope(auth.user)] },
-      select: { video: true },
+      select: { video: true, patient: { select: { videoConsentAt: true, videoConsentVersion: true } } },
     });
     const video = session?.video;
     if (!video || video.sizeBytes === 0) return notFound('No video for this session');
+    // Never serve a video once the parent has withdrawn consent (files are deleted
+    // at withdrawal; this also covers a file whose deletion failed)
+    if (!hasValidVideoConsent(session.patient)) return notFound('No video for this session');
 
     if (req.nextUrl.searchParams.get('meta') === '1') {
       return NextResponse.json({

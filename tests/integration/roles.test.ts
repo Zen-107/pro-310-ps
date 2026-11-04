@@ -176,6 +176,39 @@ describe.skipIf(!enabled)('Kids roles (integration)', () => {
       expect(ok.body.quests[0].exercise.kidName).toBeString();
     });
 
+    test('withdrawing the terms also withdraws video consent and erases every video', async () => {
+      const consent = await import('@/app/api/kids/[id]/consent/route');
+      const videoRoute = await import('@/app/api/sessions/[id]/video/route');
+      const { appendChunk, videoPath } = await import('@/lib/video-storage');
+      const { existsSync } = await import('node:fs');
+      const { TERMS_VERSION } = await import('@/lib/terms');
+
+      signInAs(parent);
+      expect((await json(await consent.POST(req('/x', { method: 'POST', body: { video: true } }), params({ id: card.id })))).body.video).toBe(true);
+      const session = await db.exerciseSession.create({
+        data: { patientId: card.id, exerciseId: f.exercise.id, status: 'COMPLETED', targetSnapshot: {}, algorithmVersion: 'test' },
+      });
+      const storageKey = `${session.id}.webm`;
+      await appendChunk(storageKey, new Uint8Array([1, 2, 3]), true);
+      await db.sessionVideo.create({
+        data: { sessionId: session.id, storageKey, mimeType: 'video/webm', sizeBytes: 3, chunkCount: 1, recordStartAt: new Date(), consentVersion: 'x', completedAt: new Date() },
+      });
+      expect((await videoRoute.GET(req(`/x?meta=1`), params({ id: session.id }))).status).toBe(200);
+
+      const res = await json(await consent.POST(req('/x', { method: 'POST', body: { terms: false } }), params({ id: card.id })));
+      expect(res.status).toBe(200);
+      expect(res.body.canPlay).toBe(false);
+      expect(res.body.video).toBe(false);
+      expect(res.body.videosDeleted).toBe(1);
+      expect(await db.sessionVideo.count({ where: { session: { patientId: card.id } } })).toBe(0);
+      expect(existsSync(videoPath(storageKey))).toBe(false);
+      expect((await videoRoute.GET(req(`/x?meta=1`), params({ id: session.id }))).status).toBe(404);
+
+      // Consent again so the child can keep playing in the tests below
+      await db.exerciseSession.delete({ where: { id: session.id } });
+      await consent.POST(req('/x', { method: 'POST', body: { terms: true, version: TERMS_VERSION } }), params({ id: card.id }));
+    });
+
     test('school paper consent (teacher) also lets a child play', async () => {
       const consent = await import('@/app/api/kids/[id]/consent/route');
       signInAs(teacher);
@@ -254,6 +287,52 @@ describe.skipIf(!enabled)('Kids roles (integration)', () => {
       const sw = await import('@/app/api/me/switch/route');
       signInAs(parent);
       expect((await sw.POST(req('/x', { method: 'POST', body: { patientId: otherKid.id } }))).status).toBe(404);
+    });
+  });
+
+  describe('chat is between the expert and parents', () => {
+    test('teachers and kids have no chat; the parent and the expert see who is in it', async () => {
+      const threads = await import('@/app/api/messages/threads/route');
+      const messages = await import('@/app/api/messages/route');
+      // An expert looks after the child
+      await db.careAssignment.create({ data: { patientId: card.id, clinicianId: f.doctorA.id, role: 'PRIMARY' } });
+
+      signInAs(teacher);
+      expect((await threads.GET()).status).toBe(403);
+      expect((await messages.POST(req('/x', { method: 'POST', body: { patientId: card.id, body: 'hi' } }))).status).toBe(403);
+      signInAs(kid);
+      expect((await threads.GET()).status).toBe(403);
+
+      signInAs(parent);
+      const mine = await json(await threads.GET());
+      expect(mine.status).toBe(200);
+      const t = mine.body.threads.find((x: { patientId: string }) => x.patientId === card.id);
+      expect(t.parents.map((p: { id: string; me: boolean }) => [p.id, p.me])).toEqual([[parent.id, true]]);
+      expect(t.experts.map((p: { id: string }) => p.id)).toEqual([f.doctorA.user.id]);
+      expect(t.classroom.name).toBeString();
+      expect((await messages.POST(req('/x', { method: 'POST', body: { patientId: card.id, body: 'สวัสดีค่ะ' } }))).status).toBe(201);
+
+      signInAs(f.doctorA.user);
+      const expert = await json(await threads.GET());
+      const et = expert.body.threads.find((x: { patientId: string }) => x.patientId === card.id);
+      expect(et.parents[0].email).toBe(parent.email);
+      expect(et.unread).toBe(1);
+    });
+  });
+
+  describe('the child dresses their mascot', () => {
+    test('a valid, unlocked look is saved; locked or broken looks are refused', async () => {
+      const avatar = await import('@/app/api/me/avatar/route');
+      signInAs(kid);
+      expect((await avatar.PUT(req('/x', { method: 'PUT', body: { avatar: 'sky' } }))).status).toBe(400);
+      const locked = await json(await avatar.PUT(req('/x', { method: 'PUT', body: { avatar: 'sky.shiny.cat.crown.none.none' } })));
+      expect(locked.status).toBe(403);
+      expect(locked.body.locked).toEqual(['hat']);
+      const ok = await json(await avatar.PUT(req('/x', { method: 'PUT', body: { avatar: 'grape.smile.tongue.bow.scarf.round' } })));
+      expect(ok.status).toBe(200);
+      expect((await db.patient.findUniqueOrThrow({ where: { id: card.id } })).avatar).toBe('grape.smile.tongue.bow.scarf.round');
+      signInAs(parent);
+      expect((await avatar.PUT(req('/x', { method: 'PUT', body: { avatar: 'grape.smile.tongue.bow.scarf.round' } }))).status).toBe(403);
     });
   });
 });

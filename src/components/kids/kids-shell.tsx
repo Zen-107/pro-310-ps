@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Camera, House, Map, Star } from 'lucide-react';
+import { Camera, House, Map, Shirt, Star } from 'lucide-react';
 import { useAppStore, type PatientTab } from '@/lib/store';
 import type { SessionUser } from '@/lib/auth-guard';
 import { LiveSessionView } from '@/components/physio/live-session-view';
@@ -10,6 +10,7 @@ import { Mascot } from '@/components/kids/mascot';
 import { KidsHome } from '@/components/kids/kids-home';
 import { KidsMissions } from '@/components/kids/kids-missions';
 import { KidsRewards } from '@/components/kids/kids-rewards';
+import { KidsWardrobe } from '@/components/kids/kids-wardrobe';
 import { ExitKidMode } from '@/components/kids/exit-kid-mode';
 
 // Patient side of the kids branch (docs/KIDS-ART-UI.md §9). Reuses the patient
@@ -21,6 +22,7 @@ const kidsTabs: { id: PatientTab; label: string; icon: React.ComponentType<{ cla
   { id: 'exercises', label: 'ภารกิจ', icon: Map, color: 'var(--kids-grass)' },
   { id: 'camera', label: 'เล่นเลย', icon: Camera, color: 'var(--kids-coral)' },
   { id: 'history', label: 'สติกเกอร์', icon: Star, color: 'var(--kids-grape)' },
+  { id: 'wardrobe', label: 'แต่งตัว', icon: Shirt, color: 'var(--kids-sun-deep)' },
 ];
 
 export function KidsShell({ user }: { user: SessionUser }) {
@@ -74,6 +76,7 @@ export function KidsShell({ user }: { user: SessionUser }) {
               {tab === 'dashboard' && <KidsHome onPlay={() => setActiveTab('camera')} />}
               {tab === 'exercises' && <KidsMissions />}
               {tab === 'history' && <KidsRewards />}
+              {tab === 'wardrobe' && <KidsWardrobe />}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -81,7 +84,7 @@ export function KidsShell({ user }: { user: SessionUser }) {
 
       {/* Bottom bar on every screen size, like a game menu */}
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t-2 border-[var(--border)] bg-white pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto grid h-20 max-w-3xl grid-cols-4">
+        <div className="mx-auto grid h-20 max-w-3xl grid-cols-5">
           {kidsTabs.map((t) => {
             const Icon = t.icon;
             const active = tab === t.id;

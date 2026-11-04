@@ -24,7 +24,7 @@ interface Message {
   sender: { id: string; name: string; role: string; title: string | null } | null;
 }
 
-const TITLE_LABEL: Record<string, string> = { DOCTOR: 'แพทย์', PHYSIOTHERAPIST: 'นักกายภาพ' };
+const TITLE_LABEL: Record<string, string> = { DOCTOR: 'ผู้เชี่ยวชาญ', PHYSIOTHERAPIST: 'ผู้เชี่ยวชาญ', PARENT: 'ผู้ปกครอง', TEACHER: 'คุณครู' };
 
 export function CareChat({ patientId, viewer }: { patientId?: string; viewer: 'PATIENT' | 'CLINICIAN' }) {
   const [messages, setMessages] = useState<Message[]>([]);

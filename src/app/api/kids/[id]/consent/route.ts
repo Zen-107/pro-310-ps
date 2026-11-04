@@ -36,7 +36,8 @@ export async function GET(_req: Request, { params }: Params) {
 /**
  * Consent for a child.
  *  PARENT:  { terms: true, version } — accept the current terms for the child (lets the child play)
- *           { terms: false }          — withdraw (child can no longer play)
+ *           { terms: false }          — withdraw (child can no longer play; video consent
+ *                                       is withdrawn too and every video is deleted)
  *           { video: boolean }        — video recording; withdrawing deletes every recorded video
  *  TEACHER: { schoolConsent: boolean } — paper consent from home received by the school
  */
@@ -58,7 +59,8 @@ export async function POST(req: Request, { params }: Params) {
         if (body.version !== TERMS_VERSION) return NextResponse.json({ error: 'Terms version changed', version: TERMS_VERSION }, { status: 409 });
         Object.assign(data, { consentVersion: TERMS_VERSION, consentAt: new Date() });
       } else if (body.terms === false) {
-        Object.assign(data, { consentVersion: null, consentAt: null });
+        // Withdrawing the terms ends the child's participation: video consent goes too
+        Object.assign(data, { consentVersion: null, consentAt: null, videoConsentAt: null, videoConsentVersion: null });
       } else return badRequest('terms must be a boolean');
     }
     if (body.video !== undefined) {
@@ -80,7 +82,7 @@ export async function POST(req: Request, { params }: Params) {
     // Withdrawing video consent erases every video already recorded for the child
     // (consent is cleared first, so no new upload can start meanwhile)
     let videosDeleted = 0;
-    if (body.video === false) {
+    if (body.video === false || body.terms === false) {
       const where = { session: { patientId: id } };
       const videos = await db.sessionVideo.findMany({ where, select: { storageKey: true } });
       await db.sessionVideo.deleteMany({ where });

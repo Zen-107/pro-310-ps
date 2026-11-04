@@ -7,7 +7,7 @@ import { AdultShell, useUnreadMessages, type AdultTab } from '@/components/adult
 import { DoctorOverview } from '@/components/physio/doctor-overview';
 import { DoctorPatients } from '@/components/physio/doctor-patients';
 import { DoctorReports } from '@/components/physio/doctor-reports';
-import { DoctorMessages } from '@/components/physio/doctor-messages';
+import { CareMessages } from '@/components/adult/care-messages';
 import { ClassesView } from '@/components/teacher/classes-view';
 
 // Expert (physio, role CLINICIAN): overview and review queue, children and
@@ -43,7 +43,7 @@ export function ExpertShell({ user }: { user: SessionUser }) {
       {tab === 'patients' && <DoctorPatients />}
       {tab === 'plans' && <ClassesView readOnly />}
       {tab === 'reports' && <DoctorReports />}
-      {tab === 'messages' && <DoctorMessages />}
+      {tab === 'messages' && <CareMessages viewer="EXPERT" />}
     </AdultShell>
   );
 }

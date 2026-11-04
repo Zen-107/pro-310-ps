@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { format, subDays } from 'date-fns';
 import { Check, Flame, Play, Star } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { MascotSays } from '@/components/kids/mascot';
+import { PlayfulMascot } from '@/components/kids/playful-mascot';
 import { useAppStore } from '@/lib/store';
 import { unlockAudio } from '@/lib/speech';
 import { kidsGreeting, nickname } from '@/lib/kids';
@@ -35,6 +35,7 @@ export function KidsHome({ onPlay }: { onPlay: () => void }) {
   const [activeDays, setActiveDays] = useState<Set<string>>(new Set());
   const [quests, setQuests] = useState<Quest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [said, setSaid] = useState<string | null>(null);
 
   useEffect(() => {
     if (!currentPatientId) return;
@@ -85,9 +86,21 @@ export function KidsHome({ onPlay }: { onPlay: () => void }) {
 
   return (
     <div className="space-y-6">
-      <MascotSays avatar={profile?.avatar} mood={loading ? 'think' : quests.length === 0 ? 'sleepy' : allDone ? 'cheer' : 'wave'}>
-        {bubble}
-      </MascotSays>
+      {/* The child's own น้องยืด (dressed in the wardrobe tab); tap it for a reaction */}
+      <div className="flex items-end gap-3">
+        <PlayfulMascot
+          avatar={profile?.avatar}
+          size={124}
+          bubbleSide="none"
+          onReact={setSaid}
+          mood={loading ? 'think' : quests.length === 0 ? 'sleepy' : allDone ? 'cheer' : 'wave'}
+          className="shrink-0"
+        />
+        <div className="relative mb-6 rounded-[24px] border-2 border-[var(--border)] bg-white px-4 py-3 text-lg font-bold leading-snug shadow-[0_4px_0_rgba(59,42,74,0.08)]">
+          <span aria-hidden className="absolute -left-2.5 bottom-4 h-4 w-4 rotate-45 border-b-2 border-l-2 border-[var(--border)] bg-white" />
+          {said ?? bubble}
+        </div>
+      </div>
 
       {/* Fire streak */}
       <section className="kids-card p-5">

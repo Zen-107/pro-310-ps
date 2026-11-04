@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // Hide the "N" dev badge (compile/runtime errors still show)
+  devIndicators: false,
   allowedDevOrigins: ["shaina-harbourless-demoniacally.ngrok-free.app"],
 };
 

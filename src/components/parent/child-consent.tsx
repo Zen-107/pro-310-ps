@@ -102,7 +102,7 @@ export function ChildConsent({
                   size="sm"
                   className="text-red-600"
                   disabled={saving}
-                  onClick={() => confirm(`ถอนความยินยอม? ${childName}จะเล่นต่อไม่ได้`) && post({ terms: false }, 'ถอนความยินยอมแล้ว')}
+                  onClick={() => confirm(`ถอนความยินยอม? ${childName}จะเล่นต่อไม่ได้ และวิดีโอที่บันทึกไว้ทั้งหมดจะถูกลบถาวร`) && post({ terms: false }, 'ถอนความยินยอมแล้ว')}
                 >
                   ถอนความยินยอม
                 </Button>

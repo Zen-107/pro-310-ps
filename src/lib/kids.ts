@@ -32,7 +32,7 @@ export function nickname(name: string | null | undefined): string {
   return (name ?? '').trim().split(/\s+/)[0] || 'นักผจญภัย';
 }
 
-/** Mascot colours a child can have as their avatar (Patient.avatar) */
+/** Mascot colours a child can have (first part of Patient.avatar) */
 export const AVATARS = [
   { id: 'peach', body: '#FFB38A', belly: '#FFE7D6' },
   { id: 'sky', body: '#8CCBFF', belly: '#E3F2FF' },
@@ -42,7 +42,11 @@ export const AVATARS = [
   { id: 'coral', body: '#FF9C94', belly: '#FFE6E3' },
 ] as const;
 export type AvatarId = (typeof AVATARS)[number]['id'];
-export const avatarColors = (id: string | null | undefined) => AVATARS.find((a) => a.id === id) ?? AVATARS[0];
+/** Colours for an avatar: a colour key, or a full look "color.eyes.…" (src/lib/mascot-look.ts) */
+export const avatarColors = (avatar: string | null | undefined) => {
+  const id = (avatar ?? '').split('.')[0];
+  return AVATARS.find((a) => a.id === id) ?? AVATARS[0];
+};
 
 /**
  * Child-facing name and steps per catalogue exercise (slug). The clinical

@@ -15,6 +15,8 @@ export const STAFF: UserRole[] = ['CLINICIAN', 'TEACHER'];
 /** Create / change mission sets */
 export const ASSIGNERS: UserRole[] = ['TEACHER'];
 export const EXPERTS: UserRole[] = ['CLINICIAN'];
+/** Care chat about a child: the expert and the child's parents (adults only) */
+export const CHAT: UserRole[] = ['CLINICIAN', 'PARENT'];
 /** Anyone who can read a child's progress (the child included) */
 export const ANYONE_WITH_CHILD: UserRole[] = [...KID, ...ADULTS];
 
