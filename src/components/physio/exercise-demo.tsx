@@ -15,7 +15,7 @@ import {
   type Limb,
   type Pt,
 } from '@/lib/exercise-poses';
-import { MASCOT_VIEWBOX, MascotFigure, chibi } from '@/components/kids/mascot-demo';
+import { MASCOT_VIEWBOX, MascotFigure, kidRig } from '@/components/kids/mascot-demo';
 
 // Vector exercise demo driven by joint-angle keyframes (lib/exercise-poses.ts).
 // No video/GIF assets. Two looks on the same pose:
@@ -189,7 +189,7 @@ export function ExerciseDemo({
     const t = demoProgress(demo, sec);
     const cheer = !demo.continuous && t > 0.97;
     const v = MASCOT_VIEWBOX;
-    const small = chibi(skel);
+    const small = kidRig(skel);
     const height = size === 'sm' ? 'h-28' : size === 'lg' ? 'h-72' : 'h-52 sm:h-60';
     return (
       <div className={`relative overflow-hidden rounded-2xl bg-gradient-to-b from-[#FFF9EE] to-[#FFEFD9] ${className}`}>
@@ -200,7 +200,7 @@ export function ExerciseDemo({
           aria-label={`น้องยืดทำท่าให้ดู${demo.unilateral && trainingSide ? ` (ข้าง${trainingSide === 'left' ? 'ซ้าย' : 'ขวา'})` : ''}`}
         >
           {/* stage: soft spotlight and floor */}
-          <ellipse cx={130} cy={110} rx={78} ry={92} fill="#fff" opacity={0.55} />
+          <ellipse cx={130} cy={100} rx={82} ry={100} fill="#fff" opacity={0.55} />
           <ellipse cx={130} cy={GROUND + 4} rx={86} ry={9} fill="#FFE2B8" />
           <g transform={mirrored ? `translate(${SCENE_W},0) scale(-1,1)` : undefined}>
             <MascotFigure skel={small.skel} sec={sec} cheer={cheer} avatar={avatar} />

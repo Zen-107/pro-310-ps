@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chibi } from '@/components/kids/mascot-demo';
+import { kidRig } from '@/components/kids/mascot-demo';
 import { EXERCISE_DEMOS, angleAt2D, buildSkeleton, type Limb } from '@/lib/exercise-poses';
 import { ACTIVE_EXERCISES, exerciseIdFromName } from '@/lib/exercises-data';
 
@@ -9,14 +9,14 @@ import { ACTIVE_EXERCISES, exerciseIdFromName } from '@/lib/exercises-data';
 const bend = (l: Limb) => angleAt2D(l.root, l.mid, l.end);
 const heading = (l: Limb) => Math.atan2(l.mid.y - l.root.y, l.mid.x - l.root.x);
 
-describe('mascot demo (chibi rig)', () => {
+describe('mascot demo (kid rig)', () => {
   for (const ex of ACTIVE_EXERCISES) {
     const slug = exerciseIdFromName(ex.name);
     test(`${slug}: same limb angles, lowest foot on the same floor`, () => {
       const demo = EXERCISE_DEMOS[slug];
       for (const t of [0, 0.5, 1]) {
         const skel = buildSkeleton(demo.pose(t));
-        const small = chibi(skel).skel;
+        const small = kidRig(skel).skel;
         for (const k of ['armNear', 'armFar', 'legNear', 'legFar'] as const) {
           expect(bend(small[k])).toBeCloseTo(bend(skel[k]), 3);
           expect(heading(small[k])).toBeCloseTo(heading(skel[k]), 5);
