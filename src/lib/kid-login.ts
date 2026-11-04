@@ -7,6 +7,7 @@
 // Browser-safe formats live in src/lib/kid-codes.ts (re-exported here).
 
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto';
+import { authSecret } from '@/lib/auth-secret';
 import { hashPassword, verifyPassword } from '@/lib/password';
 import { CODE_ALPHABET, KID_CODE_LENGTH, PICTURE_PIN_LENGTH, PICTURES, type PictureId } from '@/lib/kid-codes';
 
@@ -41,8 +42,8 @@ const TICKET_TTL_MS = 60_000;
 const usedNonces = new Map<string, number>(); // single-use within the process
 
 function secret(): string {
-  const s = process.env.NEXTAUTH_SECRET;
-  if (!s) throw new Error('NEXTAUTH_SECRET is not set');
+  const s = authSecret();
+  if (!s) throw new Error('NEXTAUTH_SECRET (or DATABASE_URL) is not set');
   return s;
 }
 

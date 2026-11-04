@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { authSecret } from '@/lib/auth-secret';
 import { NextResponse } from 'next/server';
 import type { FaultType } from '@prisma/client';
 import { db } from '@/lib/db';
@@ -41,7 +42,7 @@ export async function GET(req: Request) {
   const auth = await requireApiUser(EXPERTS);
   if ('response' in auth) return auth.response;
   const format = new URL(req.url).searchParams.get('format') === 'json' ? 'json' : 'csv';
-  const salt = process.env.NEXTAUTH_SECRET ?? 'ai-physio';
+  const salt = authSecret() ?? 'ai-physio';
   const key = (id: string) => createHash('sha256').update(`${salt}:${id}`).digest('hex').slice(0, 12);
 
   try {

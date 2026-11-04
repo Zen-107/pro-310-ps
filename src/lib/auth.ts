@@ -2,6 +2,7 @@ import type { NextAuthOptions, User as AuthUser } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
+import { authSecret } from '@/lib/auth-secret';
 import { hashPassword, verifyPassword } from '@/lib/password';
 import {
   isKidCode,
@@ -45,6 +46,7 @@ async function toAuthUser(user: UserWithProfiles | null, returnUserId: string | 
 }
 
 export const authOptions: NextAuthOptions = {
+  secret: authSecret(),
   session: { strategy: 'jwt', maxAge: SESSION_MAX_AGE_SECONDS },
   pages: { signIn: '/login' },
   providers: [
