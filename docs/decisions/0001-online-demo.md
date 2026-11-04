@@ -72,3 +72,9 @@
 - **ผล:** seed ทำ ~2,100 transaction (วัดจากเครื่อง: 23 วินาที) แต่บน Vercel ข้ามทวีปทุก query → ใส่ข้อมูลเดโมครั้งแรกใช้เวลาเป็นสิบนาที และถ้าไม่แก้ ทุกหน้าของเว็บก็จะช้าด้วย
 - **ตัดสินใจ (Claude):** เพิ่ม `vercel.json` ให้ฟังก์ชันรันที่ `sin1` ใกล้ฐานข้อมูลและใกล้ไทย · build ยังอยู่ `iad1` (เลือกไม่ได้บนแพ็กเกจฟรี) แต่ seed รันแค่ครั้งแรกจึงยอมรับได้
 - **ไม่เลือก:** รัน seed จากเครื่องเจ้าของ (เร็วกว่า แต่ต้องคัด connection string ที่เป็นค่าลับมาไว้ในเครื่อง)
+
+## Build ล้มครั้งแรก (2026-11-04)
+
+- migrate + seed ผ่าน (seed ใช้ 12 นาทีเพราะข้ามทวีป — ครั้งเดียว) แต่ `next build` ล้มตอน "Running onBuildComplete from Vercel": `ENOENT .next/next-server.js.nft.json`
+- **สมมติฐาน (ยังไม่ยืนยัน):** `output: "standalone"` ใน `next.config.ts` ชนกับ adapter ของ Vercel บน Next 16 + Turbopack · บนเครื่องเราไฟล์นี้มี จึงเดาว่าต่างกันที่ config ที่ Vercel แก้ตอน build
+- **ทดลอง:** ปิด standalone เฉพาะเมื่อ `VERCEL` ถูกตั้ง (บนเครื่องยังใช้ `bun run start` ได้เหมือนเดิม) · ถ้ายังล้ม ทางต่อไปคือลอง build ด้วย webpack (`next build --webpack`) บน Vercel
